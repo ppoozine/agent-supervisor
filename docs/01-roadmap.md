@@ -59,7 +59,7 @@
 
 **目標**：用第二個實作驗證 adapter 介面站得住。只有一個實作的介面一定會偏向那個實作。
 
-- 依任務 0 的調查結果決定做法（包 CLI 或用其他整合介面）
+- 用 subprocess 包 `codex exec`（決策第 48 筆），先查明 `codex-notes.md`「還沒查明的事」中屬於這條路線的項目
 - 實作 Codex adapter，並如實填寫它的 `capabilities`
 - 介面不合用的地方回頭修介面，Runner 仍然不得出現任何 agent 專屬的字串
 
@@ -69,7 +69,11 @@
 - 做不到的能力：`capabilities` 如實標示，並驗證對應的降級行為（例如只靠執行時間上限擋下）
 - Runner、Dispatcher、Poller 的程式碼不需要因為 agent 種類而分支
 
-**主要風險**：Codex 不支援續接 session，或不回報花費。這種情況用 `capabilities` 表達，並在規格裡寫明對應的降級行為。
+**主要風險**（依任務 0 的實測）：
+- Codex 不回報花費，也沒有輪數與花費上限 → 用 `capabilities` 表達，靠 token 上限、修復次數與執行時間上限擋住。
+- 被中止的 run 拿不到用量，用量又是整個 session 的累計值 → adapter 自己相減，拿不到時記為未知。
+- 有些被 sandbox 擋下的指令不會出現在事件流裡 → Codex 任務的稽核紀錄不完整，在規格裡寫明。
+- 中止要用 SIGINT；用 SIGTERM 的話子程序會留下來 → 中止流程仍要確認子程序真的結束。
 
 ---
 

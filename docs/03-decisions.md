@@ -53,12 +53,19 @@
 | 45 | Reviewer 要求修改時不自動修 CI，卡片直接進 Needs you | CI 失敗就照常自動修 | 這時任務需要人來看；review 留言的自動處理是階段 3 的範圍 |
 | 46 | Stop 只能用在已存在的 run 上；CI 失敗後、Dispatcher 接手前的空窗 Stop 不可用 | 加一個「暫停自動修復」的持久化旗標 | 空窗最長一個輪詢週期，為它多維護一個狀態不划算 |
 | 47 | 任務與它的 `initial` run 在同一個交易內建立；worktree 建立失敗記為該 run 的 `error` | 先建任務、再建 run | 不會出現「沒有任何 run 的任務」，看板推導不必處理這種情況 |
+| 48 | Codex adapter 在 MVP 用 subprocess 包 `codex exec`；階段 5 需要逐次核准時再評估官方 Python SDK 或 `app-server` 協定 | 官方 Python SDK（`openai-codex`） | 兩條路線都實測過。包 CLI 在 MVP 需要的能力上都可行，事件流有指令項目，不需要新套件。SDK 原本的優勢沒有成立：公開介面不提供逐次核准、中斷後子程序仍在執行、事件流沒有看到指令與檔案變更。和第 16 筆（Claude Code 用 SDK）方向不同，是因為兩家 SDK 的實際能力不同。細節見 `codex-notes.md` |
+| 49 | `TurnResult` 加上 `usage_raw`，保留 agent 回報的原始用量 | 只存輸入與輸出兩個 token 數 | 兩種 agent 都另有快取 token，Codex 還有推理 token。只存兩個數字的話之後無法自己估算花費 |
+| 50 | 任務加上以 token 計的上限，和花費上限並存，任一到頂就不再自動修復 | 只有花費上限 | Codex 不回報花費，花費上限對它不生效。原本只剩次數與時間上限擋著，加上 token 上限多一道 |
+| 51 | `PermissionPolicy` 改成三部分：sandbox 等級、是否允許連網、由各 adapter 自行解讀的工具與指令限制；`capabilities` 加上 `can_restrict_network`（修正第 34 筆的結構） | 允許的工具與指令清單 + sandbox 等級 | Codex 沒有工具允許清單，它有的是 sandbox 等級、網路開關、指令前綴規則。前兩項可以跨 agent 統一，第三項只能各自表述 |
+| 52 | Agent 的推理與計畫更新記成 `agent_message`，在 payload 用 `kind` 區分 | 新增事件型別 | 少一個型別，查詢稽核紀錄時也比較單純 |
+| 53 | 規格不假設 agent 會自己 commit；沒有 commit 的變更一律由 supervisor 在收尾時補 | 假設 agent 會在 worktree 內 commit | 實測 Codex 在 sandbox 下無法在 worktree 裡 commit |
 
 ## 尚未決定
 
 - 是否公開 repo、用哪個授權（Apache-2.0 或 MIT）
 - CLI 指令名稱（暫定 `asv`）
-- 花費上限與單一 run 最多輪數的預設值
+- 花費上限、token 上限與單一 run 最多輪數的預設值
+- token 上限要不要把快取的輸入 token 算進去：實測 Codex 的輸入有 85% 到 95% 是快取，全部計入的話上限要設得很高（任務 1 看過 Claude Code 的用量資料後決定）
 - 階段 1 允許清單的預設內容（任務 1 調查 SDK 的權限控制後決定）
 - Supervisor 補 commit 時的 commit message 格式
 - PR 上完全沒有 CI 檢查（`ci_state` 為 `none`）時要算通過還是停在 In review
@@ -66,6 +73,7 @@
 - 單一 run 執行時間上限的預設值
 - Daemon 突然死掉後，如何找到並停掉遺留的 agent（任務 1 調查後決定）
 - 多人使用與登入要不要做（階段 7 決定）
+- Claude Code 能不能落實「是否允許連網」這項政策（任務 1 調查後決定）
 - 重啟後確認不了遺留程序已停止的任務：run 會維持未結束、卡片一直顯示 Working，目前只在啟動訊息中列出，沒有在工具內解除的方法。要不要加一個手動結案的操作（任務 1 實作時決定）
 - Agent 的登入方式：訂閱方案或 API key。SDK 文件提到不允許第三方產品提供 claude.ai 登入；自己在本機用訂閱登入是否可行還沒查證，任務 1 要確認，結果可能影響第 16 筆
 - 任務花費已超過上限時，使用者手動送訊息要不要放行
