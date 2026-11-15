@@ -1,0 +1,38 @@
+[project]
+name = "agent-supervisor"
+version = "0.0.1"
+description = "Orchestration and audit layer for AI coding agents"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "claude-agent-sdk>=0.2.182",
+]
+
+[project.scripts]
+asv = "agent_supervisor.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF"]
+# 註解與 docstring 依慣例使用繁體中文，全形標點是正常用法。
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "pytest-asyncio>=1.5.0",
+    "ruff>=0.17.5",
+]

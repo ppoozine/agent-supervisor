@@ -1,0 +1,246 @@
+"""Runner：負責一個 run 從建立到結案的整個生命週期。
+
+一個 run 分成四段：建立、準備、agent 執行、收尾。四段由同一個可取消的
+asyncio 工作負責，全部做完才結案。Runner 只透過 `AgentAdapter` 介面控制 agent。
+"""
+
+import asyncio
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import aclosing
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import aiosqlite
+
+from agent_supervisor import db
+from agent_supervisor.adapters.base import AgentAdapter, AgentEvent, RunLimits, TurnResult
+from agent_supervisor.config import Config
+from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
+
+RunHook = Callable[[db.Task, db.Run], Awaitable[None]]
+EventCallback = Callable[[EventType, dict[str, Any]], None]
+
+
+class UnknownAgentError(ValueError):
+    """指定的 agent 種類沒有對應的 adapter。"""
+
+
+class NoActiveRunError(RuntimeError):
+    """任務沒有正在執行的 run，沒有東西可以中止。"""
+
+
+class BudgetExhaustedError(RuntimeError):
+    """任務的花費或 token 已達上限，不能再建立 run。"""
+
+
+@dataclass
+class _Job:
+    """一個執行中的 run，以及它目前為止的結果。"""
+
+    run: db.Run
+    work: asyncio.Task[None] | None = None
+    result: TurnResult | None = None
+    cancel_status: ExitStatus = ExitStatus.INTERRUPTED
+    is_closing: bool = False
+
+
+@dataclass(frozen=True)
+class _Outcome:
+    exit_status: ExitStatus
+    detail: str | None = None
+
+
+async def _no_hook(task: db.Task, run: db.Run) -> None:
+    """尚未實作的準備與收尾階段（worktree 與發布在任務 2 加入）。"""
+
+
+class Runner:
+    """建立、執行、中止 run。"""
+
+    def __init__(
+        self,
+        conn: aiosqlite.Connection,
+        adapters: Mapping[str, AgentAdapter],
+        config: Config,
+        *,
+        prepare: RunHook = _no_hook,
+        finalize: RunHook = _no_hook,
+        on_event: EventCallback | None = None,
+    ) -> None:
+        self._conn = conn
+        self._adapters = adapters
+        self._config = config
+        self._prepare = prepare
+        self._finalize = finalize
+        self._on_event = on_event
+        self._jobs: dict[int, _Job] = {}
+        self._locks: dict[int, asyncio.Lock] = {}
+        self._creation_lock = asyncio.Lock()
+
+    async def start_task(
+        self,
+        *,
+        repo_path: str,
+        title: str,
+        prompt: str,
+        agent_type: str,
+        model: str | None,
+        cwd: Path,
+    ) -> db.Run:
+        """建立任務與它的 initial run，並開始執行。"""
+        if agent_type not in self._adapters:
+            raise UnknownAgentError(f"no adapter for agent type {agent_type!r}")
+        async with self._creation_lock:
+            project = await db.get_or_create_project(self._conn, repo_path)
+            task, run = await db.create_task_with_initial_run(
+                self._conn,
+                project_id=project.id,
+                title=title,
+                prompt=prompt,
+                agent_type=agent_type,
+                model=model,
+                worktree_path=str(cwd),
+            )
+            self._launch(task, run)
+        return run
+
+    async def send_message(self, task_id: int, text: str) -> db.Run:
+        """對既有任務的同一個 session 追加指令，建立一個新的 run。"""
+        async with self._lock_for(task_id):
+            task = await db.get_task(self._conn, task_id)
+            await self._require_remaining_budget(task_id)
+            run = await db.create_run(self._conn, task_id, RunTrigger.USER_MESSAGE, text)
+            self._launch(task, run)
+        return run
+
+    async def stop(self, task_id: int) -> None:
+        """中止任務正在執行的 run，等它完全停下並結案後才返回。"""
+        async with self._lock_for(task_id):
+            job = self._jobs.get(task_id)
+            if job is None or job.work is None or job.work.done():
+                raise NoActiveRunError(f"task {task_id} has no active run")
+            await self._cancel(job, ExitStatus.STOPPED)
+
+    async def wait(self, run_id: int) -> db.Run:
+        """等指定的 run 結案，回傳結案後的資料。"""
+        for job in list(self._jobs.values()):
+            if job.run.id == run_id and job.work is not None:
+                await asyncio.wait({job.work})
+        return await db.get_run(self._conn, run_id)
+
+    async def shutdown(self) -> None:
+        """daemon 正常關閉時，把還在執行的 run 中止並標成 interrupted。"""
+        for job in list(self._jobs.values()):
+            if job.work is not None and not job.work.done():
+                await self._cancel(job, ExitStatus.INTERRUPTED)
+
+    def _lock_for(self, task_id: int) -> asyncio.Lock:
+        return self._locks.setdefault(task_id, asyncio.Lock())
+
+    def _launch(self, task: db.Task, run: db.Run) -> None:
+        job = _Job(run=run)
+        self._jobs[task.id] = job
+        deadline = asyncio.get_running_loop().time() + self._config.run_timeout_seconds
+        job.work = asyncio.create_task(self._execute(task, job, deadline), name=f"run-{run.id}")
+
+    async def _cancel(self, job: _Job, status: ExitStatus) -> None:
+        assert job.work is not None
+        # 已經在結案的 run 不能再取消，否則結案寫到一半會被打斷、run 永遠不結束。
+        if not job.is_closing:
+            job.cancel_status = status
+            job.work.cancel()
+        await asyncio.wait({job.work})
+
+    async def _require_remaining_budget(self, task_id: int) -> None:
+        usage = await db.get_task_usage(self._conn, task_id)
+        if usage.cost_usd >= self._config.task_cost_limit_usd:
+            raise BudgetExhaustedError(f"task {task_id} reached its cost limit")
+        if usage.tokens >= self._config.task_token_limit:
+            raise BudgetExhaustedError(f"task {task_id} reached its token limit")
+
+    async def _execute(self, task: db.Task, job: _Job, deadline: float) -> None:
+        """執行一個 run 的準備、agent、收尾三段，最後一定會結案。"""
+        try:
+            async with asyncio.timeout_at(deadline):
+                await self._prepare(task, job.run)
+                outcome = await self._run_agent(task, job)
+                if outcome.exit_status is ExitStatus.SUCCESS:
+                    await self._finalize(task, job.run)
+        except TimeoutError:
+            outcome = _Outcome(ExitStatus.LIMIT_REACHED, "run exceeded its time limit")
+        except asyncio.CancelledError:
+            # 取消一律來自 Runner 自己（Stop 或關閉）。這裡吞掉取消，
+            # 讓這個工作能把 run 結案後正常結束。
+            outcome = _Outcome(job.cancel_status, "run was cancelled")
+        except Exception as error:
+            outcome = _Outcome(ExitStatus.ERROR, f"{type(error).__name__}: {error}")
+        job.is_closing = True
+        await self._close(task, job, outcome)
+
+    async def _run_agent(self, task: db.Task, job: _Job) -> _Outcome:
+        adapter = self._adapters[task.agent_type]
+        capabilities = adapter.capabilities
+        current = await db.get_task(self._conn, task.id)
+        stream = adapter.run_turn(
+            prompt=job.run.input_text,
+            cwd=Path(current.worktree_path or "."),
+            session_id=current.session_id if capabilities.can_resume_session else None,
+            model=current.model,
+            limits=await self._limits_for(task.id, adapter),
+            policy=self._config.permission,
+            previous_usage=await db.get_last_usage_raw(self._conn, task.id),
+        )
+        async with aclosing(stream):  # type: ignore[type-var]
+            async for item in stream:
+                if isinstance(item, TurnResult):
+                    job.result = item
+                    break
+                await self._record(task.id, job.run.id, item)
+        if job.result is None:
+            return _Outcome(ExitStatus.ERROR, "agent stream ended without a result")
+        return _Outcome(job.result.exit_status, job.result.detail)
+
+    async def _limits_for(self, task_id: int, adapter: AgentAdapter) -> RunLimits:
+        capabilities = adapter.capabilities
+        usage = await db.get_task_usage(self._conn, task_id)
+        remaining = max(self._config.task_cost_limit_usd - usage.cost_usd, 0.0)
+        return RunLimits(
+            max_turns=self._config.max_turns_per_run if capabilities.can_limit_turns else None,
+            max_budget_usd=remaining if capabilities.can_limit_budget else None,
+        )
+
+    async def _record(self, task_id: int, run_id: int, event: AgentEvent) -> None:
+        await self._write_event(task_id, run_id, event.type, event.payload)
+        session_id = event.payload.get("session_id")
+        if event.type is EventType.SESSION_STARTED and session_id:
+            await db.set_task_session_id(self._conn, task_id, session_id)
+
+    async def _close(self, task: db.Task, job: _Job, outcome: _Outcome) -> None:
+        result = job.result
+        await db.finish_run(
+            self._conn,
+            job.run.id,
+            outcome.exit_status,
+            tokens_in=result.tokens_in if result else None,
+            tokens_out=result.tokens_out if result else None,
+            cost_usd=result.cost_usd if result else None,
+        )
+        await self._write_event(
+            task.id,
+            job.run.id,
+            EventType.STATE_CHANGE,
+            {
+                "change": "run_ended",
+                "exit_status": str(outcome.exit_status),
+                "detail": outcome.detail,
+                "usage_raw": result.usage_raw if result else None,
+            },
+        )
+
+    async def _write_event(
+        self, task_id: int, run_id: int, event_type: EventType, payload: dict[str, Any]
+    ) -> None:
+        await db.append_event(self._conn, task_id, run_id, event_type, payload)
+        if self._on_event is not None:
+            self._on_event(event_type, payload)

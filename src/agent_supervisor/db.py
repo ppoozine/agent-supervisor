@@ -1,0 +1,421 @@
+"""SQLite schema 與查詢。不使用 ORM。
+
+不變量由資料庫本身保證：
+- 每個任務同時最多一個未結束的 run（部分唯一索引）
+- `events` 只能新增，不能修改或刪除（trigger）
+"""
+
+import json
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import aiosqlite
+
+from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS projects (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    repo_path TEXT NOT NULL UNIQUE,
+    github_repo TEXT,
+    default_branch TEXT NOT NULL DEFAULT 'main',
+    require_review INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id),
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    agent_type TEXT NOT NULL,
+    model TEXT,
+    session_id TEXT,
+    branch TEXT,
+    worktree_path TEXT,
+    pr_number INTEGER,
+    pr_state TEXT,
+    head_sha TEXT,
+    ci_state TEXT NOT NULL DEFAULT 'none',
+    review_state TEXT NOT NULL DEFAULT 'none',
+    last_handled_head_sha TEXT,
+    ci_fix_attempts INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    id INTEGER PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    trigger TEXT NOT NULL,
+    input_text TEXT NOT NULL,
+    source_head_sha TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    exit_status TEXT,
+    tokens_in INTEGER,
+    tokens_out INTEGER,
+    cost_usd REAL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS runs_one_open_per_task
+    ON runs(task_id) WHERE ended_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    run_id INTEGER REFERENCES runs(id),
+    ts TEXT NOT NULL,
+    type TEXT NOT NULL,
+    payload TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS events_by_task ON events(task_id, id);
+
+CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+
+CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
+BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
+"""
+
+FINISHED_PR_STATES = ("merged", "closed")
+
+
+class NotFoundError(LookupError):
+    """查詢的資料列不存在。"""
+
+
+class RunAlreadyActiveError(RuntimeError):
+    """任務已經有一個未結束的 run。"""
+
+
+class TaskNotRunnableError(RuntimeError):
+    """任務已封存，或 PR 已合併或關閉，不能再建立 run。"""
+
+
+@dataclass(frozen=True)
+class Project:
+    """一個已登記的本機 repo。"""
+
+    id: int
+    name: str
+    repo_path: str
+    github_repo: str | None
+    default_branch: str
+    require_review: bool
+
+
+@dataclass(frozen=True)
+class Task:
+    """一個任務，以及 Poller 對 GitHub 狀態的快取。"""
+
+    id: int
+    project_id: int
+    title: str
+    prompt: str
+    agent_type: str
+    model: str | None
+    session_id: str | None
+    branch: str | None
+    worktree_path: str | None
+    pr_number: int | None
+    pr_state: str | None
+    head_sha: str | None
+    ci_state: str
+    review_state: str
+    last_handled_head_sha: str | None
+    ci_fix_attempts: int
+    archived_at: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class Run:
+    """任務的一次執行。"""
+
+    id: int
+    task_id: int
+    trigger: RunTrigger
+    input_text: str
+    source_head_sha: str | None
+    started_at: str
+    ended_at: str | None
+    exit_status: ExitStatus | None
+    tokens_in: int | None
+    tokens_out: int | None
+    cost_usd: float | None
+
+
+@dataclass(frozen=True)
+class Event:
+    """一筆稽核紀錄。"""
+
+    id: int
+    task_id: int
+    run_id: int | None
+    ts: str
+    type: str
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class TaskUsage:
+    """任務累計的花費與 token 數。`is_complete` 為否表示有 run 的用量未知。"""
+
+    cost_usd: float
+    tokens: int
+    is_complete: bool
+
+
+def utc_now() -> str:
+    """目前的 UTC 時間，ISO 8601 字串。"""
+    return datetime.now(UTC).isoformat(timespec="milliseconds")
+
+
+async def connect(db_path: str | Path) -> aiosqlite.Connection:
+    """開啟資料庫連線並套用必要的 pragma。"""
+    conn = await aiosqlite.connect(db_path)
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA foreign_keys = ON")
+    await conn.execute("PRAGMA journal_mode = WAL")
+    return conn
+
+
+async def init_schema(conn: aiosqlite.Connection) -> None:
+    """建立資料表、索引與 trigger（已存在則略過）。"""
+    await conn.executescript(SCHEMA)
+    await conn.commit()
+
+
+async def get_or_create_project(conn: aiosqlite.Connection, repo_path: str) -> Project:
+    """依 repo 路徑取得專案，不存在就建立。"""
+    row = await _fetch_one(conn, "SELECT * FROM projects WHERE repo_path = ?", (repo_path,))
+    if row is not None:
+        return _to_project(row)
+    cursor = await conn.execute(
+        "INSERT INTO projects (name, repo_path) VALUES (?, ?)", (Path(repo_path).name, repo_path)
+    )
+    await conn.commit()
+    return await get_project(conn, _last_id(cursor))
+
+
+async def get_project(conn: aiosqlite.Connection, project_id: int) -> Project:
+    """依主鍵取得專案。"""
+    row = await _fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+    if row is None:
+        raise NotFoundError(f"project {project_id} not found")
+    return _to_project(row)
+
+
+async def create_task_with_initial_run(
+    conn: aiosqlite.Connection,
+    *,
+    project_id: int,
+    title: str,
+    prompt: str,
+    agent_type: str,
+    model: str | None,
+    worktree_path: str | None,
+) -> tuple[Task, Run]:
+    """在同一個交易內建立任務與它的 initial run。"""
+    now = utc_now()
+    try:
+        task_cursor = await conn.execute(
+            "INSERT INTO tasks (project_id, title, prompt, agent_type, model, worktree_path,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, title, prompt, agent_type, model, worktree_path, now, now),
+        )
+        task_id = _last_id(task_cursor)
+        run_cursor = await conn.execute(
+            "INSERT INTO runs (task_id, trigger, input_text, started_at) VALUES (?, ?, ?, ?)",
+            (task_id, RunTrigger.INITIAL, prompt, now),
+        )
+        run_id = _last_id(run_cursor)
+        await conn.commit()
+    except BaseException:
+        await conn.rollback()
+        raise
+    return await get_task(conn, task_id), await get_run(conn, run_id)
+
+
+async def create_run(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    trigger: RunTrigger,
+    input_text: str,
+    source_head_sha: str | None = None,
+) -> Run:
+    """為既有任務建立一個 run；任務不可執行或已有未結束的 run 時拒絕。"""
+    task = await get_task(conn, task_id)
+    if task.archived_at is not None or task.pr_state in FINISHED_PR_STATES:
+        raise TaskNotRunnableError(f"task {task_id} is archived or its PR is finished")
+    try:
+        cursor = await conn.execute(
+            "INSERT INTO runs (task_id, trigger, input_text, source_head_sha, started_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (task_id, trigger, input_text, source_head_sha, utc_now()),
+        )
+        await conn.commit()
+    except aiosqlite.IntegrityError as error:
+        await conn.rollback()
+        raise RunAlreadyActiveError(f"task {task_id} already has an active run") from error
+    return await get_run(conn, _last_id(cursor))
+
+
+async def get_task(conn: aiosqlite.Connection, task_id: int) -> Task:
+    """依主鍵取得任務。"""
+    row = await _fetch_one(conn, "SELECT * FROM tasks WHERE id = ?", (task_id,))
+    if row is None:
+        raise NotFoundError(f"task {task_id} not found")
+    return Task(**dict(row))
+
+
+async def get_run(conn: aiosqlite.Connection, run_id: int) -> Run:
+    """依主鍵取得 run。"""
+    row = await _fetch_one(conn, "SELECT * FROM runs WHERE id = ?", (run_id,))
+    if row is None:
+        raise NotFoundError(f"run {run_id} not found")
+    return _to_run(row)
+
+
+async def get_open_run(conn: aiosqlite.Connection, task_id: int) -> Run | None:
+    """取得任務目前未結束的 run，沒有則回傳 None。"""
+    row = await _fetch_one(
+        conn, "SELECT * FROM runs WHERE task_id = ? AND ended_at IS NULL", (task_id,)
+    )
+    return None if row is None else _to_run(row)
+
+
+async def list_runs(conn: aiosqlite.Connection, task_id: int) -> list[Run]:
+    """列出任務的所有 run，依建立順序。"""
+    cursor = await conn.execute("SELECT * FROM runs WHERE task_id = ? ORDER BY id", (task_id,))
+    return [_to_run(row) for row in await cursor.fetchall()]
+
+
+async def list_open_runs(conn: aiosqlite.Connection) -> list[Run]:
+    """列出所有未結束的 run。"""
+    cursor = await conn.execute("SELECT * FROM runs WHERE ended_at IS NULL ORDER BY id")
+    return [_to_run(row) for row in await cursor.fetchall()]
+
+
+async def set_task_session_id(conn: aiosqlite.Connection, task_id: int, session_id: str) -> None:
+    """保存任務的 agent session id。"""
+    await conn.execute(
+        "UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?",
+        (session_id, utc_now(), task_id),
+    )
+    await conn.commit()
+
+
+async def finish_run(
+    conn: aiosqlite.Connection,
+    run_id: int,
+    exit_status: ExitStatus,
+    *,
+    tokens_in: int | None = None,
+    tokens_out: int | None = None,
+    cost_usd: float | None = None,
+) -> bool:
+    """把 run 結案。已經結案的 run 不會被改寫，回傳是否真的寫入。"""
+    cursor = await conn.execute(
+        "UPDATE runs SET ended_at = ?, exit_status = ?, tokens_in = ?, tokens_out = ?, cost_usd = ?"
+        " WHERE id = ? AND ended_at IS NULL",
+        (utc_now(), exit_status, tokens_in, tokens_out, cost_usd, run_id),
+    )
+    await conn.commit()
+    return cursor.rowcount == 1
+
+
+async def append_event(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    run_id: int | None,
+    event_type: EventType | str,
+    payload: dict[str, Any],
+) -> int:
+    """新增一筆事件，回傳它的 id。"""
+    cursor = await conn.execute(
+        "INSERT INTO events (task_id, run_id, ts, type, payload) VALUES (?, ?, ?, ?, ?)",
+        (task_id, run_id, utc_now(), str(event_type), json.dumps(payload, ensure_ascii=False)),
+    )
+    await conn.commit()
+    return _last_id(cursor)
+
+
+async def list_events(
+    conn: aiosqlite.Connection, task_id: int, run_id: int | None = None
+) -> list[Event]:
+    """列出任務的事件，依寫入順序；可限定某一個 run。"""
+    query = "SELECT * FROM events WHERE task_id = ?"
+    params: tuple[Any, ...] = (task_id,)
+    if run_id is not None:
+        query += " AND run_id = ?"
+        params += (run_id,)
+    cursor = await conn.execute(query + " ORDER BY id", params)
+    return [_to_event(row) for row in await cursor.fetchall()]
+
+
+async def get_task_usage(conn: aiosqlite.Connection, task_id: int) -> TaskUsage:
+    """加總任務所有 run 的花費與 token 數。"""
+    row = await _fetch_one(
+        conn,
+        "SELECT COALESCE(SUM(cost_usd), 0) AS cost,"
+        " COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) AS tokens,"
+        " COALESCE(SUM(ended_at IS NOT NULL AND tokens_in IS NULL), 0) AS unknown_runs"
+        " FROM runs WHERE task_id = ?",
+        (task_id,),
+    )
+    assert row is not None
+    return TaskUsage(
+        cost_usd=float(row["cost"]), tokens=int(row["tokens"]), is_complete=row["unknown_runs"] == 0
+    )
+
+
+async def get_last_usage_raw(conn: aiosqlite.Connection, task_id: int) -> dict[str, Any] | None:
+    """取得任務最近一次有紀錄的原始用量，供 adapter 把累計值換算成單輪。"""
+    row = await _fetch_one(
+        conn,
+        "SELECT json_extract(payload, '$.usage_raw') AS usage_raw FROM events"
+        " WHERE task_id = ? AND type = ? AND json_extract(payload, '$.usage_raw') IS NOT NULL"
+        " ORDER BY id DESC LIMIT 1",
+        (task_id, EventType.STATE_CHANGE),
+    )
+    return None if row is None else json.loads(row["usage_raw"])
+
+
+def _to_project(row: aiosqlite.Row) -> Project:
+    data = dict(row)
+    data["require_review"] = bool(data["require_review"])
+    return Project(**data)
+
+
+def _to_run(row: aiosqlite.Row) -> Run:
+    data = dict(row)
+    data["trigger"] = RunTrigger(data["trigger"])
+    data["exit_status"] = None if data["exit_status"] is None else ExitStatus(data["exit_status"])
+    return Run(**data)
+
+
+def _to_event(row: aiosqlite.Row) -> Event:
+    data = dict(row)
+    data["payload"] = json.loads(data["payload"])
+    return Event(**data)
+
+
+async def _fetch_one(
+    conn: aiosqlite.Connection, query: str, params: tuple[Any, ...]
+) -> aiosqlite.Row | None:
+    cursor = await conn.execute(query, params)
+    return await cursor.fetchone()
+
+
+def _last_id(cursor: aiosqlite.Cursor) -> int:
+    row_id = cursor.lastrowid
+    if row_id is None:
+        raise RuntimeError("insert did not produce a row id")
+    return row_id

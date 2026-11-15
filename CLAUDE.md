@@ -16,6 +16,7 @@
 | `docs/05-ui-reference.md` | 介面參考截圖、卡片內容、MVP 介面範圍（階段 2 才用到） |
 | `docs/06-diagrams.md` | 架構圖與流程圖 |
 | `docs/codex-notes.md` | Codex 介面的調查與實測結果（任務 0 的產出） |
+| `docs/claude-sdk-notes.md` | Claude Agent SDK 的調查與實測結果 |
 
 文件與本檔衝突時以 `docs/` 為準，並提醒我更新本檔。實作中做了新的設計決定，在 `docs/03-decisions.md` 新增一筆。
 
@@ -25,7 +26,7 @@
 
 ## 技術選型
 
-- Python 3.12+，套件管理用 `uv`
+- Python 3.13+，套件管理用 `uv`
 - FastAPI + uvicorn，SSE 推送狀態與 log
 - Claude Code 透過官方 Python Agent SDK（`claude-agent-sdk`）控制
 - SQLite（標準庫 `sqlite3` 或 `aiosqlite`），不使用 ORM
@@ -40,7 +41,10 @@ src/agent_supervisor/
   adapters/
     base.py          # AgentAdapter Protocol
     claude_code.py   # 用官方 Python Agent SDK 控制 Claude Code
-  runner.py          # 啟動、續接 session，寫 events，回填用量
+  enums.py           # 共用的列舉值：run 的觸發原因、結案結果、事件型別
+  runner.py          # run 的生命週期：建立、準備、agent 執行、收尾、結案
+  recovery.py        # 單一 daemon 的鎖、啟動時處理未結束的 run
+  cli.py             # 階段 1 的驗證用指令 asv
   worktree.py        # git worktree 與 branch 管理
   github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log
   poller.py          # 輪詢 PR / CI / review 狀態
@@ -95,6 +99,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 ```
 uv sync
 uv run pytest
+uv run asv --help
 uv run ruff check .
 uv run ruff format .
 ```
