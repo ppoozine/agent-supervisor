@@ -1,0 +1,99 @@
+# agent-supervisor
+
+平行管理多個 AI coding agent 的本機工具：每個任務一個 git worktree，CI 失敗自動回到同一個 agent session 修復，人只處理例外。
+
+## 文件
+
+動手前先讀 `docs/`：
+
+| 檔案 | 內容 |
+| --- | --- |
+| `docs/00-vision.md` | 想做的東西與定位 |
+| `docs/01-roadmap.md` | 九個階段與各自的完成標準 |
+| `docs/02-mvp-spec.md` | MVP 規格：資料表、API、背景工作、adapter 介面 |
+| `docs/03-decisions.md` | 決策紀錄 |
+| `docs/04-phase1-tasks.md` | 階段 1 與 1.5 的任務單與驗證清單 |
+| `docs/05-ui-reference.md` | 介面參考截圖、卡片內容、MVP 介面範圍（階段 2 才用到） |
+| `docs/06-diagrams.md` | 架構圖與流程圖 |
+
+文件與本檔衝突時以 `docs/` 為準，並提醒我更新本檔。實作中做了新的設計決定，在 `docs/03-decisions.md` 新增一筆。
+
+## 目前階段
+
+階段 1（核心迴圈），版本 `0.x`。依 `docs/04-phase1-tasks.md` 一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
+
+## 技術選型
+
+- Python 3.12+，套件管理用 `uv`
+- FastAPI + uvicorn，SSE 推送狀態與 log
+- Claude Code 透過官方 Python Agent SDK（`claude-agent-sdk`）控制
+- SQLite（標準庫 `sqlite3` 或 `aiosqlite`），不使用 ORM
+- 全程 asyncio；背景工作與 API 跑在同一個 process
+- 測試用 `pytest` + `pytest-asyncio`，lint / format 用 `ruff`
+- 前端（階段 2、開發順序第 6 步才開始）：React + Vite，放在 `web/`
+
+## 專案結構
+
+```
+src/agent_supervisor/
+  adapters/
+    base.py          # AgentAdapter Protocol
+    claude_code.py   # 用官方 Python Agent SDK 控制 Claude Code
+  runner.py          # 啟動、續接 session，寫 events，回填用量
+  worktree.py        # git worktree 與 branch 管理
+  github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log
+  poller.py          # 輪詢 PR / CI / review 狀態
+  dispatcher.py      # CI 失敗 → 建立 ci_failure run
+  status.py          # 由狀態推導看板欄位（純函式）
+  db.py              # schema 與查詢
+  config.py
+  api/               # FastAPI 路由與 SSE
+tests/
+docs/
+```
+
+import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名的知名套件。
+
+## 必須遵守的設計規則
+
+1. **看板欄位不存資料庫**。一律由 `status.py` 的純函式從 run / PR / CI / review 狀態推導。
+2. **Runner 只透過 `AgentAdapter` 介面控制 agent**。Runner 內不得出現任何 Claude Code 專屬的字串或參數。
+3. **`events` 表只新增，不修改、不刪除**。
+4. **防無限迴圈**：
+   - 同一個 commit 的 CI 失敗只餵回一次（比對 `last_handled_head_sha`）
+   - 自動修復最多 3 次（`ci_fix_attempts`）
+   - 單一任務累計 `cost_usd` 超過全域上限就停止
+   - 單一 run 的輪數與花費上限由 adapter 在執行中擋下；執行時間上限由 Runner 自己計時
+   - Stop、中斷、出錯之後不自動開新的 run，等人介入
+   - 這些規則只決定能不能再自動修復，不影響成果能不能合併；細節以規格為準
+5. **GitHub 一律用輪詢**（預設 30 秒），MVP 不做 webhook。
+6. **對外部指令的呼叫**（`git`、`gh`、agent）集中在各自的模組，方便測試時替換。
+7. **push 與開 PR 由 supervisor 執行**，不交給 agent；agent 正常結束的每一次 run 都做收尾，其他結束方式不自動發布、保留 worktree 內的變更。
+8. **Agent 的動作受權限政策限制**（允許清單與 sandbox 等級）。Adapter 攔得到的清單外動作一律拒絕並寫入 `permission_denied` 事件。這是基本防護不是安全邊界，階段 1 到 4 只用在信任的 repo。
+9. **每個任務同時最多一個未結束的 run**，由資料庫約束保證；建立 run 與更新防迴圈欄位在同一個交易內完成。
+10. **一個 run 由同一個可取消的工作從建立負責到結案**（準備、agent 執行、收尾）；建立 run、Stop、封存共用每個任務一把鎖。
+11. **同時只允許一個 daemon**；啟動時先停掉遺留程序再接受新工作。
+
+## Adapter 注意事項
+
+- Claude Code adapter 使用官方 Python Agent SDK（`claude-agent-sdk`），不自己包 CLI。
+- **不要憑印象寫參數**。實作前先查官方文件，確認串流訊息、續接 session、中止、輪數與花費上限、權限控制的實際用法，把查到的結果記在 `docs/claude-sdk-notes.md`。Codex adapter 同樣先調查，記在 `docs/codex-notes.md`。
+- Adapter 要如實填寫 `capabilities`；做不到的事不要在 adapter 裡假裝做到。
+- 測試不得真的啟動 agent：用 fake adapter 吐出預錄的事件。
+
+## 開發慣例
+
+- 每一步一個 branch、一個 PR，PR 描述寫明對應規格的哪一步
+- 新增行為必須附測試；`uv run pytest` 與 `uv run ruff check` 都要過才算完成
+- 型別註記寫完整；公開函式寫一行 docstring
+- 註解與文件用繁體中文，程式碼識別字與 commit message 用英文
+- 遇到規格沒寫清楚的地方，先停下來問我，不要自行擴充範圍
+
+## 常用指令
+
+```
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format .
+```
