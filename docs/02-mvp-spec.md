@@ -132,6 +132,15 @@ GitHub 上其他的檢查結果（取消、逾時、略過、需要人工核准�
 
 Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` 裡用 `kind` 標明是一般訊息、推理還是計畫。
 
+幾種事件的 `payload` 慣例：
+
+| 事件 | 內容 |
+| --- | --- |
+| `session_started` | `session_id`（新 session 在 agent 確認建立之前是空的，確認後會再送一筆帶 id 的），以及 `process_marker`：一個會出現在 agent 程序命令列上的字串，重啟復原時用它找遺留的程序 |
+| `tool_call`、`command` | 一次工具呼叫寫成兩筆事件，`phase` 分別是 `started` 與 `finished`，用 `tool_use_id` 對應。因為事件只能新增，結果不能回填到第一筆 |
+| `permission_denied` | 被拒絕的工具、完整輸入、拒絕的原因 |
+| `state_change` | run 結案時寫一筆，`change` 為 `run_ended`，帶 `exit_status`、`detail` 與 `usage_raw` |
+
 ## Run 的生命週期
 
 一個 run 從建立到結案會經過四段：**建立 → 準備 → agent 執行 → 收尾**。流程圖見 `06-diagrams.md`。
@@ -211,13 +220,13 @@ Dispatcher 發現任務符合條件時：
 
 抓 log 失敗時，這個 run 以 `error` 結束，卡片進 Needs you；已經扣掉的修復次數不退回。
 
-使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
+使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務的花費或 token 已達上限時，目前的實作會拒絕新的訊息（這一點尚未定案，見 `03-decisions.md`）。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
 
 **防無限迴圈**
 
 1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。
 2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止。
-3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
+3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`，其中 `tokens_in` 包含快取的輸入 token。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
 4. 單一 run 的上限：Runner 把「剩餘預算」與「最多輪數」交給 adapter，在執行中就擋下，不等 run 結束。Adapter 做不到時由 `capabilities` 表明。
 5. 單一 run 的執行時間上限：由 Runner 自己計時，不依賴 agent。超過就中止這個 run，`exit_status` 記為 `limit_reached`。這是所有 adapter 都有的最後一道防線。
 
@@ -269,7 +278,9 @@ Daemon 啟動時，在開始接受任何新工作之前，先找出所有 `ended
 
 無法確認某個 run 的遺留程序已經停止時，那個 run 維持未結束，該任務因此建不了新的 run；daemon 在啟動訊息中列出這些任務，由人手動處理。
 
-怎麼辨識並停掉遺留程序（程序群組、adapter 自己記錄的識別資訊等）在任務 1 調查後決定並補進這裡，但上面的行為是必須做到的。
+辨識遺留程序的方法：adapter 在 `session_started` 事件裡提供 `process_marker`，復原時找出命令列包含這個字串的程序，先送 SIGINT，等不到再強制終止。未結束的 run 如果連一筆 `session_started` 都沒有，表示 agent 還沒啟動，直接標成 `interrupted`。
+
+實測（Claude Code）：daemon 被強制終止後，agent 的程序與它啟動的子程序都還在執行；下一次啟動時兩者都被停掉，run 標成 `interrupted`。
 
 ## 中止與封存
 
@@ -340,11 +351,12 @@ class RunLimits:
 @dataclass(frozen=True)
 class TurnResult:
     session_id: str | None
-    exit_status: str
+    exit_status: ExitStatus
     tokens_in: int | None
     tokens_out: int | None
-    usage_raw: dict[str, Any] | None
     cost_usd: float | None
+    usage_raw: dict[str, Any] | None
+    detail: str | None = None
 
 
 class AgentAdapter(Protocol):
@@ -352,18 +364,23 @@ class AgentAdapter(Protocol):
 
     def run_turn(
         self,
+        *,
         prompt: str,
         cwd: Path,
         session_id: str | None,
         model: str | None,
         limits: RunLimits,
         policy: PermissionPolicy,
+        previous_usage: dict[str, Any] | None,
     ) -> AsyncIterator[AgentEvent | TurnResult]: ...
 ```
 
 - `session_id` 為 `None` 表示開新 session；有值表示續接。
 - Adapter 一拿到 session id 就要送出一筆 `session_started` 事件，Runner 收到後立刻寫進 `tasks.session_id`。這樣 run 被中止、中斷或出錯時仍然可以續接。`TurnResult` 也帶 session id，作為最後確認。
 - `model` 為 `None` 表示用該 agent 的預設模型。
+- `previous_usage` 是同一個任務上一輪的 `usage_raw`。有些 agent 回報的是整個 session 的累計值（Claude Code 的花費、Codex 的 token 數），adapter 用它相減換算成單輪。Runner 不解讀它的內容。
+- `tokens_in` 要包含快取的輸入 token（快取寫入與快取讀取）。實測兩種 agent 的輸入都有九成左右是快取，不計入的話數字沒有意義。
+- `TurnResult.detail` 是給人看的補充說明，例如撞到的是哪一種上限。
 - `usage_raw` 是 agent 回報的原始用量資料（含快取、推理等各種 token 數），原樣寫進事件。`tokens_in` 與 `tokens_out` 只是其中兩個數字，之後要自己估算花費時需要完整的資料。
 - `TurnResult` 的 `session_id` 與 token 欄位可以是 `None`：agent 還沒啟動成功就出錯時沒有 session，被中止時可能拿不到完整用量。未知的用量不要填 0。
 - 中止一個 run：Runner 取消正在讀取串流的工作，adapter 必須在串流被關閉時把底下的 agent 與它的子程序都停掉，流程見「中止與封存」。
@@ -380,6 +397,16 @@ class AgentAdapter(Protocol):
 | 自製 API agent | 直接呼叫模型 API，自己寫 agent 迴圈 | 階段 6 |
 
 Claude Code 選 SDK 而不是自己包 CLI 的理由見 `03-decisions.md` 第 16 筆；Codex 選包 CLI 而不是官方 SDK 的理由見第 48 筆。
+
+Claude Code adapter 的做法與已知限制（實測，細節見 `claude-sdk-notes.md`）：
+
+- 新 session 的 id 由 adapter 事先指定。啟動前先送一筆只有 `process_marker` 的 `session_started`，等 agent 確認 session 建立後才送出帶 id 的那一筆。這樣啟動失敗的 run 不會留下一個不存在的 session 讓之後的 run 去續接。
+- 只載入專案層級的 Claude Code 設定，所以 agent 讀得到目標 repo 的 `CLAUDE.md`，但不受使用者個人的 hooks 與外掛影響。
+- 工具與指令的限制由「工具呼叫前的 hook」落實，它對每一次工具呼叫都會執行。只靠核准回呼不夠：實測發現目標 repo 的專案設定裡若有允許規則，或指令被判定為唯讀（例如 `ls`），呼叫就不會經過核准回呼。核准回呼仍然保留，負責放行需要詢問的呼叫。
+- 目標 repo 專案設定裡的 hooks 也會在 agent 上執行，這是載入專案設定的代價。
+- 拒絕背景執行的指令。一個 run 就是一輪做完；背景指令在這一輪結束時會被終止，agent 卻會回報已經完成。
+- 沒有內容的訊息與思考區塊不寫入事件。**sandbox 等級與是否允許連網目前無法落實**：SDK 的 sandbox 設定實測沒有生效，原因未查明，所以 `can_restrict_network` 為否。唯讀等級以拒絕所有會寫入的工具來近似。
+- 被中止或逾時的 run 沒有用量。它的花費會算進同一個 session 的下一個 run，因為花費是用累計值相減得到的。
 
 Codex adapter 已知的限制（實測）：被中止的 run 拿不到用量；有些被 sandbox 擋下的指令不會出現在事件流裡，所以 Codex 任務的 `permission_denied` 事件不完整。
 

@@ -78,7 +78,8 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 - [ ] `runs` 表有 token 數與花費
 - [ ] `docs/claude-sdk-notes.md` 寫了實際查到的用法，不是猜的
 - [ ] Runner 裡沒有任何 Claude Code 專屬的字串
-- [ ] 讓 agent 做一件清單外的事，確認被拒絕且有 `permission_denied` 事件
+- [ ] 讓 agent 做一件清單外的事（例如執行 `gh --version`），確認被拒絕且有 `permission_denied` 事件
+- [ ] （待查）sandbox 等級與限制連網對 Claude Code 目前無法落實，見 `claude-sdk-notes.md`
 - [ ] 把輪數上限調得很低，確認 run 在執行中被擋下，`exit_status` 是 `limit_reached`
 - [ ] run 執行中把程式強制關掉再啟動，確認遺留的 agent 程序已經不在、該 run 變成 `interrupted`
 - [ ] daemon 已經在跑的時候再啟動一個，確認第二個直接結束

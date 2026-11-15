@@ -59,22 +59,33 @@
 | 51 | `PermissionPolicy` 改成三部分：sandbox 等級、是否允許連網、由各 adapter 自行解讀的工具與指令限制；`capabilities` 加上 `can_restrict_network`（修正第 34 筆的結構） | 允許的工具與指令清單 + sandbox 等級 | Codex 沒有工具允許清單，它有的是 sandbox 等級、網路開關、指令前綴規則。前兩項可以跨 agent 統一，第三項只能各自表述 |
 | 52 | Agent 的推理與計畫更新記成 `agent_message`，在 payload 用 `kind` 區分 | 新增事件型別 | 少一個型別，查詢稽核紀錄時也比較單純 |
 | 53 | 規格不假設 agent 會自己 commit；沒有 commit 的變更一律由 supervisor 在收尾時補 | 假設 agent 會在 worktree 內 commit | 實測 Codex 在 sandbox 下無法在 worktree 裡 commit |
+| 54 | Claude Code 的 agent 只載入專案層級的設定 | 都不載入、全部載入 | agent 需要讀到目標 repo 的 `CLAUDE.md`；使用者個人的 hooks、外掛、skills 不該在無人看管的 agent 上執行。代價是目標 repo 專案設定裡的 hooks 與允許規則也會生效，所以權限政策改用 hook 落實（第 61 筆） |
+| 55 | token 上限把快取的輸入 token 算進去，`tokens_in` 包含快取寫入與快取讀取 | 只算一般輸入 | 實測 Claude Code 一個小任務的一般輸入只有 6 個 token，快取相關的有 58,000 多；Codex 也有九成是快取。不計入的話上限形同虛設 |
+| 56 | `run_turn` 多一個 `previous_usage` 參數，由 Runner 傳入上一輪的 `usage_raw` | adapter 自己在記憶體裡記上一輪的累計值 | Claude Code 的花費與 Codex 的 token 數都是整個 session 的累計，要相減才是單輪。放在 adapter 的記憶體裡，daemon 重啟後就會算錯 |
+| 57 | 遺留程序用 `session_started` 事件裡的 `process_marker` 辨識，復原時找命令列包含它的程序 | 記錄程序編號、用程序群組 | SDK 沒有公開的方法取得 CLI 的程序編號；session id 會出現在命令列上，而且重啟後仍然查得到。程序編號則可能被系統重複使用 |
+| 58 | 一次工具呼叫寫成開始與結束兩筆事件，用 `tool_use_id` 對應 | 結果回填到同一筆事件 | `events` 只能新增不能修改 |
+| 59 | 階段 1 的 CLI 在前景執行到 run 結束，同時只能有一個；`asv stop` 送訊號給正在執行的那一個 | 現在就做常駐的 daemon | daemon 與 API 是階段 2 的範圍；階段 1 只需要能手動驗證 |
+| 60 | 新增三個模組：`enums.py`（共用的列舉值）、`recovery.py`（單一 daemon 的鎖與重啟復原）、`cli.py` | 全部放進 `runner.py` 與 `db.py` | 列舉值被 db、runner、adapter 共用，放在任何一方都會造成反向相依；復原牽涉作業系統程序，獨立出來才方便測試時替換 |
+| 61 | Claude Code 的權限政策用「工具呼叫前的 hook」落實，核准回呼只負責放行 | 只用核准回呼 | 實測：專案設定裡的允許規則會讓呼叫跳過核准回呼，被判定為唯讀的指令也不會經過它。hook 對每一次呼叫都執行，而且先於允許規則 |
+| 62 | 新 session 的 id 等 agent 確認建立後才保存到任務上 | 啟動前就保存 | 實測：第一次啟動失敗（例如工作目錄不存在）後，任務會留著一個不存在的 session，之後每次送訊息都去續接它而失敗，任務永遠卡住 |
+| 63 | Python 最低版本為 3.13 | 3.12 | 專案剛開始、只有自己使用，沒有相容舊版的需求，直接用較新的版本 |
+| 64 | 權限政策拒絕背景執行的指令，agent 只能在前景等指令跑完 | 允許背景執行 | 實測：agent 可以把指令丟到背景後直接結束這一輪，run 被記成成功；但 run 一結束背景指令就被終止。若 agent 把測試丟到背景，supervisor 會在測試沒跑完時就 push |
 
 ## 尚未決定
 
 - 是否公開 repo、用哪個授權（Apache-2.0 或 MIT）
 - CLI 指令名稱（暫定 `asv`）
-- 花費上限、token 上限與單一 run 最多輪數的預設值
-- token 上限要不要把快取的輸入 token 算進去：實測 Codex 的輸入有 85% 到 95% 是快取，全部計入的話上限要設得很高（任務 1 看過 Claude Code 的用量資料後決定）
-- 階段 1 允許清單的預設內容（任務 1 調查 SDK 的權限控制後決定）
+- 花費上限、token 上限、單一 run 最多輪數與執行時間上限的預設值。程式裡目前是暫定值：5 美元、2,000 萬 token、50 輪、30 分鐘
+- 階段 1 允許清單的預設內容。程式裡目前是暫定值：允許讀檔、搜尋、寫檔、編輯、執行指令、待辦清單；拒絕以 `git push`、`gh`、`sudo` 開頭的指令
 - Supervisor 補 commit 時的 commit message 格式
 - PR 上完全沒有 CI 檢查（`ci_state` 為 `none`）時要算通過還是停在 In review
 - GitHub 上取消、逾時、略過等檢查結果如何對應到 `ci_state`（任務 3 調查後決定）
-- 單一 run 執行時間上限的預設值
-- Daemon 突然死掉後，如何找到並停掉遺留的 agent（任務 1 調查後決定）
 - 多人使用與登入要不要做（階段 7 決定）
-- Claude Code 能不能落實「是否允許連網」這項政策（任務 1 調查後決定）
+- 權限政策目前不限制寫檔的路徑：agent 可以用寫檔工具寫到 worktree 之外。要不要在階段 1 就擋（任務 2 有了 worktree 之後決定）
+- 重啟復原強制終止 agent 程序後，只確認該程序消失，沒有確認它啟動的子程序也消失
+- 所有模組共用一條資料庫連線。目前只有一個工作在寫入所以沒有問題；任務 3 加入 Poller 與 Dispatcher 之後，一方的 rollback 可能影響另一方還沒 commit 的寫入，到時要改成各自的連線或加鎖
+- Claude Code 的 sandbox 設定為什麼沒有生效。查明之前 Claude Code 任務無法限制連網與寫入範圍（見 `claude-sdk-notes.md`）
 - 重啟後確認不了遺留程序已停止的任務：run 會維持未結束、卡片一直顯示 Working，目前只在啟動訊息中列出，沒有在工具內解除的方法。要不要加一個手動結案的操作（任務 1 實作時決定）
 - Agent 的登入方式：訂閱方案或 API key。SDK 文件提到不允許第三方產品提供 claude.ai 登入；自己在本機用訂閱登入是否可行還沒查證，任務 1 要確認，結果可能影響第 16 筆
-- 任務花費已超過上限時，使用者手動送訊息要不要放行
+- 任務花費已超過上限時，使用者手動送訊息要不要放行。目前的實作是拒絕，要繼續得先調高設定檔裡的上限
 - 階段 5（治理）與階段 6（自製 agent）的先後（MVP 完成後評估）

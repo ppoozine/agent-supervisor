@@ -27,7 +27,7 @@
 **目標**：開始寫程式前，環境與文件都到位。
 
 - 建立 `agent-supervisor` 與 `agent-supervisor-sandbox` 兩個 private repo
-- 本機確認：Python 3.12+、`uv`、`gh`（已登入）、`claude` CLI、`codex` CLI
+- 本機確認：Python 3.13+、`uv`、`gh`（已登入）、`claude` CLI、`codex` CLI
 - 把 `CLAUDE.md` 與 `docs/` 放進主專案並 commit 到 main
 
 **完成標準**：在主專案資料夾啟動 Claude Code，它能讀到 `CLAUDE.md` 並正確說出目前在哪個階段。
