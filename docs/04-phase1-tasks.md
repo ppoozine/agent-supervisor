@@ -50,9 +50,9 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
    單次 run 的輪數與花費上限、權限控制的實際用法，
    以及用訂閱方案登入時能不能這樣使用，
    把結果寫進 docs/claude-sdk-notes.md 後再實作
-5. 權限政策（見規格「權限政策」）：設定檔裡的允許清單與
-   sandbox 等級，adapter 攔得到的清單外動作拒絕並寫入
-   permission_denied 事件
+5. 權限政策（見規格「權限政策」）：設定檔裡的 sandbox 等級、
+   是否允許連網、工具與指令的限制；先調查 SDK 能落實哪些，
+   adapter 攔得到的違規動作拒絕並寫入 permission_denied 事件
 6. 實作 Runner：啟動 run、把 adapter 事件寫進 events、
    收到 session 建立事件時立刻保存 session id、
    結束時回填 tokens、cost_usd 與 exit_status；
@@ -188,9 +188,11 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 實作 docs/02-mvp-spec.md 開發順序的第 4 步：Codex adapter。
 
 範圍：
-1. 先讀 docs/codex-notes.md（任務 0 的調查結果），確認內容
-   對目前安裝的 Codex 版本仍然正確，有出入就更新
-2. 依調查結果向我提出做法（包 CLI 或用 SDK），確認後再實作
+1. 先讀 docs/codex-notes.md（任務 0 的調查與實測結果），確認內容
+   對目前安裝的 Codex 版本仍然正確，有出入就更新；並查明其中
+   「還沒查明的事」屬於階段 1.5 的項目
+2. 做法是用 subprocess 包 codex exec（見決策第 48 筆）；
+   先給我實作計畫，確認後再實作
 3. 實作 CodexAdapter，如實填寫 capabilities
 4. 介面不合用的地方提出修改建議，不要在 Runner 裡加入
    針對特定 agent 的分支
@@ -206,6 +208,9 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 - [ ] 任務 1 到 3 的驗證清單中不依賴特定能力的項目，用 Codex 重跑一次
 - [ ] Codex 支援的能力各自通過對應的驗證
 - [ ] Codex 做不到的能力，確認降級行為符合規格（例如只靠執行時間上限擋下）
+- [ ] Codex 任務的指令與檔案變更有寫進 `events`
+- [ ] 按 Stop 後確認 Codex 啟動的子程序真的結束了
+- [ ] 把 token 上限調得很低，確認 Codex 任務超過後不再自動修復
 - [ ] Runner、Dispatcher、Poller 沒有因為 agent 種類而分支
 - [ ] Codex 做不到的事（如果有）在 `capabilities` 與規格裡都有寫明
 

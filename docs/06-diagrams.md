@@ -138,7 +138,7 @@ flowchart TD
     iface --> fake["FakeAdapter<br/>測試用"]
 
     claude --> sdk["官方 Python Agent SDK"]
-    codex --> codexcli["Codex<br/>做法待任務 0 調查"]
+    codex --> codexcli["codex exec<br/>subprocess 讀 JSONL"]
     custom --> modelapi["模型 API<br/>自己的 agent 迴圈"]
 ```
 
@@ -302,7 +302,7 @@ flowchart TD
     c2 -->|"否"| no
     c2 -->|"是"| c3{"修復次數小於 3？"}
     c3 -->|"否"| no
-    c3 -->|"是"| c4{"剩餘預算大於零？"}
+    c3 -->|"是"| c4{"花費與 token 的<br/>剩餘預算都大於零？"}
     c4 -->|"否"| no
     c4 -->|"是"| c5{"沒有 run 正在執行？"}
     c5 -->|"否"| no
@@ -400,7 +400,7 @@ sequenceDiagram
 flowchart LR
     loop_start(["CI 失敗"]) --> g1["同一個 commit<br/>只餵回一次"]
     g1 --> g2["自動修復<br/>最多 3 次"]
-    g2 --> g3["任務花費<br/>有上限"]
+    g2 --> g3["任務花費與 token<br/>有上限"]
     g3 --> run["開始一次 run"]
     run --> g4["單次 run 的<br/>輪數與花費上限<br/>adapter 負責"]
     run --> g5["單次 run 的<br/>執行時間上限<br/>Runner 負責"]

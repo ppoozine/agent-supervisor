@@ -17,7 +17,7 @@ MVP 只證明一件事：一個任務從開單到 CI 綠燈，中間 CI 失敗�
 - CI 失敗時抓 log 餵回同一個 session
 - 四欄看板與任務詳情頁
 - 每個任務的稽核紀錄與 token 花費（花費為估算值）
-- 無人看管時的基本權限政策（允許清單與 sandbox 等級，屬於基本防護）
+- 無人看管時的基本權限政策（sandbox 等級、是否允許連網、工具與指令的限制，屬於基本防護）
 
 **不包含**
 
@@ -47,7 +47,7 @@ React 看板（瀏覽器）
 ```
 
 - Poller 查到 CI 失敗後交給 Dispatcher，Dispatcher 請 Runner 續接同一個 session。
-- **push 與開 PR 由 supervisor 執行，不交給 agent。** Agent 只在 worktree 內改檔與 commit。
+- **push 與開 PR 由 supervisor 執行，不交給 agent。** Agent 只在 worktree 內改檔。它可能會自己 commit，也可能不會（Codex 在 sandbox 下無法在 worktree 裡 commit，見 `codex-notes.md`），沒有 commit 的變更由 supervisor 在收尾時補。
 - 四個元件都讀寫 SQLite。
 
 ## 資料表
@@ -130,6 +130,8 @@ GitHub 上其他的檢查結果（取消、逾時、略過、需要人工核准�
 | `type` | `session_started` / `agent_message` / `tool_call` / `command` / `permission_denied` / `pushed` / `pr_opened` / `ci_status` / `state_change` |
 | `payload` | JSON，依 `type` 而異 |
 
+Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` 裡用 `kind` 標明是一般訊息、推理還是計畫。
+
 ## Run 的生命週期
 
 一個 run 從建立到結案會經過四段：**建立 → 準備 → agent 執行 → 收尾**。流程圖見 `06-diagrams.md`。
@@ -191,7 +193,7 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 1. `head_sha` 上的所有 CI 檢查都已結束，且至少一個失敗
 2. `head_sha` 不等於 `last_handled_head_sha`
 3. `ci_fix_attempts` 小於 3
-4. 任務的剩餘預算大於零（花費上限減去累計 `cost_usd`）
+4. 任務的剩餘預算大於零：花費上限減去累計 `cost_usd`，以及 token 上限減去累計 token 數，兩者都要大於零
 5. 沒有 run 正在執行
 6. PR 開著，任務未封存
 7. 最後一次 run 的 `exit_status` 是 `success`
@@ -215,7 +217,7 @@ Dispatcher 發現任務符合條件時：
 
 1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。
 2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止。
-3. 單一任務花費上限：累計 `cost_usd` 達到上限（剩餘預算小於等於零）就不再啟動自動修復；上限值為全域設定。
+3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
 4. 單一 run 的上限：Runner 把「剩餘預算」與「最多輪數」交給 adapter，在執行中就擋下，不等 run 結束。Adapter 做不到時由 `capabilities` 表明。
 5. 單一 run 的執行時間上限：由 Runner 自己計時，不依賴 agent。超過就中止這個 run，`exit_status` 記為 `limit_reached`。這是所有 adapter 都有的最後一道防線。
 
@@ -229,7 +231,7 @@ Dispatcher 發現任務符合條件時：
 **關於花費**
 
 - `cost_usd` 是 agent 依價目表算出的估算值，不是帳單。使用訂閱方案時它代表相對用量。介面上一律標示為估算。
-- Adapter 無法回報花費時 `cost_usd` 為 `NULL`，第 3 條不生效，這種任務靠第 2 條與第 5 條擋住。
+- Adapter 無法回報花費時（例如 Codex）`cost_usd` 為 `NULL`，第 3 條的花費上限不生效，改由同一條的 token 上限擋住，另外還有第 2 條與第 5 條。
 - Run 被中斷而拿不到用量時，`cost_usd` 也是 `NULL`。累計時不把它當成零：這個任務的花費統計標示為「不完整」。
 
 ## 權限政策（階段 1 版本）
@@ -238,7 +240,10 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 
 **信任前提**：階段 1 到 4 只把這個工具用在自己信任的 repo 上。這裡的政策是基本防護，**不是安全邊界**。Agent 只要能執行測試或 shell，就有辦法透過它們間接做到清單外的事（例如讓測試程式去 push）。worktree 只隔離工作目錄，各 worktree 仍共用同一份 git 資料。真正的隔離要等階段 5 的 container sandbox。
 
-- `PermissionPolicy` 是通用的資料結構，包含兩部分：允許的工具與指令清單、sandbox 等級（唯讀、只能寫工作目錄）。
+- `PermissionPolicy` 是通用的資料結構，包含三部分：
+  - sandbox 等級：唯讀，或只能寫工作目錄
+  - 是否允許連網
+  - 工具與指令的限制：內容由各 adapter 自行解讀，因為每種 agent 的機制不同（Claude Code 是工具清單，Codex 是指令前綴規則）
 - 各 adapter 把政策轉成該 agent 自己的設定，並盡力落實。不同 agent 能做到的程度不同：有的可以逐次攔截工具呼叫，有的只有 sandbox 等級。做不到的部分由 `capabilities` 表明。
 - Adapter 攔得到的清單外動作一律拒絕，並寫入 `permission_denied` 事件。階段 1 不做「跳出來問人」。
 - Agent 不需要 push、開 PR 或呼叫 `gh`，這些由 supervisor 做，允許清單不含這些動作。
@@ -322,6 +327,7 @@ class AdapterCapabilities:
     can_limit_turns: bool
     can_limit_budget: bool
     can_gate_tool_calls: bool
+    can_restrict_network: bool
     reports_cost: bool
 
 
@@ -337,6 +343,7 @@ class TurnResult:
     exit_status: str
     tokens_in: int | None
     tokens_out: int | None
+    usage_raw: dict[str, Any] | None
     cost_usd: float | None
 
 
@@ -357,6 +364,7 @@ class AgentAdapter(Protocol):
 - `session_id` 為 `None` 表示開新 session；有值表示續接。
 - Adapter 一拿到 session id 就要送出一筆 `session_started` 事件，Runner 收到後立刻寫進 `tasks.session_id`。這樣 run 被中止、中斷或出錯時仍然可以續接。`TurnResult` 也帶 session id，作為最後確認。
 - `model` 為 `None` 表示用該 agent 的預設模型。
+- `usage_raw` 是 agent 回報的原始用量資料（含快取、推理等各種 token 數），原樣寫進事件。`tokens_in` 與 `tokens_out` 只是其中兩個數字，之後要自己估算花費時需要完整的資料。
 - `TurnResult` 的 `session_id` 與 token 欄位可以是 `None`：agent 還沒啟動成功就出錯時沒有 session，被中止時可能拿不到完整用量。未知的用量不要填 0。
 - 中止一個 run：Runner 取消正在讀取串流的工作，adapter 必須在串流被關閉時把底下的 agent 與它的子程序都停掉，流程見「中止與封存」。
 - 串流結束卻沒有送出 `TurnResult` 時，Runner 把這個 run 記為 `error`。被中止的 run 不等 `TurnResult`，由 Runner 自己結案。
@@ -368,10 +376,12 @@ class AgentAdapter(Protocol):
 | Adapter | 做法 | 何時做 |
 | --- | --- | --- |
 | Claude Code | 官方 Python Agent SDK（`claude-agent-sdk`） | 階段 1 |
-| Codex | 待查證它的非互動介面與續接方式後決定；調查在階段 1 開始前先做（任務 0） | 階段 1.5 |
+| Codex | 用 subprocess 包 `codex exec` 的非互動模式，逐行讀 JSONL 事件；調查與實測結果見 `codex-notes.md` | 階段 1.5 |
 | 自製 API agent | 直接呼叫模型 API，自己寫 agent 迴圈 | 階段 6 |
 
-Claude Code 選 SDK 而不是自己包 CLI 的理由見 `03-decisions.md` 第 16 筆。
+Claude Code 選 SDK 而不是自己包 CLI 的理由見 `03-decisions.md` 第 16 筆；Codex 選包 CLI 而不是官方 SDK 的理由見第 48 筆。
+
+Codex adapter 已知的限制（實測）：被中止的 run 拿不到用量；有些被 sandbox 擋下的指令不會出現在事件流裡，所以 Codex 任務的 `permission_denied` 事件不完整。
 
 ## 開發順序
 
