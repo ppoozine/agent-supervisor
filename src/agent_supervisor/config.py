@@ -44,6 +44,11 @@ class Config:
         return self.data_dir / "agent-supervisor.db"
 
     @property
+    def worktrees_dir(self) -> Path:
+        """各任務 worktree 的上層目錄。"""
+        return self.data_dir / "worktrees"
+
+    @property
     def lock_path(self) -> Path:
         """確保同時只有一個 daemon 的鎖檔位置。"""
         return self.data_dir / "daemon.lock"

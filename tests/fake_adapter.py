@@ -74,8 +74,9 @@ class Call:
 class FakeAdapter:
     """每次 run_turn 依序取用一份劇本。
 
-    劇本是一個清單，元素可以是事件、結果、例外（會被拋出），
-    或 `asyncio.Event`（串流會停在那裡直到它被設定）。
+    劇本是一個清單，元素可以是事件、結果、例外（會被拋出）、
+    `asyncio.Event`（串流會停在那裡直到它被設定），
+    或一個函式（會收到這次呼叫的參數，用來模擬 agent 在工作目錄裡改檔）。
     """
 
     scripts: list[list[Any]]
@@ -104,6 +105,9 @@ class FakeAdapter:
                     continue
                 if isinstance(step, BaseException):
                     raise step
+                if callable(step):
+                    step(self.calls[-1])
+                    continue
                 yield step
         finally:
             self.closed_count += 1

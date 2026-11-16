@@ -5,6 +5,7 @@ SDK 的實際用法與實測結果見 `docs/claude-sdk-notes.md`。
 """
 
 import asyncio
+import os
 import re
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -39,7 +40,9 @@ from agent_supervisor.adapters.base import (
 from agent_supervisor.enums import EventType, ExitStatus
 
 COMMAND_TOOL = "Bash"
-WRITING_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit", COMMAND_TOOL})
+FILE_WRITING_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
+WRITING_TOOLS = FILE_WRITING_TOOLS | {COMMAND_TOOL}
+PATH_KEYS = ("file_path", "notebook_path")
 LIMIT_SUBTYPES = frozenset({"error_max_turns", "error_max_budget_usd"})
 INPUT_TOKEN_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 COMMAND_SEPARATORS = re.compile(r"&&|\|\||[;|\n]")
@@ -61,7 +64,7 @@ ClientFactory = Callable[[ClaudeAgentOptions], AbstractAsyncContextManager[SdkCl
 
 
 def evaluate_tool_call(
-    tool_name: str, tool_input: dict[str, Any], policy: PermissionPolicy
+    tool_name: str, tool_input: dict[str, Any], policy: PermissionPolicy, *, cwd: Path
 ) -> str | None:
     """依權限政策判斷一次工具呼叫；允許時回傳 None，拒絕時回傳原因。
 
@@ -73,6 +76,8 @@ def evaluate_tool_call(
         return f"tool {tool_name} is not in the allowed tools"
     if policy.sandbox_level is SandboxLevel.READ_ONLY and tool_name in WRITING_TOOLS:
         return f"tool {tool_name} can write and the sandbox level is read-only"
+    if tool_name in FILE_WRITING_TOOLS and not _is_inside(tool_input, cwd):
+        return f"tool {tool_name} may only write inside the working directory"
     if tool_name != COMMAND_TOOL:
         return None
     if tool_input.get("run_in_background"):
@@ -85,6 +90,18 @@ def evaluate_tool_call(
             if _starts_with_command(segment.strip(), denied):
                 return f"command starting with {denied!r} is not allowed"
     return None
+
+
+def _is_inside(tool_input: dict[str, Any], cwd: Path) -> bool:
+    """寫檔工具的目標路徑是否在工作目錄之內。只做字串層級的正規化，不解析符號連結。"""
+    for key in PATH_KEYS:
+        target = tool_input.get(key)
+        if target is None:
+            continue
+        resolved = Path(os.path.normpath(os.path.join(cwd, str(target))))
+        if not resolved.is_relative_to(cwd):
+            return False
+    return True
 
 
 def _starts_with_command(segment: str, denied: str) -> bool:
@@ -134,8 +151,8 @@ class ClaudeCodeAdapter:
             permission_mode="default",
             # 兩道關卡用同一套政策。hook 對每一次工具呼叫都會執行，而且先於專案設定裡的
             # 允許規則與自動放行的唯讀指令；核准回呼只在需要詢問時才被呼叫，負責放行。
-            hooks={"PreToolUse": [HookMatcher(hooks=[_make_hook(policy, denials)])]},
-            can_use_tool=_make_gate(policy, denials),
+            hooks={"PreToolUse": [HookMatcher(hooks=[_make_hook(policy, cwd, denials)])]},
+            can_use_tool=_make_gate(policy, cwd, denials),
             setting_sources=list(self._setting_sources),  # type: ignore[arg-type]
             max_turns=limits.max_turns,
             max_budget_usd=limits.max_budget_usd,
@@ -184,10 +201,14 @@ def _is_init(message: Any) -> bool:
 
 
 def _check(
-    tool_name: str, tool_input: dict[str, Any], policy: PermissionPolicy, denials: list[AgentEvent]
+    tool_name: str,
+    tool_input: dict[str, Any],
+    policy: PermissionPolicy,
+    cwd: Path,
+    denials: list[AgentEvent],
 ) -> str | None:
     """依政策判斷；拒絕時留下一筆 permission_denied 事件並回傳給 agent 看的訊息。"""
-    reason = evaluate_tool_call(tool_name, tool_input, policy)
+    reason = evaluate_tool_call(tool_name, tool_input, policy, cwd=cwd)
     if reason is None:
         return None
     denials.append(
@@ -198,11 +219,11 @@ def _check(
     return f"Denied by supervisor policy: {reason}"
 
 
-def _make_hook(policy: PermissionPolicy, denials: list[AgentEvent]) -> Any:
+def _make_hook(policy: PermissionPolicy, cwd: Path, denials: list[AgentEvent]) -> Any:
     """建立工具呼叫前的 hook：違反政策就拒絕，否則不表示意見。"""
 
     async def pre_tool_use(hook_input: Any, tool_use_id: str | None, context: Any) -> Any:
-        message = _check(hook_input["tool_name"], hook_input["tool_input"], policy, denials)
+        message = _check(hook_input["tool_name"], hook_input["tool_input"], policy, cwd, denials)
         if message is None:
             return {}
         return {
@@ -216,13 +237,13 @@ def _make_hook(policy: PermissionPolicy, denials: list[AgentEvent]) -> Any:
     return pre_tool_use
 
 
-def _make_gate(policy: PermissionPolicy, denials: list[AgentEvent]) -> Any:
+def _make_gate(policy: PermissionPolicy, cwd: Path, denials: list[AgentEvent]) -> Any:
     """建立核准回呼：需要詢問的呼叫依政策放行或拒絕。"""
 
     async def gate(
         tool_name: str, tool_input: dict[str, Any], context: Any
     ) -> PermissionResultAllow | PermissionResultDeny:
-        message = _check(tool_name, tool_input, policy, denials)
+        message = _check(tool_name, tool_input, policy, cwd, denials)
         if message is None:
             return PermissionResultAllow()
         return PermissionResultDeny(message=message)

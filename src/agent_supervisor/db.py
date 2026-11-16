@@ -5,6 +5,7 @@
 - `events` 只能新增，不能修改或刪除（trigger）
 """
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -178,7 +179,8 @@ def utc_now() -> str:
 
 
 async def connect(db_path: str | Path) -> aiosqlite.Connection:
-    """開啟資料庫連線並套用必要的 pragma。"""
+    """開啟資料庫連線並套用必要的 pragma；資料庫所在的目錄不存在時會建立。"""
+    await asyncio.to_thread(Path(db_path).parent.mkdir, parents=True, exist_ok=True)
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
     await conn.execute("PRAGMA foreign_keys = ON")
@@ -192,16 +194,32 @@ async def init_schema(conn: aiosqlite.Connection) -> None:
     await conn.commit()
 
 
-async def get_or_create_project(conn: aiosqlite.Connection, repo_path: str) -> Project:
-    """依 repo 路徑取得專案，不存在就建立。"""
-    row = await _fetch_one(conn, "SELECT * FROM projects WHERE repo_path = ?", (repo_path,))
-    if row is not None:
-        return _to_project(row)
-    cursor = await conn.execute(
-        "INSERT INTO projects (name, repo_path) VALUES (?, ?)", (Path(repo_path).name, repo_path)
+async def upsert_project(
+    conn: aiosqlite.Connection,
+    repo_path: str,
+    *,
+    github_repo: str | None = None,
+    default_branch: str = "main",
+    require_review: bool = False,
+) -> Project:
+    """登記一個本機 repo；已登記過就更新它的設定。"""
+    await conn.execute(
+        "INSERT INTO projects (name, repo_path, github_repo, default_branch, require_review)"
+        " VALUES (?, ?, ?, ?, ?)"
+        " ON CONFLICT(repo_path) DO UPDATE SET github_repo = excluded.github_repo,"
+        " default_branch = excluded.default_branch, require_review = excluded.require_review",
+        (Path(repo_path).name, repo_path, github_repo, default_branch, int(require_review)),
     )
     await conn.commit()
-    return await get_project(conn, _last_id(cursor))
+    project = await get_project_by_path(conn, repo_path)
+    assert project is not None
+    return project
+
+
+async def get_project_by_path(conn: aiosqlite.Connection, repo_path: str) -> Project | None:
+    """依 repo 路徑取得專案，沒有登記過則回傳 None。"""
+    row = await _fetch_one(conn, "SELECT * FROM projects WHERE repo_path = ?", (repo_path,))
+    return None if row is None else _to_project(row)
 
 
 async def get_project(conn: aiosqlite.Connection, project_id: int) -> Project:
@@ -220,7 +238,7 @@ async def create_task_with_initial_run(
     prompt: str,
     agent_type: str,
     model: str | None,
-    worktree_path: str | None,
+    worktree_path: str | None = None,
 ) -> tuple[Task, Run]:
     """在同一個交易內建立任務與它的 initial run。"""
     now = utc_now()
@@ -308,6 +326,36 @@ async def set_task_session_id(conn: aiosqlite.Connection, task_id: int, session_
     await conn.execute(
         "UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?",
         (session_id, utc_now(), task_id),
+    )
+    await conn.commit()
+
+
+TASK_UPDATABLE_FIELDS = frozenset(
+    {"branch", "worktree_path", "pr_number", "pr_state", "head_sha", "ci_state", "review_state"}
+)
+
+
+async def update_task(conn: aiosqlite.Connection, task_id: int, **fields: Any) -> None:
+    """更新任務的 branch、worktree 或 GitHub 狀態快取欄位。"""
+    unknown = set(fields) - TASK_UPDATABLE_FIELDS
+    if unknown:
+        raise ValueError(f"task fields cannot be updated: {', '.join(sorted(unknown))}")
+    if not fields:
+        return
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    await conn.execute(
+        # 欄位名稱只會來自上面的白名單，不是外部輸入。
+        f"UPDATE tasks SET {assignments}, updated_at = ? WHERE id = ?",
+        (*fields.values(), utc_now(), task_id),
+    )
+    await conn.commit()
+
+
+async def archive_task(conn: aiosqlite.Connection, task_id: int) -> None:
+    """把任務標成已封存。"""
+    now = utc_now()
+    await conn.execute(
+        "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?", (now, now, task_id)
     )
     await conn.commit()
 

@@ -14,6 +14,7 @@ from agent_supervisor.config import Config
 from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
 from agent_supervisor.runner import (
     BudgetExhaustedError,
+    EventWriter,
     NoActiveRunError,
     Runner,
     UnknownAgentError,
@@ -34,20 +35,23 @@ def config(tmp_path: Path) -> Config:
     return Config(data_dir=tmp_path)
 
 
+WORK_DIR = "/work/dir"
+
+
 def make_runner(
     conn: aiosqlite.Connection, config: Config, adapter: FakeAdapter, **kwargs: object
 ) -> Runner:
+    async def prepare(task: db.Task, run: db.Run, record: object) -> None:
+        await db.update_task(conn, task.id, worktree_path=WORK_DIR)
+
+    kwargs.setdefault("prepare", prepare)
     return Runner(conn, {"fake": adapter}, config, **kwargs)  # type: ignore[arg-type]
 
 
-async def start(runner: Runner, tmp_path: Path, prompt: str = "do it") -> db.Run:
+async def start(runner: Runner, conn: aiosqlite.Connection, prompt: str = "do it") -> db.Run:
+    project = await db.upsert_project(conn, "/repos/demo")
     return await runner.start_task(
-        repo_path=str(tmp_path),
-        title="demo",
-        prompt=prompt,
-        agent_type="fake",
-        model=None,
-        cwd=tmp_path,
+        project_id=project.id, title="demo", prompt=prompt, agent_type="fake", model=None
     )
 
 
@@ -57,7 +61,7 @@ async def test_successful_run_records_events_and_usage(
     adapter = FakeAdapter([[session_started(), message("working"), result()]])
     runner = make_runner(conn, config, adapter)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     assert run.exit_status == ExitStatus.SUCCESS
     assert run.ended_at is not None
@@ -78,7 +82,7 @@ async def test_run_end_event_keeps_raw_usage(
     adapter = FakeAdapter([[session_started(), result(usage_raw={"cumulative": 7})]])
     runner = make_runner(conn, config, adapter)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     last_event = (await db.list_events(conn, run.task_id))[-1]
     assert last_event.payload["change"] == "run_ended"
@@ -93,7 +97,7 @@ async def test_session_id_is_saved_as_soon_as_it_is_known(
     adapter = FakeAdapter([[session_started("early"), gate, result(session_id="early")]])
     runner = make_runner(conn, config, adapter)
 
-    run = await start(runner, tmp_path)
+    run = await start(runner, conn)
     await _until(lambda: _session_id(conn, run.task_id), "early")
     still_running = (await db.get_run(conn, run.id)).ended_at is None
     gate.set()
@@ -108,7 +112,7 @@ async def test_stream_without_result_is_an_error(
     adapter = FakeAdapter([[session_started(), message("then nothing")]])
     runner = make_runner(conn, config, adapter)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     assert run.exit_status == ExitStatus.ERROR
     assert run.tokens_in is None
@@ -120,7 +124,7 @@ async def test_adapter_exception_is_an_error_with_detail(
     adapter = FakeAdapter([[session_started(), RuntimeError("agent exploded")]])
     runner = make_runner(conn, config, adapter)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     last_event = (await db.list_events(conn, run.task_id))[-1]
     assert run.exit_status == ExitStatus.ERROR
@@ -133,7 +137,7 @@ async def test_limit_reported_by_adapter_ends_run_as_limit_reached(
     adapter = FakeAdapter([[session_started(), result(ExitStatus.LIMIT_REACHED)]])
     runner = make_runner(conn, config, adapter)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     assert run.exit_status == ExitStatus.LIMIT_REACHED
     assert run.tokens_in == 100
@@ -144,7 +148,7 @@ async def test_stop_ends_run_as_stopped_and_closes_the_adapter(
 ) -> None:
     adapter = FakeAdapter([[session_started(), asyncio.Event(), result()]])
     runner = make_runner(conn, config, adapter)
-    run = await start(runner, tmp_path)
+    run = await start(runner, conn)
     await _until(lambda: _session_id(conn, run.task_id), "session-1")
 
     await runner.stop(run.task_id)
@@ -160,7 +164,7 @@ async def test_stop_without_active_run_is_rejected(
 ) -> None:
     adapter = FakeAdapter([[session_started(), result()]])
     runner = make_runner(conn, config, adapter)
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     with pytest.raises(NoActiveRunError):
         await runner.stop(run.task_id)
@@ -172,7 +176,7 @@ async def test_run_exceeding_time_limit_ends_as_limit_reached(
     adapter = FakeAdapter([[session_started(), asyncio.Event(), result()]])
     runner = make_runner(conn, replace(config, run_timeout_seconds=0.05), adapter)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     assert run.exit_status == ExitStatus.LIMIT_REACHED
     assert adapter.closed_count == 1
@@ -189,7 +193,7 @@ async def test_message_resumes_the_saved_session_with_previous_usage(
         ]
     )
     runner = make_runner(conn, config, adapter)
-    first = await runner.wait((await start(runner, tmp_path)).id)
+    first = await runner.wait((await start(runner, conn)).id)
 
     second = await runner.wait((await runner.send_message(first.task_id, "one more thing")).id)
 
@@ -208,7 +212,7 @@ async def test_message_is_rejected_while_a_run_is_active(
     gate = asyncio.Event()
     adapter = FakeAdapter([[session_started(), gate, result()]])
     runner = make_runner(conn, config, adapter)
-    run = await start(runner, tmp_path)
+    run = await start(runner, conn)
 
     with pytest.raises(db.RunAlreadyActiveError):
         await runner.send_message(run.task_id, "too early")
@@ -227,7 +231,7 @@ async def test_limits_carry_max_turns_and_remaining_budget(
     runner = make_runner(
         conn, replace(config, task_cost_limit_usd=4.0, max_turns_per_run=7), adapter
     )
-    first = await runner.wait((await start(runner, tmp_path)).id)
+    first = await runner.wait((await start(runner, conn)).id)
 
     await runner.wait((await runner.send_message(first.task_id, "more")).id)
 
@@ -243,7 +247,7 @@ async def test_limits_are_omitted_when_adapter_cannot_enforce_them(
     adapter = FakeAdapter([[session_started(), result()]], capabilities=capabilities)
     runner = make_runner(conn, config, adapter)
 
-    await runner.wait((await start(runner, tmp_path)).id)
+    await runner.wait((await start(runner, conn)).id)
 
     assert adapter.calls[0].limits.max_turns is None
     assert adapter.calls[0].limits.max_budget_usd is None
@@ -254,7 +258,7 @@ async def test_message_is_rejected_when_cost_budget_is_exhausted(
 ) -> None:
     adapter = FakeAdapter([[session_started(), result(cost_usd=2.0)]])
     runner = make_runner(conn, replace(config, task_cost_limit_usd=2.0), adapter)
-    first = await runner.wait((await start(runner, tmp_path)).id)
+    first = await runner.wait((await start(runner, conn)).id)
 
     with pytest.raises(BudgetExhaustedError):
         await runner.send_message(first.task_id, "more")
@@ -269,7 +273,7 @@ async def test_message_is_rejected_when_token_budget_is_exhausted(
         [[session_started(), result(tokens_in=900, tokens_out=100, cost_usd=None)]]
     )
     runner = make_runner(conn, replace(config, task_token_limit=1000), adapter)
-    first = await runner.wait((await start(runner, tmp_path)).id)
+    first = await runner.wait((await start(runner, conn)).id)
 
     with pytest.raises(BudgetExhaustedError):
         await runner.send_message(first.task_id, "more")
@@ -282,10 +286,10 @@ async def test_policy_from_config_is_passed_to_the_adapter(
     adapter = FakeAdapter([[session_started(), result()]])
     runner = make_runner(conn, replace(config, permission=policy), adapter)
 
-    await runner.wait((await start(runner, tmp_path)).id)
+    await runner.wait((await start(runner, conn)).id)
 
     assert adapter.calls[0].policy == policy
-    assert adapter.calls[0].cwd == tmp_path
+    assert adapter.calls[0].cwd == Path(WORK_DIR)
 
 
 async def test_unknown_agent_type_is_rejected_before_creating_anything(
@@ -293,14 +297,11 @@ async def test_unknown_agent_type_is_rejected_before_creating_anything(
 ) -> None:
     runner = make_runner(conn, config, FakeAdapter([]))
 
+    project = await db.upsert_project(conn, "/repos/demo")
+
     with pytest.raises(UnknownAgentError):
         await runner.start_task(
-            repo_path=str(tmp_path),
-            title="demo",
-            prompt="x",
-            agent_type="nope",
-            model=None,
-            cwd=tmp_path,
+            project_id=project.id, title="demo", prompt="x", agent_type="nope", model=None
         )
 
     cursor = await conn.execute("SELECT COUNT(*) AS n FROM tasks")
@@ -312,14 +313,14 @@ async def test_finalize_runs_only_after_a_successful_agent_turn(
 ) -> None:
     finalized: list[int] = []
 
-    async def finalize(task: db.Task, run: db.Run) -> None:
+    async def finalize(task: db.Task, run: db.Run, record: object) -> None:
         finalized.append(run.id)
 
     adapter = FakeAdapter(
         [[session_started(), result()], [session_started(), result(ExitStatus.ERROR)]]
     )
     runner = make_runner(conn, config, adapter, finalize=finalize)
-    first = await runner.wait((await start(runner, tmp_path)).id)
+    first = await runner.wait((await start(runner, conn)).id)
     second = await runner.wait((await runner.send_message(first.task_id, "again")).id)
 
     assert finalized == [first.id]
@@ -329,13 +330,13 @@ async def test_finalize_runs_only_after_a_successful_agent_turn(
 async def test_finalize_failure_turns_the_run_into_an_error_but_keeps_usage(
     conn: aiosqlite.Connection, config: Config, tmp_path: Path
 ) -> None:
-    async def finalize(task: db.Task, run: db.Run) -> None:
+    async def finalize(task: db.Task, run: db.Run, record: object) -> None:
         raise RuntimeError("push rejected")
 
     adapter = FakeAdapter([[session_started(), result()]])
     runner = make_runner(conn, config, adapter, finalize=finalize)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     assert run.exit_status == ExitStatus.ERROR
     assert run.tokens_in == 100
@@ -345,13 +346,13 @@ async def test_finalize_failure_turns_the_run_into_an_error_but_keeps_usage(
 async def test_prepare_failure_ends_the_run_as_error_without_starting_the_agent(
     conn: aiosqlite.Connection, config: Config, tmp_path: Path
 ) -> None:
-    async def prepare(task: db.Task, run: db.Run) -> None:
+    async def prepare(task: db.Task, run: db.Run, record: object) -> None:
         raise RuntimeError("worktree failed")
 
     adapter = FakeAdapter([[session_started(), result()]])
     runner = make_runner(conn, config, adapter, prepare=prepare)
 
-    run = await runner.wait((await start(runner, tmp_path)).id)
+    run = await runner.wait((await start(runner, conn)).id)
 
     assert run.exit_status == ExitStatus.ERROR
     assert adapter.calls == []
@@ -362,13 +363,13 @@ async def test_stop_during_finalize_does_not_become_success(
 ) -> None:
     entered = asyncio.Event()
 
-    async def finalize(task: db.Task, run: db.Run) -> None:
+    async def finalize(task: db.Task, run: db.Run, record: object) -> None:
         entered.set()
         await asyncio.Event().wait()
 
     adapter = FakeAdapter([[session_started(), result()]])
     runner = make_runner(conn, config, adapter, finalize=finalize)
-    run = await start(runner, tmp_path)
+    run = await start(runner, conn)
     await entered.wait()
 
     await runner.stop(run.task_id)
@@ -383,7 +384,7 @@ async def test_shutdown_marks_active_runs_as_interrupted(
 ) -> None:
     adapter = FakeAdapter([[session_started(), asyncio.Event(), result()]])
     runner = make_runner(conn, config, adapter)
-    run = await start(runner, tmp_path)
+    run = await start(runner, conn)
     await _until(lambda: _session_id(conn, run.task_id), "session-1")
 
     await runner.shutdown()
@@ -401,7 +402,7 @@ async def test_on_event_callback_receives_each_recorded_event(
         conn, config, adapter, on_event=lambda event_type, payload: seen.append(str(event_type))
     )
 
-    await runner.wait((await start(runner, tmp_path)).id)
+    await runner.wait((await start(runner, conn)).id)
 
     assert seen == ["session_started", "agent_message", "state_change"]
 
@@ -416,3 +417,121 @@ async def _until(read: object, expected: object) -> None:
         # 被觀察的是資料庫裡的值，沒有事件可以等，只能輪詢。
         while await read() != expected:  # type: ignore[operator]  # noqa: ASYNC110
             await asyncio.sleep(0.005)
+
+
+async def test_run_without_a_working_directory_is_an_error(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    async def prepare(task: db.Task, run: db.Run, record: object) -> None:
+        return None
+
+    adapter = FakeAdapter([[session_started(), result()]])
+    runner = make_runner(conn, config, adapter, prepare=prepare)
+
+    run = await runner.wait((await start(runner, conn)).id)
+
+    assert run.exit_status == ExitStatus.ERROR
+    assert adapter.calls == []
+    assert "working directory" in (await db.list_events(conn, run.task_id))[-1].payload["detail"]
+
+
+async def test_events_written_by_a_stage_are_recorded_for_the_run(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    async def finalize(task: db.Task, run: db.Run, record: EventWriter) -> None:
+        await record(EventType.PUSHED, {"branch": "asv/task-1", "head_sha": "abc"})
+
+    adapter = FakeAdapter([[session_started(), result()]])
+    runner = make_runner(conn, config, adapter, finalize=finalize)
+
+    run = await runner.wait((await start(runner, conn)).id)
+
+    events = await db.list_events(conn, run.task_id)
+    assert [event.type for event in events][-2:] == [EventType.PUSHED, EventType.STATE_CHANGE]
+    assert events[-2].run_id == run.id
+    assert events[-2].payload["head_sha"] == "abc"
+
+
+async def test_archive_runs_the_archive_stage_then_marks_the_task(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    archived: list[int] = []
+
+    async def archive(task: db.Task) -> None:
+        archived.append(task.id)
+
+    adapter = FakeAdapter([[session_started(), result()]])
+    runner = make_runner(conn, config, adapter, archive=archive)
+    run = await runner.wait((await start(runner, conn)).id)
+
+    await runner.archive(run.task_id)
+
+    assert archived == [run.task_id]
+    assert (await db.get_task(conn, run.task_id)).archived_at is not None
+    with pytest.raises(db.TaskNotRunnableError):
+        await runner.send_message(run.task_id, "too late")
+
+
+async def test_archive_is_rejected_while_a_run_is_active(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    gate = asyncio.Event()
+    archived: list[int] = []
+
+    async def archive(task: db.Task) -> None:
+        archived.append(task.id)
+
+    adapter = FakeAdapter([[session_started(), gate, result()]])
+    runner = make_runner(conn, config, adapter, archive=archive)
+    run = await start(runner, conn)
+
+    with pytest.raises(db.RunAlreadyActiveError):
+        await runner.archive(run.task_id)
+
+    gate.set()
+    await runner.wait(run.id)
+    assert archived == []
+    assert (await db.get_task(conn, run.task_id)).archived_at is None
+
+
+async def test_task_is_not_archived_when_the_archive_stage_fails(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    async def archive(task: db.Task) -> None:
+        raise RuntimeError("commit hook rejected the changes")
+
+    adapter = FakeAdapter([[session_started(), result()]])
+    runner = make_runner(conn, config, adapter, archive=archive)
+    run = await runner.wait((await start(runner, conn)).id)
+
+    with pytest.raises(RuntimeError, match="commit hook"):
+        await runner.archive(run.task_id)
+
+    assert (await db.get_task(conn, run.task_id)).archived_at is None
+
+
+async def test_message_cannot_start_a_run_while_the_task_is_being_archived(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def archive(task: db.Task) -> None:
+        entered.set()
+        await release.wait()
+
+    adapter = FakeAdapter([[session_started(), result()], [session_started(), result()]])
+    runner = make_runner(conn, config, adapter, archive=archive)
+    run = await runner.wait((await start(runner, conn)).id)
+    archiving = asyncio.create_task(runner.archive(run.task_id))
+    await entered.wait()
+
+    sending = asyncio.create_task(runner.send_message(run.task_id, "racing the archive"))
+    await asyncio.sleep(0.01)
+    release.set()
+    await archiving
+    done, _ = await asyncio.wait({sending})
+
+    assert isinstance(sending.exception(), db.TaskNotRunnableError)
+    assert len(await db.list_runs(conn, run.task_id)) == 1
+    assert done == {sending}

@@ -18,7 +18,9 @@ from agent_supervisor.adapters.base import AgentAdapter, AgentEvent, RunLimits, 
 from agent_supervisor.config import Config
 from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
 
-RunHook = Callable[[db.Task, db.Run], Awaitable[None]]
+EventWriter = Callable[[EventType, dict[str, Any]], Awaitable[None]]
+RunStage = Callable[[db.Task, db.Run, EventWriter], Awaitable[None]]
+ArchiveStage = Callable[[db.Task], Awaitable[None]]
 EventCallback = Callable[[EventType, dict[str, Any]], None]
 
 
@@ -32,6 +34,10 @@ class NoActiveRunError(RuntimeError):
 
 class BudgetExhaustedError(RuntimeError):
     """任務的花費或 token 已達上限，不能再建立 run。"""
+
+
+class NoWorkingDirectoryError(RuntimeError):
+    """準備階段結束後任務仍然沒有工作目錄，agent 無處執行。"""
 
 
 @dataclass
@@ -51,12 +57,16 @@ class _Outcome:
     detail: str | None = None
 
 
-async def _no_hook(task: db.Task, run: db.Run) -> None:
-    """尚未實作的準備與收尾階段（worktree 與發布在任務 2 加入）。"""
+async def _no_stage(task: db.Task, run: db.Run, record: EventWriter) -> None:
+    """什麼都不做的準備或收尾階段。"""
+
+
+async def _no_archive(task: db.Task) -> None:
+    """什麼都不做的封存階段。"""
 
 
 class Runner:
-    """建立、執行、中止 run。"""
+    """建立、執行、中止 run，以及封存任務。"""
 
     def __init__(
         self,
@@ -64,8 +74,9 @@ class Runner:
         adapters: Mapping[str, AgentAdapter],
         config: Config,
         *,
-        prepare: RunHook = _no_hook,
-        finalize: RunHook = _no_hook,
+        prepare: RunStage = _no_stage,
+        finalize: RunStage = _no_stage,
+        archive: ArchiveStage = _no_archive,
         on_event: EventCallback | None = None,
     ) -> None:
         self._conn = conn
@@ -73,34 +84,26 @@ class Runner:
         self._config = config
         self._prepare = prepare
         self._finalize = finalize
+        self._archive = archive
         self._on_event = on_event
         self._jobs: dict[int, _Job] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._creation_lock = asyncio.Lock()
 
     async def start_task(
-        self,
-        *,
-        repo_path: str,
-        title: str,
-        prompt: str,
-        agent_type: str,
-        model: str | None,
-        cwd: Path,
+        self, *, project_id: int, title: str, prompt: str, agent_type: str, model: str | None
     ) -> db.Run:
         """建立任務與它的 initial run，並開始執行。"""
         if agent_type not in self._adapters:
             raise UnknownAgentError(f"no adapter for agent type {agent_type!r}")
         async with self._creation_lock:
-            project = await db.get_or_create_project(self._conn, repo_path)
             task, run = await db.create_task_with_initial_run(
                 self._conn,
-                project_id=project.id,
+                project_id=project_id,
                 title=title,
                 prompt=prompt,
                 agent_type=agent_type,
                 model=model,
-                worktree_path=str(cwd),
             )
             self._launch(task, run)
         return run
@@ -121,6 +124,15 @@ class Runner:
             if job is None or job.work is None or job.work.done():
                 raise NoActiveRunError(f"task {task_id} has no active run")
             await self._cancel(job, ExitStatus.STOPPED)
+
+    async def archive(self, task_id: int) -> None:
+        """封存任務。有 run 在執行時拒絕；封存階段失敗時任務維持未封存。"""
+        async with self._lock_for(task_id):
+            task = await db.get_task(self._conn, task_id)
+            if await db.get_open_run(self._conn, task_id) is not None:
+                raise db.RunAlreadyActiveError(f"task {task_id} has an active run; stop it first")
+            await self._archive(task)
+            await db.archive_task(self._conn, task_id)
 
     async def wait(self, run_id: int) -> db.Run:
         """等指定的 run 結案，回傳結案後的資料。"""
@@ -161,12 +173,16 @@ class Runner:
 
     async def _execute(self, task: db.Task, job: _Job, deadline: float) -> None:
         """執行一個 run 的準備、agent、收尾三段，最後一定會結案。"""
+
+        async def record(event_type: EventType, payload: dict[str, Any]) -> None:
+            await self._write_event(task.id, job.run.id, event_type, payload)
+
         try:
             async with asyncio.timeout_at(deadline):
-                await self._prepare(task, job.run)
+                await self._prepare(task, job.run, record)
                 outcome = await self._run_agent(task, job)
                 if outcome.exit_status is ExitStatus.SUCCESS:
-                    await self._finalize(task, job.run)
+                    await self._finalize(task, job.run, record)
         except TimeoutError:
             outcome = _Outcome(ExitStatus.LIMIT_REACHED, "run exceeded its time limit")
         except asyncio.CancelledError:
@@ -182,9 +198,11 @@ class Runner:
         adapter = self._adapters[task.agent_type]
         capabilities = adapter.capabilities
         current = await db.get_task(self._conn, task.id)
+        if current.worktree_path is None:
+            raise NoWorkingDirectoryError(f"task {task.id} has no working directory")
         stream = adapter.run_turn(
             prompt=job.run.input_text,
-            cwd=Path(current.worktree_path or "."),
+            cwd=Path(current.worktree_path),
             session_id=current.session_id if capabilities.can_resume_session else None,
             model=current.model,
             limits=await self._limits_for(task.id, adapter),

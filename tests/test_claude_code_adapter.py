@@ -29,6 +29,7 @@ from agent_supervisor.adapters.base import (
 from agent_supervisor.adapters.claude_code import ClaudeCodeAdapter, evaluate_tool_call
 from agent_supervisor.enums import EventType, ExitStatus
 
+CWD = Path("/work/tree")
 POLICY = PermissionPolicy(
     tool_rules={"allowed_tools": ["Read", "Write", "Bash"], "denied_commands": ["git push", "gh"]}
 )
@@ -467,7 +468,7 @@ async def test_finished_turn_does_not_interrupt_the_agent() -> None:
     ],
 )
 def test_tool_rules(tool_name: str, tool_input: dict[str, Any], is_allowed: bool) -> None:
-    reason = evaluate_tool_call(tool_name, tool_input, POLICY)
+    reason = evaluate_tool_call(tool_name, tool_input, POLICY, cwd=CWD)
 
     assert (reason is None) is is_allowed
 
@@ -479,8 +480,8 @@ def test_read_only_sandbox_denies_tools_that_can_write(tool_name: str) -> None:
         tool_rules={"allowed_tools": ["Read", "Write", "Edit", "Bash"]},
     )
 
-    assert evaluate_tool_call(tool_name, {"command": "ls"}, policy) is not None
-    assert evaluate_tool_call("Read", {"file_path": "a"}, policy) is None
+    assert evaluate_tool_call(tool_name, {"command": "ls"}, policy, cwd=CWD) is not None
+    assert evaluate_tool_call("Read", {"file_path": "a"}, policy, cwd=CWD) is None
 
 
 def test_capabilities_match_what_was_verified() -> None:
@@ -493,12 +494,12 @@ def test_capabilities_match_what_was_verified() -> None:
 
 
 def test_background_execution_is_denied() -> None:
-    foreground = evaluate_tool_call("Bash", {"command": "pytest -q"}, POLICY)
+    foreground = evaluate_tool_call("Bash", {"command": "pytest -q"}, POLICY, cwd=CWD)
     explicit_foreground = evaluate_tool_call(
-        "Bash", {"command": "pytest -q", "run_in_background": False}, POLICY
+        "Bash", {"command": "pytest -q", "run_in_background": False}, POLICY, cwd=CWD
     )
     background = evaluate_tool_call(
-        "Bash", {"command": "pytest -q", "run_in_background": True}, POLICY
+        "Bash", {"command": "pytest -q", "run_in_background": True}, POLICY, cwd=CWD
     )
 
     assert foreground is None
@@ -515,3 +516,40 @@ async def test_empty_reasoning_and_text_blocks_are_not_recorded() -> None:
     messages = events_of(await harness.run(), EventType.AGENT_MESSAGE)
 
     assert [event.payload for event in messages] == [{"kind": "message", "text": "real"}]
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "path_key", "path", "is_allowed"),
+    [
+        ("Write", "file_path", "/work/tree/src/app.py", True),
+        ("Write", "file_path", "notes.txt", True),
+        ("Write", "file_path", "/work/tree", True),
+        ("Write", "file_path", "/etc/hosts", False),
+        ("Write", "file_path", "/work/tree-other/app.py", False),
+        ("Write", "file_path", "../outside.txt", False),
+        ("Write", "file_path", "/work/tree/../outside.txt", False),
+        ("Edit", "file_path", "/home/someone/.zshrc", False),
+        ("NotebookEdit", "notebook_path", "/elsewhere/nb.ipynb", False),
+        ("Read", "file_path", "/etc/hosts", True),
+    ],
+)
+def test_writing_tools_are_limited_to_the_working_directory(
+    tool_name: str, path_key: str, path: str, is_allowed: bool
+) -> None:
+    policy = PermissionPolicy(
+        tool_rules={"allowed_tools": ["Read", "Write", "Edit", "NotebookEdit"]}
+    )
+
+    reason = evaluate_tool_call(tool_name, {path_key: path}, policy, cwd=CWD)
+
+    assert (reason is None) is is_allowed
+
+
+async def test_write_outside_the_working_directory_is_denied_through_the_hook() -> None:
+    ask = Ask("Write", {"file_path": "/etc/hosts", "content": "x"}, via="hook")
+    harness = Harness([ask, sdk_result()])
+
+    denied = events_of(await harness.run(), EventType.PERMISSION_DENIED)
+
+    assert ask.decision["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "working directory" in denied[0].payload["reason"]
