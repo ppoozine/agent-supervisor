@@ -41,7 +41,7 @@ async def conn(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
 
 
 async def open_run(conn: aiosqlite.Connection, marker: str | None) -> db.Run:
-    project = await db.get_or_create_project(conn, "/repos/demo")
+    project = await db.upsert_project(conn, "/repos/demo")
     task, run = await db.create_task_with_initial_run(
         conn,
         project_id=project.id,

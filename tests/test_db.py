@@ -19,7 +19,7 @@ async def conn(tmp_path: Path) -> AsyncIterator[aiosqlite.Connection]:
 
 
 async def make_task(conn: aiosqlite.Connection) -> tuple[db.Task, db.Run]:
-    project = await db.get_or_create_project(conn, "/repos/demo")
+    project = await db.upsert_project(conn, "/repos/demo")
     return await db.create_task_with_initial_run(
         conn,
         project_id=project.id,
@@ -38,15 +38,42 @@ async def test_schema_has_the_four_tables(conn: aiosqlite.Connection) -> None:
     assert {"projects", "tasks", "runs", "events"} <= names
 
 
-async def test_get_or_create_project_returns_same_row_for_same_path(
+async def test_upsert_project_registers_once_and_updates_settings(
     conn: aiosqlite.Connection,
 ) -> None:
-    first = await db.get_or_create_project(conn, "/repos/demo")
-    second = await db.get_or_create_project(conn, "/repos/demo")
+    first = await db.upsert_project(conn, "/repos/demo")
+    second = await db.upsert_project(
+        conn, "/repos/demo", github_repo="owner/demo", default_branch="trunk", require_review=True
+    )
 
     assert first.id == second.id
     assert first.name == "demo"
-    assert first.require_review is False
+    assert (first.github_repo, first.default_branch, first.require_review) == (None, "main", False)
+    assert (second.github_repo, second.default_branch, second.require_review) == (
+        "owner/demo",
+        "trunk",
+        True,
+    )
+    assert await db.get_project_by_path(conn, "/repos/unknown") is None
+
+
+async def test_update_task_changes_only_whitelisted_fields(conn: aiosqlite.Connection) -> None:
+    task, _ = await make_task(conn)
+
+    await db.update_task(conn, task.id, branch="asv/task-1", pr_number=5, pr_state="open")
+
+    stored = await db.get_task(conn, task.id)
+    assert (stored.branch, stored.pr_number, stored.pr_state) == ("asv/task-1", 5, "open")
+    with pytest.raises(ValueError, match="title"):
+        await db.update_task(conn, task.id, title="renamed")
+
+
+async def test_archive_task_sets_archived_at(conn: aiosqlite.Connection) -> None:
+    task, _ = await make_task(conn)
+
+    await db.archive_task(conn, task.id)
+
+    assert (await db.get_task(conn, task.id)).archived_at is not None
 
 
 async def test_create_task_also_creates_an_open_initial_run(conn: aiosqlite.Connection) -> None:
