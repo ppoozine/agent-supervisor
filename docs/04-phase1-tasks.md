@@ -122,7 +122,7 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 - [ ] 對 sandbox repo 開一個任務，GitHub 上出現一個新的 PR
 - [ ] 對同一個任務再送一則訊息，新的 commit 有被 push 到同一個 PR
 - [ ] 開一個不會產生任何變更的任務，確認沒有開 PR
-- [ ] 同時開兩個任務，兩個 worktree 互不影響
+- [ ] 先後開兩個任務，兩個 worktree 互不影響（階段 1 的 CLI 同時只能執行一個，真正同時要等階段 2）
 - [ ] 封存任務後 worktree 目錄被清掉，branch 還在
 - [ ] 收尾進行中按 Stop，確認沒有繼續 push 或開 PR，run 是 `stopped`
 - [ ] 對已封存的任務送訊息，確認被拒絕

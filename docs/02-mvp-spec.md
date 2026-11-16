@@ -148,7 +148,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 | 階段 | 做什麼 |
 | --- | --- |
 | 建立 | 在資料庫交易內寫入 run。開任務時，任務與它的 `initial` run 在同一個交易內建立，所以不會有「沒有任何 run 的任務」 |
-| 準備 | `initial`：建立 worktree 與 branch。`ci_failure`：抓失敗的 CI log。`user_message`：無 |
+| 準備 | 確保任務有自己的 worktree 與 branch（已經有了就略過，所以只有第一個 run 會真的建立）。`ci_failure` 另外要抓失敗的 CI log |
 | agent 執行 | 透過 adapter 跑一輪，事件寫進 `events` |
 | 收尾 | commit、push、開 PR，見下一節 |
 
@@ -161,15 +161,26 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 
 **每個任務一把鎖。** 建立 run、Stop、封存這三種操作都要先拿到該任務的鎖才能進行，所以封存進行到一半時不會有新的 run 被建立。鎖只存在於 daemon 的記憶體內，搭配資料庫「每個任務最多一個未結束的 run」的約束。
 
+## Worktree 與 branch
+
+| 項目 | 規則 |
+| --- | --- |
+| 位置 | 資料目錄下的 `worktrees/<專案名>/task-<任務編號>`，預設是 `~/.agent-supervisor/worktrees/…` |
+| branch 名稱 | `asv/task-<任務編號>-<標題的英數字>`，最長 60 個字元；標題沒有英數字時只用編號 |
+| 基底 | 先 `git fetch`，再從遠端的預設分支（`origin/<default_branch>`）切出來。不受本機預設分支是否更新影響，也不動使用者自己的工作目錄 |
+| 專案登記 | 記下 repo 路徑、GitHub 的 `owner/name`、預設分支、是否要求 review。GitHub repo 與預設分支可以從 `origin` 自動讀出 |
+
+任務的工作目錄如果不是這個工具建立的 worktree（沒有自己的 branch），準備階段會拒絕執行，封存時也不會去動那個目錄。
+
 ## Run 結束後的收尾
 
 Agent 正常結束這一輪之後，Runner 依序做下面的事。`initial`、`ci_failure`、`user_message` 三種 trigger 都一樣。
 
 收尾是 run 的一部分：全部做完才寫入 `ended_at`，所以收尾期間卡片仍在 Working。
 
-1. worktree 有未 commit 的變更 → 由 supervisor 補一個 commit。
+1. worktree 有未 commit 的變更 → 由 supervisor 補一個 commit，訊息是 `chore(agent): save uncommitted changes from run <run 編號>`。
 2. branch 相對於遠端有新的 commit → push，寫入 `pushed` 事件，並立刻把 `head_sha` 更新為剛 push 的 commit、`ci_state` 設為 `pending`、`review_state` 設為 `none`。這樣不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
-3. 還沒有 PR 且 branch 相對於基底分支有 commit → 開 PR，回填 `pr_number` 並把 `pr_state` 設為 `open`，寫入 `pr_opened` 事件。
+3. 還沒有 PR 且 branch 相對於基底分支有 commit → 開 PR，回填 `pr_number` 並把 `pr_state` 設為 `open`，寫入 `pr_opened` 事件。PR 的標題是任務標題，內容是任務描述加上一行註明來源的文字。
 4. branch 相對於基底分支沒有任何 commit → 不開 PR，卡片進 Needs you（標籤 `No changes`）。
 
 補 commit、push 或開 PR 任何一步失敗時，run 的 `exit_status` 記為 `error`，寫入一筆事件說明原因，卡片進 Needs you。不自動重試。
@@ -402,6 +413,7 @@ Claude Code adapter 的做法與已知限制（實測，細節見 `claude-sdk-no
 
 - 新 session 的 id 由 adapter 事先指定。啟動前先送一筆只有 `process_marker` 的 `session_started`，等 agent 確認 session 建立後才送出帶 id 的那一筆。這樣啟動失敗的 run 不會留下一個不存在的 session 讓之後的 run 去續接。
 - 只載入專案層級的 Claude Code 設定，所以 agent 讀得到目標 repo 的 `CLAUDE.md`，但不受使用者個人的 hooks 與外掛影響。
+- 寫檔與編輯工具的目標路徑必須在任務的 worktree 之內。只比對路徑字串、不解析符號連結，也擋不住透過指令寫到外面。
 - 工具與指令的限制由「工具呼叫前的 hook」落實，它對每一次工具呼叫都會執行。只靠核准回呼不夠：實測發現目標 repo 的專案設定裡若有允許規則，或指令被判定為唯讀（例如 `ls`），呼叫就不會經過核准回呼。核准回呼仍然保留，負責放行需要詢問的呼叫。
 - 目標 repo 專案設定裡的 hooks 也會在 agent 上執行，這是載入專案設定的代價。
 - 拒絕背景執行的指令。一個 run 就是一輪做完；背景指令在這一輪結束時會被終止，agent 卻會回報已經完成。

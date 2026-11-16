@@ -45,7 +45,9 @@ src/agent_supervisor/
   runner.py          # run 的生命週期：建立、準備、agent 執行、收尾、結案
   recovery.py        # 單一 daemon 的鎖、啟動時處理未結束的 run
   cli.py             # 階段 1 的驗證用指令 asv
-  worktree.py        # git worktree 與 branch 管理
+  stages.py          # run 的準備（建 worktree）與收尾（commit、push、開 PR）、封存
+  process.py         # 執行外部指令的共用底層，逾時或取消時終止子程序
+  worktree.py        # git worktree 與 branch 管理（所有 git 指令）
   github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log
   poller.py          # 輪詢 PR / CI / review 狀態
   dispatcher.py      # CI 失敗 → 建立 ci_failure run

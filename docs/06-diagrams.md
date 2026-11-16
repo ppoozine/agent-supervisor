@@ -86,6 +86,7 @@ flowchart LR
 flowchart TD
     subgraph core["協調邏輯（不直接呼叫外部工具）"]
         runner["runner.py"]
+        stagesmod["stages.py<br/>準備、收尾、封存"]
         dispatcher["dispatcher.py"]
         poller["poller.py"]
         status["status.py<br/>純函式"]
@@ -110,8 +111,9 @@ flowchart TD
     dispatcher --> githubmod
     dispatcher --> status
     poller --> githubmod
-    runner --> worktree
-    runner --> githubmod
+    runner --> stagesmod
+    stagesmod --> worktree
+    stagesmod --> githubmod
     runner --> adapters
     worktree --> git
     githubmod --> gh
