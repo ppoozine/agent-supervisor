@@ -179,6 +179,19 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 - [ ] run 執行中在 GitHub 上關閉 PR，確認 run 被中止、之後沒有 push
 - [ ] 自動修復沒有產生新 commit 時，確認停下來進 Needs you
 
+驗證時的操作方式（階段 1 沒有常駐的 daemon，見決策第 74、75 筆）：
+
+```
+uv run asv start --watch --project <sandbox repo 路徑> --title "標題" "任務描述"   # 開任務並持續監看
+uv run asv watch                  # 之前開的任務，重新開始監看
+uv run asv list                   # 另一個終端機：看每個任務推導出的欄位與標籤
+uv run asv stop                   # 另一個終端機：中止所有正在跑的 run，監看繼續
+```
+
+- 監看的程序要一直開著，自動修復才會發生；按 Ctrl-C 會中止正在跑的 run 並結束。
+- 監看期間不能再執行 `start`、`message`、`archive`（同時只允許一個實例）。要送訊息得先按 Ctrl-C，送的時候加 `--watch`。所以「自動修復進行中送訊息被拒」實際看到的是「已有實例在執行」；任務鎖與資料庫約束由單元測試涵蓋。
+- 花費上限與輪詢間隔在設定檔調整，例如 `task_cost_limit_usd = 0.2`、`poll_interval_seconds = 15`。
+
 ---
 
 ## 任務 4 · Codex adapter（階段 1.5）
