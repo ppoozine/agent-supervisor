@@ -22,7 +22,7 @@
 
 ## 目前階段
 
-階段 1（核心迴圈），版本 `0.x`。依 `docs/04-phase1-tasks.md` 一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
+階段 1.5（第二個 adapter），版本 `0.x`。階段 1 的任務 1 到 3 已完成並合併；現在做 `docs/04-phase1-tasks.md` 的任務 4（Codex adapter）。一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
 
 ## 技術選型
 
@@ -41,6 +41,7 @@ src/agent_supervisor/
   adapters/
     base.py          # AgentAdapter Protocol
     claude_code.py   # 用官方 Python Agent SDK 控制 Claude Code
+    codex.py         # 用 subprocess 包 `codex exec` 控制 Codex
   enums.py           # 共用的列舉值：run 的觸發原因、結案結果、事件型別
   runner.py          # run 的生命週期：建立、準備、agent 執行、收尾、結案
   recovery.py        # 單一 daemon 的鎖、啟動時處理未結束的 run

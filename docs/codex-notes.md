@@ -1,6 +1,6 @@
 # Codex 介面調查筆記
 
-最後更新：2026-11-15
+最後更新：2026-11-19
 
 任務 0 的產出（見 `04-phase1-tasks.md`）。只調查，不實作。目的是在階段 1 定下 `AgentAdapter` 介面之前，先知道第二種 agent 的限制。
 
@@ -255,15 +255,53 @@ Codex 用三個獨立的機制控制 agent 能做什麼：
 
 階段 1.5 實作 Codex adapter 時要查的（路線 A）：
 
-1. 被擋下的 `git` 指令為什麼沒有出現在事件流裡，有沒有辦法看到
-2. 檔案變更在事件流裡長什麼樣子（這次的測試只觀察到指令執行的項目）
-3. 用 API key 登入時行為是否相同
+1. 被擋下的 `git` 指令為什麼沒有出現在事件流裡，有沒有辦法看到 → 再次確認不會出現，原因仍未查明
+2. 檔案變更在事件流裡長什麼樣子（這次的測試只觀察到指令執行的項目）→ 已查明，見「階段 1.5 的補充實測」
+3. 用 API key 登入時行為是否相同 → 沒有查（手邊沒有 API key）
 
 階段 5 評估路線 B 時要查的：
 
 4. 事件流為什麼沒有指令與檔案變更的項目，怎麼打開
 5. 中斷後怎麼可靠地停掉子程序
 6. 用底層 client 或直接走協定做逐次核准是否可行
+
+## 階段 1.5 的補充實測
+
+2026-11-19 做的，實作 Codex adapter（任務 4）之前。CLI 仍是本機的 0.167.0，用已儲存的 ChatGPT 登入；在 `agent-supervisor-sandbox` 的臨時 worktree 上測，測完已刪除 worktree 與 branch。每一項只測了一次。
+
+**和先前筆記對照**：`codex exec` 與 `codex exec resume` 的選項和「六個調查項目」寫的一致（重新執行兩者的 `--help` 比對）。事件順序、用量欄位、SIGINT 的行為也和先前的實測一致。沒有發現出入。
+
+| 問題 | 結果 |
+| --- | --- |
+| 開啟連網 | `-c sandbox_workspace_write.network_access=true` 有效：`curl -sI https://example.com` 回 `HTTP/2 200`。不加時網路是關的（先前實測） |
+| 開啟連網後能不能 push | **能。** `git push --dry-run origin HEAD` 成功，結束代碼 0。`.git` 唯讀擋得住 commit，擋不住 push。所以允許連網時，Codex 可以把 branch 上已有的 commit 推出去 |
+| 檔案變更的事件 | 這次 agent 用 shell 指令改檔（`printf ... > a.txt`、`python3 -c ...`），事件流裡是兩個 `command_execution` 項目，沒有出現檔案變更的項目。檔案變更項目的形狀仍然沒有觀察到 |
+| 被擋下的 `git add` | 和先前一樣**沒有出現在事件流裡**：前後的指令項目編號是連續的，中間沒有 `git add` 的項目，只有 agent 最後的文字訊息提到它失敗（無法建立 `index.lock`）。原因沒有查明 |
+| 指令項目的形狀 | `{"type": "command_execution", "command": "/bin/zsh -lc '...'", "aggregated_output": "...", "exit_code": 0, "status": "completed"}`。`item.started` 時 `exit_code` 是 `null`、`status` 是 `in_progress`。指令一律包在 `/bin/zsh -lc` 裡 |
+| 續接時的選項 | `codex exec resume <id> --json -c sandbox_mode="workspace-write" -o <檔案> <prompt>` 可行，在原本的 worktree 執行 |
+| 辨識程序 | `-o <檔案>` 的路徑會出現在 Codex 程序的命令列上，首次執行與續接都有這個選項。把檔名取成唯一的字串，就能用 `pgrep -f` 找到那個程序。`codex` 這個指令會直接換成平台專屬的執行檔，所以啟動它的程序編號就是 Codex 本身 |
+| 程序群組 | Codex 把它啟動的指令放在**各自的程序群組**（子程序的群組編號是它自己，不是 Codex 的）。所以對 Codex 的程序群組送訊號碰不到子程序；要強制終止時得先找出子孫程序 |
+| SIGINT | 指令執行中送出後 1.1 秒結束，結束代碼 1，子程序一起結束，之後沒有再送出任何事件（沒有 `turn.completed`，拿不到用量）。stderr 有一行 `failed to record rollout items: thread ... not found` |
+| 指令規則 | `codex execpolicy check --rules <檔案> -- git push origin main` 對 `prefix_rule(pattern=["git", "push"], decision="forbidden")` 回報 `forbidden`。但同一條規則對 `/bin/zsh -lc 'git push origin main'` 沒有命中，而 agent 實際執行的指令都是後面這種形狀。`codex exec` 執行時會不會把包在 shell 裡的指令拆開來比對，沒有實測 |
+
+同一天稍後補測的：
+
+| 問題 | 結果 |
+| --- | --- |
+| 檔案變更的項目 | 要求用內建的檔案編輯工具時出現了：`{"type": "file_change", "changes": [{"path": "<絕對路徑>", "kind": "update"}, {"path": "...", "kind": "add"}], "status": "in_progress"}`，完成時 `status` 是 `completed`。只有路徑與種類，沒有變更內容 |
+| MCP 工具呼叫的項目 | `{"type": "mcp_tool_call", "server": "...", "tool": "...", "arguments": {...}, "result": {...}, "error": null, "status": "completed"}`。這台機器的 Codex 設定了額外的 MCP 工具，agent 用它讀檔 |
+| 續接時回報的 id | `thread.started` 的 `thread_id` 和傳入的 id 相同 |
+| 從 stdin 送指示 | 最後一個參數給 `-`，指示從 stdin 讀入；首次執行與續接都可行，以連字號開頭的指示也沒問題 |
+| 失敗時的事件 | 指定不存在的模型：先有一筆 `error`（`{"message": ...}`），再一筆 `turn.failed`（`{"error": {"message": ...}}`），結束代碼 1，沒有 `turn.completed` |
+| 推理 token | 一輪的 `output_tokens` 是 509、`reasoning_output_tokens` 是 23。推理 token 有沒有包含在 `output_tokens` 裡無法從這組數字判斷；adapter 的 `tokens_out` 直接用 `output_tokens` |
+
+**沒有查的**：用 API key 登入時行為是否相同（手邊沒有 API key）；`~/.codex/rules/` 下的規則在 `codex exec` 裡實際會不會擋下指令（要改使用者的設定目錄才能測，沒有動）。
+
+**對 adapter 的影響**：
+
+1. `PermissionPolicy.allow_network` 對 Codex 執行的指令可以落實，預設值是允許連網。使用者設定的 MCP 工具（實測 agent 用了一個來讀檔）受不受這個限制沒有驗證。但允許連網時 Codex 擋不住 `git push`，而 `can_gate_tool_calls` 是 `False`，`tool_rules` 裡「拒絕的指令」對 Codex 不生效。這和「push 由 supervisor 執行」的規則有落差，處理方式待決定。
+2. `process_marker` 用 `-o` 的檔名。
+3. 中止用 SIGINT；等不到結束時，先列出子孫程序再逐一強制終止，不能靠程序群組。
 
 ## 出處
 
