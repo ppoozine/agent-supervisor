@@ -11,14 +11,11 @@ from pathlib import Path
 
 import aiosqlite
 
-from agent_supervisor import db, worktree
+from agent_supervisor import ci_log, db, worktree
 from agent_supervisor.config import Config
-from agent_supervisor.enums import EventType
+from agent_supervisor.enums import CiState, EventType, ReviewState, RunTrigger
 from agent_supervisor.github import GitHub
 from agent_supervisor.runner import EventWriter
-
-PENDING = "pending"
-NONE = "none"
 
 
 class StageError(RuntimeError):
@@ -34,7 +31,12 @@ class RunStages:
         self._github = github
 
     async def prepare(self, task: db.Task, run: db.Run, record: EventWriter) -> None:
-        """確保任務有自己的 worktree；已經有了就什麼都不做。"""
+        """確保任務有自己的 worktree；ci_failure run 另外要抓失敗的 CI log。"""
+        await self._ensure_worktree(task)
+        if run.trigger is RunTrigger.CI_FAILURE:
+            await self._load_ci_failure(task, run)
+
+    async def _ensure_worktree(self, task: db.Task) -> None:
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is not None and current.branch is None:
             # 沒有自己的 branch，表示工作目錄不是這個工具建立的 worktree
@@ -51,6 +53,35 @@ class RunStages:
             Path(project.repo_path), path, branch=branch, base_branch=project.default_branch
         )
         await db.update_task(self._conn, current.id, branch=branch, worktree_path=str(path))
+
+    async def _load_ci_failure(self, task: db.Task, run: db.Run) -> None:
+        """抓失敗檢查的 log，整理後寫成這個 run 實際要送給 agent 的內容。"""
+        current = await db.get_task(self._conn, task.id)
+        project = await db.get_project(self._conn, current.project_id)
+        if project.github_repo is None or current.pr_number is None:
+            raise StageError(f"task {current.id} has no pull request to read CI results from")
+        status = await self._github.get_pull_request_status(project.github_repo, current.pr_number)
+        if status.head_sha != run.source_head_sha:
+            raise StageError("the pull request moved to another commit since CI failed")
+        if not status.failed_checks:
+            # 例如有人在 GitHub 上重跑了失敗的 job：這個 commit 上已經沒有失敗的檢查可以修。
+            raise StageError(
+                f"CI is no longer failing on this commit (now {status.ci_state}); nothing to fix"
+            )
+
+        logs = []
+        for check in status.failed_checks:
+            if check.job_id is None:
+                continue
+            text = await self._github.fetch_job_log(project.github_repo, check.job_id)
+            logs.append(ci_log.CheckLog(check.name, text))
+        if not logs:
+            raise StageError("no CI log is available for the failed checks")
+        without_log = [check.name for check in status.failed_checks if check.job_id is None]
+        prompt = ci_log.build_fix_prompt(
+            status.head_sha, logs, without_log, max_chars=self._config.ci_log_max_chars
+        )
+        await db.set_run_input_text(self._conn, run.id, prompt)
 
     async def finalize(self, task: db.Task, run: db.Run, record: EventWriter) -> None:
         """把 agent 的成果發布出去：補 commit、push、必要時開 PR。"""
@@ -91,7 +122,13 @@ class RunStages:
         await worktree.push(path, task.branch)
         sha = await worktree.head_sha(path)
         # 立刻更新快取：不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
-        await db.update_task(self._conn, task.id, head_sha=sha, ci_state=PENDING, review_state=NONE)
+        await db.update_task(
+            self._conn,
+            task.id,
+            head_sha=sha,
+            ci_state=CiState.PENDING,
+            review_state=ReviewState.NONE,
+        )
         await record(EventType.PUSHED, {"branch": task.branch, "head_sha": sha})
 
     async def _ensure_pull_request(

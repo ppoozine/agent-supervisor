@@ -10,17 +10,18 @@ import pytest
 
 from agent_supervisor import cli, db
 from agent_supervisor.config import Config
-from agent_supervisor.enums import ExitStatus
+from agent_supervisor.enums import CiState, ExitStatus, RunTrigger
+from agent_supervisor.github import FailedCheck
 from agent_supervisor.recovery import InstanceLock
 from tests.conftest import GitRepo
 from tests.fake_adapter import Call, FakeAdapter, message, result, session_started
 from tests.test_recovery import FakeProcessTable, open_run
-from tests.test_stages import FakeGitHub
+from tests.test_stages import FakeGitHub, pr_status
 
 
 @pytest.fixture
 def config(tmp_path: Path) -> Config:
-    return Config(data_dir=tmp_path / "data")
+    return Config(data_dir=tmp_path / "data", poll_interval_seconds=0.02)
 
 
 class Cli:
@@ -240,7 +241,8 @@ async def test_interrupt_signal_stops_the_running_task(asv: Cli) -> None:
     await _until_session(asv.config, "s-1")
 
     os.kill(os.getpid(), signal.SIGINT)
-    code = await running
+    async with asyncio.timeout(5.0):
+        code = await running
 
     assert code == 1
     assert (await asv.runs())[0].exit_status == ExitStatus.STOPPED
@@ -255,7 +257,7 @@ async def test_stop_signals_the_running_instance(asv: Cli, monkeypatch: pytest.M
 
     lock.release()
     assert code == 0
-    assert sent == [(os.getpid(), signal.SIGINT)]
+    assert sent == [(os.getpid(), signal.SIGUSR1)]
 
 
 async def test_stop_without_a_running_instance_reports_an_error(
@@ -368,3 +370,236 @@ async def test_start_fills_in_a_missing_github_repo_for_an_already_registered_pr
     await conn.close()
     assert project is not None
     assert project.github_repo == "someone/detected"
+
+
+async def _until(config: Config, query: str, *params: object) -> tuple[object, ...]:
+    """等到查詢有結果並回傳第一列。用唯讀連線輪詢，避免和 CLI 搶鎖。"""
+    async with asyncio.timeout(10.0):
+        while True:
+            row = await asyncio.to_thread(_query_one, config.db_path, query, params)
+            if row is not None:
+                return row
+            await asyncio.sleep(0.01)
+
+
+def _query_one(db_path: Path, query: str, params: tuple[object, ...]) -> tuple[object, ...] | None:
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.OperationalError:  # 資料庫檔案還不存在
+        return None
+    try:
+        return conn.execute(query, params).fetchone()  # type: ignore[no-any-return]
+    except sqlite3.OperationalError:  # 資料表還沒建立，或正在寫入
+        return None
+    finally:
+        conn.close()
+
+
+async def test_watch_feeds_a_ci_failure_back_and_ends_up_ready_to_merge(
+    asv: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    await asv.register()
+    adapter = FakeAdapter(
+        [
+            [session_started(), write_file("calc.py", "broken\n"), result()],
+            [write_file("calc.py", "fixed\n"), result()],
+        ]
+    )
+    watching = asyncio.create_task(
+        asv(adapter, "start", "--agent", "fake", "--watch", "--project", str(asv.repo.path), "go")
+    )
+
+    # 第一個 commit 的 CI 失敗
+    (first_sha,) = await _until(
+        asv.config, "SELECT head_sha FROM tasks WHERE pr_number IS NOT NULL"
+    )
+    asv.github.job_logs[11] = "pytest\tRun tests\t2026-01-01T00:00:00.0Z assert broken == fixed\n"
+    asv.github.statuses[41] = pr_status(
+        str(first_sha), CiState.FAILED, failed_checks=(FailedCheck("pytest", 11),)
+    )
+    # 自動修復 push 了第二個 commit，這次 CI 通過
+    # 這段期間替身的 GitHub 仍回報舊的 commit，Poller 不能把它寫回去。
+    (second_sha,) = await _until(
+        asv.config, "SELECT head_sha FROM tasks WHERE head_sha != ?", first_sha
+    )
+    await asyncio.sleep(0.2)
+    assert (await asv.task()).head_sha == second_sha
+    asv.github.statuses[41] = pr_status(str(second_sha), CiState.PASSED)
+    await _until(asv.config, "SELECT 1 FROM tasks WHERE ci_state = 'passed'")
+
+    os.kill(os.getpid(), signal.SIGINT)
+    assert await watching == 0
+
+    runs = await asv.runs()
+    assert [(run.trigger, run.exit_status) for run in runs] == [
+        (RunTrigger.INITIAL, ExitStatus.SUCCESS),
+        (RunTrigger.CI_FAILURE, ExitStatus.SUCCESS),
+    ]
+    assert "assert broken == fixed" in adapter.calls[1].prompt
+    assert adapter.calls[1].session_id == "session-1"
+    task = await asv.task()
+    assert (task.ci_fix_attempts, task.last_handled_head_sha) == (1, first_sha)
+
+    capsys.readouterr()
+    assert await asv(FakeAdapter([]), "list") == 0
+    assert "[Ready to merge / Ready]" in capsys.readouterr().out
+
+
+async def test_stop_signal_stops_the_run_but_keeps_watching(asv: Cli) -> None:
+    await asv.register()
+    adapter = FakeAdapter([[session_started("s-1"), asyncio.Event(), result()]])
+    watching = asyncio.create_task(
+        asv(adapter, "start", "--agent", "fake", "--watch", "--project", str(asv.repo.path), "go")
+    )
+    await _until_session(asv.config, "s-1")
+
+    os.kill(os.getpid(), signal.SIGUSR1)
+    await _until(asv.config, "SELECT 1 FROM runs WHERE exit_status = 'stopped'")
+    await asyncio.sleep(0.1)
+
+    assert not watching.done()
+    os.kill(os.getpid(), signal.SIGINT)
+    assert await watching == 0
+
+
+async def test_watch_alone_resumes_monitoring_existing_tasks(asv: Cli) -> None:
+    await asv.register()
+    await asv.start(FakeAdapter([[session_started(), write_file("a.txt"), result()]]))
+    head_sha = (await asv.task()).head_sha
+    assert head_sha is not None
+    asv.github.statuses[41] = pr_status(head_sha, CiState.PASSED)
+
+    watching = asyncio.create_task(asv(FakeAdapter([]), "watch"))
+    await _until(asv.config, "SELECT 1 FROM tasks WHERE ci_state = 'passed'")
+    os.kill(os.getpid(), signal.SIGINT)
+
+    assert await watching == 0
+
+
+async def test_list_shows_the_derived_column_for_each_task(
+    asv: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    await asv.register()
+    await asv.start(FakeAdapter([[session_started(), write_file("a.txt"), result()]]))
+    await asv.start(FakeAdapter([[session_started("s-2"), result(session_id="s-2")]]))
+    capsys.readouterr()
+
+    code = await asv(FakeAdapter([]), "list")
+
+    lines = capsys.readouterr().out.splitlines()
+    assert code == 0
+    assert "task 1  [In review / CI running]  PR #41  ci=pending  fixes=0/3" in lines[0]
+    assert "task 2  [Needs you / No changes]  no PR" in lines[1]
+
+
+async def _deliver(signal_number: int) -> None:
+    """對自己送一個訊號，並等事件迴圈把它交給處理函式。"""
+    os.kill(os.getpid(), signal_number)
+    await asyncio.sleep(0.02)
+
+
+def _signal_during_recovery(monkeypatch: pytest.MonkeyPatch, signal_number: int) -> None:
+    """讓訊號在啟動時的復原階段送到，那時還沒有任何 run。"""
+
+    async def recover(conn: object, processes: object) -> None:
+        await _deliver(signal_number)
+
+    monkeypatch.setattr(cli, "_recover", recover)
+
+
+async def test_interrupt_during_startup_creates_no_run(
+    asv: Cli, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    await asv.register()
+    _signal_during_recovery(monkeypatch, signal.SIGINT)
+    adapter = FakeAdapter([[session_started(), asyncio.Event(), result()]])
+
+    async with asyncio.timeout(5.0):
+        code = await asv.start(adapter)
+
+    assert code == 1
+    assert adapter.calls == []
+    assert _query_one(asv.config.db_path, "SELECT 1 FROM tasks", ()) is None
+    assert "interrupted before the run was created" in capsys.readouterr().err
+
+
+async def test_interrupt_while_the_run_is_being_created_still_stops_it(
+    asv: Cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await asv.register()
+    create_task_with_initial_run = db.create_task_with_initial_run
+
+    async def interrupted_while_creating(*args: object, **kwargs: object) -> object:
+        await _deliver(signal.SIGINT)
+        return await create_task_with_initial_run(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(db, "create_task_with_initial_run", interrupted_while_creating)
+    adapter = FakeAdapter([[session_started(), asyncio.Event(), result()]])
+
+    async with asyncio.timeout(5.0):
+        code = await asv.start(adapter)
+
+    assert code == 1
+    assert (await asv.runs())[0].exit_status == ExitStatus.STOPPED
+
+
+async def test_stop_request_during_startup_is_kept_until_the_run_exists(
+    asv: Cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await asv.register()
+    _signal_during_recovery(monkeypatch, signal.SIGUSR1)
+    adapter = FakeAdapter([[session_started(), asyncio.Event(), result()]])
+
+    async with asyncio.timeout(5.0):
+        code = await asv.start(adapter)
+
+    assert code == 1
+    assert (await asv.runs())[0].exit_status == ExitStatus.STOPPED
+
+
+async def test_interrupt_does_not_wait_for_a_github_query_that_hangs(asv: Cli) -> None:
+    await asv.register()
+    await asv.start(FakeAdapter([[session_started(), write_file("a.txt"), result()]]))
+    asv.github.statuses[41] = pr_status("any", CiState.PASSED)
+    querying = asyncio.Event()
+
+    async def hang() -> None:
+        querying.set()
+        await asyncio.Event().wait()
+
+    asv.github.on_status_query = hang
+    watching = asyncio.create_task(asv(FakeAdapter([]), "watch"))
+
+    async with asyncio.timeout(5.0):
+        await querying.wait()
+        os.kill(os.getpid(), signal.SIGINT)
+        assert await watching == 0
+
+
+async def test_interrupt_during_dispatch_starts_no_further_fix_runs(
+    asv: Cli, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await asv.register()
+    for number, name in ((41, "a.txt"), (42, "b.txt")):
+        await asv.start(FakeAdapter([[session_started(), write_file(name), result()]]))
+        head_sha = (await asv.task(number - 40)).head_sha
+        asv.github.job_logs[number] = "pytest\tRun tests\t2026-01-01T00:00:00.0Z boom\n"
+        asv.github.statuses[number] = pr_status(
+            str(head_sha), CiState.FAILED, failed_checks=(FailedCheck("pytest", number),)
+        )
+    start_ci_fix = cli.Runner.start_ci_fix
+
+    async def interrupted_after_starting(runner: cli.Runner, task_id: int) -> db.Run | None:
+        run = await start_ci_fix(runner, task_id)
+        await _deliver(signal.SIGINT)
+        return run
+
+    monkeypatch.setattr(cli.Runner, "start_ci_fix", interrupted_after_starting)
+
+    async with asyncio.timeout(5.0):
+        code = await asv(FakeAdapter([[asyncio.Event(), result()]]), "watch")
+
+    assert code == 0
+    assert [run.trigger for run in await asv.runs(1)][-1] == RunTrigger.CI_FAILURE
+    assert [run.trigger for run in await asv.runs(2)] == [RunTrigger.INITIAL]
+    assert (await asv.task(2)).ci_fix_attempts == 0

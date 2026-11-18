@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from agent_supervisor.github import GitHub, GitHubError
+from agent_supervisor.enums import CiState, PrState, ReviewState
+from agent_supervisor.github import FailedCheck, GitHub, GitHubError, parse_pull_request_status
 from agent_supervisor.process import CommandResult
 
 
@@ -127,5 +128,179 @@ async def test_create_raises_when_the_new_pull_request_cannot_be_found() -> None
         )
 
 
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        pytest.param("<html>502 Bad Gateway</html>", id="not-json"),
+        pytest.param("[]", id="not-an-object"),
+        pytest.param(json.dumps({"state": "OPEN"}), id="missing-field"),
+        pytest.param(json.dumps({"state": "DRAFT", "headRefOid": "abc"}), id="unknown-pr-state"),
+    ],
+)
+async def test_unexpected_status_output_is_reported_as_a_github_error(stdout: str) -> None:
+    gh = FakeGh([ok(stdout)])
+
+    with pytest.raises(GitHubError, match="gh pr view returned unexpected output"):
+        await GitHub(gh).get_pull_request_status("owner/repo", 7)
+
+
+async def test_unexpected_pull_request_list_output_is_reported_as_a_github_error() -> None:
+    gh = FakeGh([ok(json.dumps([{"number": 12}]))])
+
+    with pytest.raises(GitHubError, match="gh pr list returned unexpected output"):
+        await GitHub(gh).find_pull_request("owner/repo", "asv/task-1")
+
+
+async def test_gh_that_cannot_be_started_is_reported_as_a_github_error() -> None:
+    async def missing_gh(
+        args: Sequence[str], *, cwd: Path | None = None, input_text: str | None = None
+    ) -> CommandResult:
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    with pytest.raises(GitHubError, match="gh could not be started"):
+        await GitHub(missing_gh).get_pull_request_status("owner/repo", 7)
+
+
 def _option(call: list[str], name: str) -> str:
     return call[call.index(name) + 1]
+
+
+def check_run(conclusion: str | None, *, status: str = "COMPLETED", name: str = "job") -> dict:  # type: ignore[type-arg]
+    return {
+        "__typename": "CheckRun",
+        "name": name,
+        "status": status,
+        "conclusion": conclusion or "",
+        "detailsUrl": "https://github.com/o/r/actions/runs/900/job/123",
+    }
+
+
+def status_context(state: str, *, context: str = "external/ci") -> dict:  # type: ignore[type-arg]
+    return {"__typename": "StatusContext", "context": context, "state": state, "targetUrl": ""}
+
+
+def pr_view(*checks: dict, state: str = "OPEN", review: str = "") -> dict:  # type: ignore[type-arg]
+    return {
+        "state": state,
+        "headRefOid": "abc123",
+        "reviewDecision": review,
+        "statusCheckRollup": list(checks),
+    }
+
+
+PASS, FAIL = check_run("SUCCESS"), check_run("FAILURE")
+
+
+@pytest.mark.parametrize(
+    ("checks", "expected"),
+    [
+        pytest.param([], CiState.NONE, id="no-checks"),
+        pytest.param([PASS], CiState.PASSED, id="success"),
+        pytest.param([check_run("NEUTRAL")], CiState.PASSED, id="neutral"),
+        pytest.param([check_run("SKIPPED")], CiState.PASSED, id="skipped"),
+        pytest.param([FAIL], CiState.FAILED, id="failure"),
+        pytest.param([check_run("CANCELLED")], CiState.FAILED, id="cancelled"),
+        pytest.param([check_run("TIMED_OUT")], CiState.FAILED, id="timed-out"),
+        pytest.param([check_run("STARTUP_FAILURE")], CiState.FAILED, id="startup-failure"),
+        pytest.param([check_run("ACTION_REQUIRED")], CiState.PENDING, id="action-required"),
+        pytest.param([check_run("STALE")], CiState.PENDING, id="stale"),
+        pytest.param([check_run("SOMETHING_NEW")], CiState.PENDING, id="unknown-conclusion"),
+        pytest.param([check_run(None, status="IN_PROGRESS")], CiState.PENDING, id="in-progress"),
+        pytest.param([check_run(None, status="QUEUED")], CiState.PENDING, id="queued"),
+        pytest.param([status_context("SUCCESS")], CiState.PASSED, id="status-success"),
+        pytest.param([status_context("PENDING")], CiState.PENDING, id="status-pending"),
+        pytest.param([status_context("EXPECTED")], CiState.PENDING, id="status-expected"),
+        pytest.param([status_context("FAILURE")], CiState.FAILED, id="status-failure"),
+        pytest.param([status_context("ERROR")], CiState.FAILED, id="status-error"),
+        pytest.param([PASS, check_run("SKIPPED")], CiState.PASSED, id="pass-and-skip"),
+        pytest.param([PASS, FAIL], CiState.FAILED, id="pass-and-fail"),
+        pytest.param(
+            [FAIL, check_run(None, status="IN_PROGRESS")],
+            CiState.PENDING,
+            id="failed-but-others-still-running",
+        ),
+        pytest.param(
+            [FAIL, status_context("PENDING")], CiState.PENDING, id="failed-status-pending"
+        ),
+    ],
+)
+def test_checks_map_to_ci_state(checks: list[dict], expected: CiState) -> None:  # type: ignore[type-arg]
+    assert parse_pull_request_status(pr_view(*checks)).ci_state == expected
+
+
+@pytest.mark.parametrize(
+    ("state", "review", "pr_state", "review_state"),
+    [
+        ("OPEN", "", PrState.OPEN, ReviewState.NONE),
+        ("OPEN", "REVIEW_REQUIRED", PrState.OPEN, ReviewState.NONE),
+        ("OPEN", "APPROVED", PrState.OPEN, ReviewState.APPROVED),
+        ("OPEN", "CHANGES_REQUESTED", PrState.OPEN, ReviewState.CHANGES_REQUESTED),
+        ("MERGED", "APPROVED", PrState.MERGED, ReviewState.APPROVED),
+        ("CLOSED", "", PrState.CLOSED, ReviewState.NONE),
+    ],
+)
+def test_pull_request_and_review_states(
+    state: str, review: str, pr_state: PrState, review_state: ReviewState
+) -> None:
+    parsed = parse_pull_request_status(pr_view(state=state, review=review))
+
+    assert (parsed.pr_state, parsed.review_state, parsed.head_sha) == (
+        pr_state,
+        review_state,
+        "abc123",
+    )
+
+
+def test_failed_checks_carry_the_job_id_when_they_come_from_actions() -> None:
+    parsed = parse_pull_request_status(
+        pr_view(
+            PASS,
+            check_run("FAILURE", name="pytest"),
+            check_run("CANCELLED", name="slow"),
+            status_context("FAILURE", context="external/lint"),
+        )
+    )
+
+    assert parsed.failed_checks == (
+        FailedCheck("pytest", 123),
+        FailedCheck("slow", 123),
+        FailedCheck("external/lint", None),
+    )
+
+
+async def test_status_is_fetched_with_one_gh_call() -> None:
+    gh = FakeGh([ok(json.dumps(pr_view(FAIL, review="APPROVED")))])
+
+    status = await GitHub(gh).get_pull_request_status("owner/repo", 7)
+
+    assert status.ci_state == CiState.FAILED
+    assert gh.calls == [
+        [
+            "gh",
+            "pr",
+            "view",
+            "7",
+            "--repo",
+            "owner/repo",
+            "--json",
+            "state,headRefOid,reviewDecision,statusCheckRollup",
+        ]
+    ]
+
+
+async def test_job_log_prefers_the_failed_steps() -> None:
+    gh = FakeGh([ok("job\tstep\tboom\n")])
+
+    log = await GitHub(gh).fetch_job_log("owner/repo", 123)
+
+    assert log == "job\tstep\tboom\n"
+    assert gh.calls[0][-3:] == ["--job", "123", "--log-failed"]
+
+
+async def test_job_log_falls_back_to_the_full_log_for_a_cancelled_job() -> None:
+    gh = FakeGh([ok(""), ok("job\tstep\tThe operation was canceled.\n")])
+
+    log = await GitHub(gh).fetch_job_log("owner/repo", 123)
+
+    assert "canceled" in log
+    assert gh.calls[1][-3:] == ["--job", "123", "--log"]

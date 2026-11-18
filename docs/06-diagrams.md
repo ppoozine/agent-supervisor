@@ -62,7 +62,7 @@ flowchart LR
     agents -->|"改檔與 commit"| worktrees
     runner -->|"push 與開 PR"| github
     poller -->|"查詢狀態"| github
-    dispatcher -->|"抓失敗的 CI log"| github
+    runner -->|"修復前抓失敗的 CI log"| github
     api --- db
     runner --- db
     poller --- db
@@ -90,6 +90,7 @@ flowchart TD
         dispatcher["dispatcher.py"]
         poller["poller.py"]
         status["status.py<br/>純函式"]
+        cilog["ci_log.py<br/>純函式"]
         apimod["api/"]
     end
 
@@ -108,10 +109,12 @@ flowchart TD
     apimod --> runner
     apimod --> status
     dispatcher --> runner
-    dispatcher --> githubmod
     dispatcher --> status
     poller --> githubmod
+    poller --> runner
     runner --> stagesmod
+    runner --> status
+    stagesmod --> cilog
     stagesmod --> worktree
     stagesmod --> githubmod
     runner --> adapters

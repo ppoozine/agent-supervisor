@@ -535,3 +535,48 @@ async def test_message_cannot_start_a_run_while_the_task_is_being_archived(
     assert isinstance(sending.exception(), db.TaskNotRunnableError)
     assert len(await db.list_runs(conn, run.task_id)) == 1
     assert done == {sending}
+
+
+async def test_stop_right_after_the_run_is_created_still_closes_it(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    adapter = FakeAdapter([[asyncio.Event(), result()]])
+    runner = make_runner(conn, config, adapter)
+
+    run = await start(runner, conn)
+    await runner.stop(run.task_id)  # 負責這個 run 的工作還沒開始執行
+
+    assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.STOPPED
+
+
+async def test_run_that_is_already_being_cancelled_is_not_cancelled_again(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    """中止到一半、等待的人自己被取消之後再中止一次，不能打斷第一次取消的收拾。"""
+    cleaning_up, may_finish = asyncio.Event(), asyncio.Event()
+    cleaned_up: list[bool] = []
+
+    async def prepare(task: db.Task, run: db.Run, record: EventWriter) -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cleaning_up.set()
+            await may_finish.wait()
+            cleaned_up.append(True)
+            raise
+
+    runner = make_runner(conn, config, FakeAdapter([]), prepare=prepare)
+    run = await start(runner, conn)
+
+    async with asyncio.timeout(5.0):
+        first_stop = asyncio.create_task(runner.stop(run.task_id))
+        await cleaning_up.wait()
+        first_stop.cancel()
+        await asyncio.wait({first_stop})
+        second_stop = asyncio.create_task(runner.stop(run.task_id))
+        await asyncio.sleep(0.02)
+        may_finish.set()
+        await second_stop
+
+    assert cleaned_up == [True]
+    assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.STOPPED

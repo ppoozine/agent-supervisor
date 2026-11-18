@@ -34,6 +34,8 @@ class Config:
     task_token_limit: int = 20_000_000
     max_turns_per_run: int = 50
     run_timeout_seconds: float = 1800.0
+    poll_interval_seconds: float = 30.0
+    ci_log_max_chars: int = 20_000
     permission: PermissionPolicy = field(
         default_factory=lambda: PermissionPolicy(tool_rules=DEFAULT_TOOL_RULES)
     )

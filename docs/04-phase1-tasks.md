@@ -1,6 +1,6 @@
 # 04 · 階段 1 與 1.5 任務單
 
-最後更新：2026-11-15
+最後更新：2026-11-19
 
 一個事前調查、階段 1 的三個任務與階段 1.5 的一個任務。一次只給 Claude Code 一個，做完、測試通過、合併後再給下一個。每個任務都讓它先提計畫，確認後再動手。
 
@@ -84,7 +84,7 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 - [ ] run 執行中把程式強制關掉再啟動，確認遺留的 agent 程序已經不在、該 run 變成 `interrupted`
 - [ ] daemon 已經在跑的時候再啟動一個，確認第二個直接結束
 - [ ] 對一個被中止的任務再送訊息，確認續接的是同一個 session
-- [ ] 按 Stop 後確認 agent 與它啟動的子程序都真的結束了
+- [x] 按 Stop 後確認 agent 與它啟動的子程序都真的結束了
 - [ ] 把執行時間上限調得很低，確認 run 被中止，`exit_status` 是 `limit_reached`
 - [ ] 任務有 run 在執行時再觸發一次，確認被拒絕
 
@@ -165,19 +165,32 @@ AgentAdapter 介面，列出介面或 capabilities 需要調整的地方。
 ```
 
 **我要驗證的事**（也就是階段 1 的完成標準）
-- [ ] 在 sandbox 開一個會讓測試失敗的任務，不介入，最後 CI 變綠燈
-- [ ] 開一個修不好的任務，確認 3 次後停下來，欄位顯示 Needs you
-- [ ] 把花費上限調得很低，確認超過後停下來
-- [ ] 同一個 commit 的 CI 失敗沒有被重複餵回
+- [x] 在 sandbox 開一個會讓測試失敗的任務，不介入，最後 CI 變綠燈
+- [x] 開一個修不好的任務，確認 3 次後停下來，欄位顯示 Needs you
+- [x] 把花費上限調得很低，確認超過後停下來
+- [x] 同一個 commit 的 CI 失敗沒有被重複餵回
 - [ ] 過長的 CI log 有被截取，沒有整份塞給 agent
-- [ ] sandbox 專案不要求 review 時，CI 綠燈的卡片顯示 Ready to merge
-- [ ] 在 GitHub 上合併 PR 後，卡片離開看板
-- [ ] CI 失敗時按 Stop，確認之後沒有自動開新的 run
+- [x] sandbox 專案不要求 review 時，CI 綠燈的卡片顯示 Ready to merge
+- [x] 在 GitHub 上合併 PR 後，卡片離開看板
+- [x] CI 失敗時按 Stop，確認之後沒有自動開新的 run
 - [ ] 自動修復進行中送訊息，確認被拒絕，沒有兩個 run 同時執行
 - [ ] 第三次自動修復把 CI 修好，確認卡片到 Ready to merge 而不是 Needs you
 - [ ] Reviewer 要求修改且 CI 失敗時，確認沒有自動修復，卡片在 Needs you
 - [ ] run 執行中在 GitHub 上關閉 PR，確認 run 被中止、之後沒有 push
-- [ ] 自動修復沒有產生新 commit 時，確認停下來進 Needs you
+- [x] 自動修復沒有產生新 commit 時，確認停下來進 Needs you
+
+驗證時的操作方式（階段 1 沒有常駐的 daemon，見決策第 74、75 筆）：
+
+```
+uv run asv start --watch --project <sandbox repo 路徑> --title "標題" "任務描述"   # 開任務並持續監看
+uv run asv watch                  # 之前開的任務，重新開始監看
+uv run asv list                   # 另一個終端機：看每個任務推導出的欄位與標籤
+uv run asv stop                   # 另一個終端機：中止所有正在跑的 run，監看繼續
+```
+
+- 監看的程序要一直開著，自動修復才會發生；按 Ctrl-C 會中止正在跑的 run 並結束。
+- 監看期間不能再執行 `start`、`message`、`archive`（同時只允許一個實例）。要送訊息得先按 Ctrl-C，送的時候加 `--watch`。所以「自動修復進行中送訊息被拒」實際看到的是「已有實例在執行」；任務鎖與資料庫約束由單元測試涵蓋。
+- 花費上限與輪詢間隔在設定檔調整，例如 `task_cost_limit_usd = 0.2`、`poll_interval_seconds = 15`。
 
 ---
 

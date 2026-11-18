@@ -48,10 +48,11 @@ src/agent_supervisor/
   stages.py          # run 的準備（建 worktree）與收尾（commit、push、開 PR）、封存
   process.py         # 執行外部指令的共用底層，逾時或取消時終止子程序
   worktree.py        # git worktree 與 branch 管理（所有 git 指令）
-  github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log
+  github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log；檢查結果換算成 ci_state
+  ci_log.py          # 清理與截取 CI log、組出修復指示（純函式）
   poller.py          # 輪詢 PR / CI / review 狀態
-  dispatcher.py      # CI 失敗 → 建立 ci_failure run
-  status.py          # 由狀態推導看板欄位（純函式）
+  dispatcher.py      # 找出符合自動修復條件的任務，交給 Runner 建立 ci_failure run
+  status.py          # 自動修復條件、看板欄位與狀態標籤（純函式）
   db.py              # schema 與查詢
   config.py
   api/               # FastAPI 路由與 SSE

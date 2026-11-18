@@ -1,6 +1,6 @@
 # 02 · MVP 規格
 
-最後更新：2026-11-15
+最後更新：2026-11-18
 
 ## 目標與範圍
 
@@ -95,7 +95,20 @@ SQLite，四張表。
 
 有檢查失敗但其他檢查還在跑時仍是 `pending`，等全部結束才一次處理。
 
-GitHub 上其他的檢查結果（取消、逾時、略過、需要人工核准等）要對應到哪一個值，以及同一個檢查重跑時取哪一次，在任務 3 查過 `gh` 實際回傳的資料後補進這裡。
+單一檢查的結果如何歸類（任務 3 實測 `gh pr view --json statusCheckRollup` 後決定）：
+
+| GitHub 回報的結果 | 歸類 | 說明 |
+| --- | --- | --- |
+| 還沒結束（`QUEUED`、`IN_PROGRESS` 等）；外部狀態 `PENDING`、`EXPECTED` | 還沒結束 | |
+| `SUCCESS`、`NEUTRAL`、`SKIPPED` | 通過 | 被略過的 job 不該擋住合併 |
+| `FAILURE`、`TIMED_OUT`、`STARTUP_FAILURE`；外部狀態 `FAILURE`、`ERROR` | 失敗 | |
+| `CANCELLED` | 失敗 | 實測 job 超過 `timeout-minutes` 回報的也是這個值，agent 修得了；手動取消會多花一次修復，由修復次數上限擋住 |
+| `ACTION_REQUIRED`、`STALE`、沒看過的新值 | 還沒結束 | 等人核准或等重跑，agent 修不了；卡片停在 In review |
+
+- 檢查有兩種形狀：GitHub Actions 的檢查（有 `status` 與 `conclusion`）與外部服務回報的狀態（只有 `state`）。兩種都要處理。
+- 同一個檢查重跑時，GitHub 只回報最新的一次，不需要自己挑。
+- `ci_state` 為 `none` 時卡片停在 In review（標籤 `No checks`），不算通過。剛 push 完的幾秒內檢查清單也是空的，算通過的話卡片會短暫跳到 Ready to merge。
+- 實測過的結果：成功、失敗、略過、手動取消、逾時、還在跑、外部狀態 `PENDING`、沒有任何檢查、重跑。其餘是依列舉值的意思歸類。
 
 ### runs
 
@@ -103,7 +116,7 @@ GitHub 上其他的檢查結果（取消、逾時、略過、需要人工核准�
 | --- | --- |
 | `id`, `task_id` | 主鍵與所屬任務 |
 | `trigger` | `initial` / `ci_failure` / `user_message` |
-| `input_text` | 這次送給 agent 的內容 |
+| `input_text` | 這次送給 agent 的內容。`ci_failure` run 建立時先寫一段簡短說明，準備階段抓到 CI log 後更新成完整內容 |
 | `source_head_sha` | `ci_failure` run 針對的 commit；其他 trigger 為 `NULL` |
 | `started_at`, `ended_at` | 執行區間 |
 | `exit_status` | `success` / `error` / `stopped` / `limit_reached` / `interrupted` |
@@ -140,6 +153,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 | `tool_call`、`command` | 一次工具呼叫寫成兩筆事件，`phase` 分別是 `started` 與 `finished`，用 `tool_use_id` 對應。因為事件只能新增，結果不能回填到第一筆 |
 | `permission_denied` | 被拒絕的工具、完整輸入、拒絕的原因 |
 | `state_change` | run 結案時寫一筆，`change` 為 `run_ended`，帶 `exit_status`、`detail` 與 `usage_raw` |
+| `ci_status` | Poller 查到的四個狀態欄位與 PR 編號。只在其中任何一個有變化時才寫，不是每次輪詢都寫 |
 
 ## Run 的生命週期
 
@@ -204,7 +218,7 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 | Working | 有 run 正在執行；或符合「自動修復條件」、正在等 Dispatcher 接手 |
 | Needs you | 最後一次 run 的 `exit_status` 不是 `success`；或最後一次 run 是 `success` 但任務沒有 PR（agent 沒有產生任何變更）；或 CI 失敗但不符合自動修復條件（含已達修復上限、累計花費超過上限）；或 reviewer 要求修改 |
 | Ready to merge | PR 開著、CI 通過，且（專案不要求 review，或 review 已核准） |
-| In review | 其餘 PR 開著的情況：CI 進行中，或 CI 通過但還在等審查 |
+| In review | 其餘 PR 開著的情況：CI 進行中、PR 上沒有任何 CI 檢查，或 CI 通過但還在等審查 |
 
 ## 自動修復條件與防迴圈
 
@@ -229,7 +243,16 @@ Dispatcher 發現任務符合條件時：
 2. 交易結束後才抓 `source_head_sha` 上所有失敗檢查的 log，只擷取失敗的片段
 3. 把 run 交給 Runner 續接同一個 session
 
-抓 log 失敗時，這個 run 以 `error` 結束，卡片進 Needs you；已經扣掉的修復次數不退回。
+抓 log 是 run 準備階段的一部分，所以這時 run 已經存在、可以被 Stop。抓 log 失敗時，這個 run 以 `error` 結束，卡片進 Needs you；已經扣掉的修復次數不退回。
+
+**送給 agent 的 CI log**
+
+- 只有 GitHub Actions 的檢查抓得到 log（`gh run view --job <編號> --log-failed`）。被取消或逾時的 job 沒有「失敗的步驟」，改抓整份 log。
+- 外部服務回報的失敗抓不到 log，只在指示裡列出名稱。所有失敗的檢查都抓不到 log 時，run 以 `error` 結束。
+- 抓 log 之前會再確認 PR 的最新 commit 仍是 `source_head_sha`，已經不是就以 `error` 結束。
+- log 會去掉每行的時間戳與顏色碼，每個失敗的檢查只保留尾段。所有檢查合計的長度上限是全域設定（暫定 20,000 個字元），平均分給各個檢查。實測一個吵雜的失敗步驟有 3,008 行、320 KB，真正的錯誤在最後兩行。
+
+**修復次數的歸零**：使用者送訊息時，在建立 run 的同一個交易內把 `ci_fix_attempts` 歸零。人已經介入，自動修復重新有 3 次機會；花費與 token 上限仍然有效。
 
 使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務的花費或 token 已達上限時，目前的實作會拒絕新的訊息（這一點尚未定案，見 `03-decisions.md`）。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
 
@@ -338,7 +361,11 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | Poller | 每 30 秒查詢有開 PR 的任務，把 `pr_state`、`head_sha`、`ci_state`、`review_state` 當成一組一起更新 |
 | Dispatcher | 發現符合自動修復條件的任務就建立 `ci_failure` run，抓 log，交給 Runner |
 
-**Poller 不能用舊資料蓋掉新資料。** 查詢 GitHub 需要時間，期間 supervisor 可能剛 push 了新的 commit。Poller 查詢前記下任務當時的 `head_sha`，要寫入時如果資料庫裡的 `head_sha` 已經不一樣，就丟掉這次結果，等下一輪再查。
+Poller 用一次 `gh pr view` 查回四個欄位。Review 狀態照 GitHub 回報的寫入：收尾時 push 之後會先設成 `none`，但 GitHub 預設不會因為新的 commit 撤銷核准，所以下一次輪詢可能又變回 `approved`。單一任務查詢失敗不影響其他任務，下一輪再查。
+
+**所有模組共用一條資料庫連線，寫入由一把鎖排隊。** Dispatcher 的交易包含好幾步，沒有鎖的話 Runner 同時間的寫入會把它切成兩半。
+
+**Poller 不能用舊資料蓋掉新資料。** 查詢 GitHub 需要時間，期間 supervisor 可能剛 push 了新的 commit。Poller 查詢前記下任務當時的 `head_sha`，要寫入時如果資料庫裡的 `head_sha` 已經不一樣，就丟掉這次結果，等下一輪再查。反過來，GitHub 的資料也可能落後剛 push 的 commit：回報的最新 commit 如果是這個任務更早 push 過的，同樣丟掉。這一項只在 GitHub 回報 PR 還開著時適用：合併或關閉的 PR 最新 commit 不會再變，停在舊的 commit 是正常的，照常寫入。
 
 Runner 只透過 adapter 介面控制 agent。介面以「一輪對話」為單位：送一段輸入，拿回一串事件，最後一筆是這一輪的結果。
 
