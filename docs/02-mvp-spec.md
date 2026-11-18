@@ -286,7 +286,7 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 - `PermissionPolicy` 是通用的資料結構，包含三部分：
   - sandbox 等級：唯讀，或只能寫工作目錄
   - 是否允許連網
-  - 工具與指令的限制：內容由各 adapter 自行解讀，因為每種 agent 的機制不同（Claude Code 是工具清單，Codex 是指令前綴規則）
+  - 工具與指令的限制：內容由各 adapter 自行解讀，因為每種 agent 的機制不同（Claude Code 是工具清單與拒絕的指令前綴；Codex 的非互動模式無法逐次攔截，這一部分對它不生效）
 - 各 adapter 把政策轉成該 agent 自己的設定，並盡力落實。不同 agent 能做到的程度不同：有的可以逐次攔截工具呼叫，有的只有 sandbox 等級。做不到的部分由 `capabilities` 表明。
 - Adapter 攔得到的清單外動作一律拒絕，並寫入 `permission_denied` 事件。階段 1 不做「跳出來問人」。
 - Agent 不需要 push、開 PR 或呼叫 `gh`，這些由 supervisor 做，允許清單不含這些動作。
@@ -447,7 +447,17 @@ Claude Code adapter 的做法與已知限制（實測，細節見 `claude-sdk-no
 - 沒有內容的訊息與思考區塊不寫入事件。**sandbox 等級與是否允許連網目前無法落實**：SDK 的 sandbox 設定實測沒有生效，原因未查明，所以 `can_restrict_network` 為否。唯讀等級以拒絕所有會寫入的工具來近似。
 - 被中止或逾時的 run 沒有用量。它的花費會算進同一個 session 的下一個 run，因為花費是用累計值相減得到的。
 
-Codex adapter 已知的限制（實測）：被中止的 run 拿不到用量；有些被 sandbox 擋下的指令不會出現在事件流裡，所以 Codex 任務的 `permission_denied` 事件不完整。
+Codex adapter 的做法與已知限制（實測，細節見 `codex-notes.md`）：
+
+- 每一輪啟動一個 `codex exec` 程序，續接用 `codex exec resume <id>`，一律在任務的 worktree 執行。指示從 stdin 送入。
+- sandbox 等級與是否允許連網每次都明確傳入，不依賴使用者自己的 Codex 設定。實測這兩項對 Codex 執行的指令有效，所以 `can_restrict_network` 為是。但使用者自己的 Codex 設定仍會被載入：實測 agent 用了使用者設定的 MCP 工具讀檔，這類工具受不受 sandbox 與連網限制**沒有驗證**。
+- session id 要等 Codex 啟動後才知道，所以 `process_marker` 另外用一個啟動前就確定的字串：放在「最後一則訊息」輸出檔的檔名裡，會出現在命令列上。這個檔案放在 worktree 之外，用完就刪。
+- 用量是整個 session 的累計值，adapter 用 `previous_usage` 相減成單輪。不回報花費，`cost_usd` 一律為 `NULL`。被中止的 run 拿不到用量。
+- 沒有輪數與花費上限，`can_limit_turns` 與 `can_limit_budget` 為否；只靠任務的 token 上限、修復次數與執行時間上限擋住。
+- 中止時送 SIGINT，Codex 會連同它啟動的子程序一起結束；等不到就強制終止它與所有子孫程序。
+- **無法逐次攔截指令**，`can_gate_tool_calls` 為否，政策裡「拒絕的指令」對 Codex 不生效，也不會有 `permission_denied` 事件。允許連網時 Codex 可以自己執行 `git push`（實測 `--dry-run` 成功）；它在 worktree 裡無法 commit，所以能推出去的只有 supervisor 已經 commit 的內容。這是已知限制，見 `03-decisions.md` 第 89 筆。
+- 有些被 sandbox 擋下的指令（例如 `git add`）不會出現在事件流裡，只在 agent 的文字訊息中提到，所以 Codex 任務的稽核紀錄不完整。
+- 指令執行寫成 `command` 事件；檔案變更、MCP 工具等其他項目寫成 `tool_call` 事件，內容原樣保留。種類是 `error` 的項目也寫成 `tool_call`，標示為失敗。
 
 ## 開發順序
 

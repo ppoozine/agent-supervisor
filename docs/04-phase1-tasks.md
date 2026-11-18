@@ -222,11 +222,11 @@ uv run asv stop                   # 另一個終端機：中止所有正在跑�
 - [ ] 任務 1 到 3 的驗證清單中不依賴特定能力的項目，用 Codex 重跑一次
 - [ ] Codex 支援的能力各自通過對應的驗證
 - [ ] Codex 做不到的能力，確認降級行為符合規格（例如只靠執行時間上限擋下）
-- [ ] Codex 任務的指令與檔案變更有寫進 `events`
-- [ ] 按 Stop 後確認 Codex 啟動的子程序真的結束了
+- [x] Codex 任務的指令與檔案變更有寫進 `events`
+- [x] 按 Stop 後確認 Codex 啟動的子程序真的結束了
 - [ ] 把 token 上限調得很低，確認 Codex 任務超過後不再自動修復
-- [ ] Runner、Dispatcher、Poller 沒有因為 agent 種類而分支
-- [ ] Codex 做不到的事（如果有）在 `capabilities` 與規格裡都有寫明
+- [x] Runner、Dispatcher、Poller 沒有因為 agent 種類而分支
+- [x] Codex 做不到的事（如果有）在 `capabilities` 與規格裡都有寫明
 
 ---
 

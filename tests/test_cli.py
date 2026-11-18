@@ -603,3 +603,7 @@ async def test_interrupt_during_dispatch_starts_no_further_fix_runs(
     assert [run.trigger for run in await asv.runs(1)][-1] == RunTrigger.CI_FAILURE
     assert [run.trigger for run in await asv.runs(2)] == [RunTrigger.INITIAL]
     assert (await asv.task(2)).ci_fix_attempts == 0
+
+
+def test_both_agent_types_can_be_selected() -> None:
+    assert set(cli.default_adapters()) == {"claude_code", "codex"}
