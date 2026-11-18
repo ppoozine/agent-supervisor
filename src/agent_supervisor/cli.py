@@ -28,6 +28,7 @@ import aiosqlite
 from agent_supervisor import db, status, worktree
 from agent_supervisor.adapters.base import AgentAdapter
 from agent_supervisor.adapters.claude_code import ClaudeCodeAdapter
+from agent_supervisor.adapters.codex import CodexAdapter
 from agent_supervisor.config import DEFAULT_CONFIG_PATH, Config, load_config
 from agent_supervisor.dispatcher import Dispatcher
 from agent_supervisor.enums import EventType, ExitStatus
@@ -77,17 +78,21 @@ def main() -> None:
     """命令列進入點。"""
     # 監看模式會跑很久，輸出導到檔案或管線時也要逐行寫出，不然看不到進度。
     sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
-    adapters: dict[str, AgentAdapter] = {DEFAULT_AGENT: ClaudeCodeAdapter()}
     code = asyncio.run(
         run(
             sys.argv[1:],
             config=None,
-            adapters=adapters,
+            adapters=default_adapters(),
             processes=SystemProcessTable(),
             github=GitHub(),
         )
     )
     sys.exit(code)
+
+
+def default_adapters() -> dict[str, AgentAdapter]:
+    """`--agent` 可以指定的 agent 種類與各自的 adapter。"""
+    return {DEFAULT_AGENT: ClaudeCodeAdapter(), "codex": CodexAdapter()}
 
 
 async def run(
@@ -141,7 +146,7 @@ def _build_parser() -> argparse.ArgumentParser:
     start.add_argument("prompt", help="給 agent 的任務描述")
     start.add_argument("--project", type=_absolute_path, required=True, help="本機 repo 的路徑")
     start.add_argument("--title", help="任務標題（預設取描述的開頭）")
-    start.add_argument("--agent", default=DEFAULT_AGENT, help="agent 種類")
+    start.add_argument("--agent", default=DEFAULT_AGENT, help="agent 種類：claude_code 或 codex")
     start.add_argument("--model", help="模型（預設用 agent 的預設值）")
     start.add_argument("--watch", action="store_true", help=WATCH_HELP)
 
