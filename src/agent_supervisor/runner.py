@@ -7,13 +7,13 @@ asyncio 工作負責，全部做完才結案。Runner 只透過 `AgentAdapter` �
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
-from agent_supervisor import db
+from agent_supervisor import db, status
 from agent_supervisor.adapters.base import AgentAdapter, AgentEvent, RunLimits, TurnResult
 from agent_supervisor.config import Config
 from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
@@ -48,7 +48,9 @@ class _Job:
     work: asyncio.Task[None] | None = None
     result: TurnResult | None = None
     cancel_status: ExitStatus = ExitStatus.INTERRUPTED
+    is_cancel_requested: bool = False
     is_closing: bool = False
+    has_started: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,25 @@ class Runner:
             self._launch(task, run)
         return run
 
+    async def start_ci_fix(self, task_id: int) -> db.Run | None:
+        """任務符合自動修復條件時建立 ci_failure run 並開始執行；不符合就回傳 None。
+
+        條件在任務鎖與資料庫交易內重新檢查，所以不會和使用者的訊息搶同一個 session。
+        失敗的 CI log 在準備階段才抓，那時 run 已經存在、可以被中止。
+        """
+        limits = status.Limits(self._config.task_cost_limit_usd, self._config.task_token_limit)
+        async with self._lock_for(task_id):
+            run = await db.create_ci_failure_run(
+                self._conn,
+                task_id,
+                "CI failed; the failure log is fetched before the agent starts.",
+                condition=lambda snapshot: status.can_auto_fix(snapshot, limits),
+            )
+            if run is None:
+                return None
+            self._launch(await db.get_task(self._conn, task_id), run)
+        return run
+
     async def stop(self, task_id: int) -> None:
         """中止任務正在執行的 run，等它完全停下並結案後才返回。"""
         async with self._lock_for(task_id):
@@ -124,6 +145,19 @@ class Runner:
             if job is None or job.work is None or job.work.done():
                 raise NoActiveRunError(f"task {task_id} has no active run")
             await self._cancel(job, ExitStatus.STOPPED)
+
+    async def stop_if_running(self, task_id: int) -> bool:
+        """任務有 run 在執行就中止它，回傳是否真的中止了一個 run。"""
+        try:
+            await self.stop(task_id)
+        except NoActiveRunError:
+            return False
+        return True
+
+    async def stop_all(self) -> None:
+        """中止所有正在執行的 run。"""
+        for task_id in list(self._jobs):
+            await self.stop_if_running(task_id)
 
     async def archive(self, task_id: int) -> None:
         """封存任務。有 run 在執行時拒絕；封存階段失敗時任務維持未封存。"""
@@ -158,8 +192,13 @@ class Runner:
 
     async def _cancel(self, job: _Job, status: ExitStatus) -> None:
         assert job.work is not None
+        # 工作還沒開始執行就被取消的話，它連結案的程式都不會跑到，run 會永遠不結束。
+        await job.has_started.wait()
         # 已經在結案的 run 不能再取消，否則結案寫到一半會被打斷、run 永遠不結束。
-        if not job.is_closing:
+        # 已經要求過取消的也不能再取消一次：第二次會打斷 agent 正在做的收拾。
+        # 上一個呼叫端等到一半自己被取消時（例如程序正要結束），就會有第二個人來中止。
+        if not job.is_closing and not job.is_cancel_requested:
+            job.is_cancel_requested = True
             job.cancel_status = status
             job.work.cancel()
         await asyncio.wait({job.work})
@@ -177,6 +216,7 @@ class Runner:
         async def record(event_type: EventType, payload: dict[str, Any]) -> None:
             await self._write_event(task.id, job.run.id, event_type, payload)
 
+        job.has_started.set()
         try:
             async with asyncio.timeout_at(deadline):
                 await self._prepare(task, job.run, record)
@@ -200,8 +240,10 @@ class Runner:
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is None:
             raise NoWorkingDirectoryError(f"task {task.id} has no working directory")
+        # 準備階段可能改寫了這次要送的內容（ci_failure run 的 CI log），所以重新讀取。
+        run = await db.get_run(self._conn, job.run.id)
         stream = adapter.run_turn(
-            prompt=job.run.input_text,
+            prompt=run.input_text,
             cwd=Path(current.worktree_path),
             session_id=current.session_id if capabilities.can_resume_session else None,
             model=current.model,

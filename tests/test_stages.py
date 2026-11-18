@@ -9,19 +9,58 @@ import pytest
 
 from agent_supervisor import db, worktree
 from agent_supervisor.config import Config
-from agent_supervisor.enums import EventType
-from agent_supervisor.github import GitHubError, PullRequest
+from agent_supervisor.enums import (
+    CiState,
+    EventType,
+    ExitStatus,
+    PrState,
+    ReviewState,
+    RunTrigger,
+)
+from agent_supervisor.github import FailedCheck, GitHubError, PullRequest, PullRequestStatus
 from agent_supervisor.stages import RunStages, StageError
 from tests.conftest import GitRepo
 
 
+def pr_status(
+    head_sha: str,
+    ci_state: CiState = CiState.PASSED,
+    *,
+    pr_state: PrState = PrState.OPEN,
+    review_state: ReviewState = ReviewState.NONE,
+    failed_checks: tuple[FailedCheck, ...] = (),
+) -> PullRequestStatus:
+    """建立一組 Poller 會查到的狀態。"""
+    return PullRequestStatus(pr_state, head_sha, ci_state, review_state, failed_checks)
+
+
 class FakeGitHub:
-    """假的 GitHub：記住開過的 PR，可以設定下一次開 PR 失敗。"""
+    """假的 GitHub：記住開過的 PR，可以設定下一次開 PR 失敗。
+
+    `statuses` 是各 PR 目前的狀態（以 PR 編號為鍵），`job_logs` 是各 job 的 log。
+    `on_status_query` 會在查詢狀態「回傳之前」被呼叫，用來模擬查詢期間發生的事。
+    """
 
     def __init__(self) -> None:
         self.pull_requests: dict[str, PullRequest] = {}
         self.created: list[dict[str, str]] = []
         self.fail_next_create = False
+        self.statuses: dict[int, PullRequestStatus] = {}
+        self.job_logs: dict[int, str] = {}
+        self.on_status_query: Any = None
+
+    async def get_pull_request_status(self, repo: str, number: int) -> PullRequestStatus:
+        if number not in self.statuses:
+            raise GitHubError(f"gh pr view failed: no pull request {number}")
+        status = self.statuses[number]
+        if self.on_status_query is not None:
+            await self.on_status_query()
+        return status
+
+    async def fetch_job_log(self, repo: str, job_id: int) -> str:
+        if job_id not in self.job_logs:
+            raise GitHubError(f"gh run view failed: no log for job {job_id}")
+        return self.job_logs[job_id]
 
     async def find_pull_request(self, repo: str, branch: str) -> PullRequest | None:
         return self.pull_requests.get(branch)
@@ -300,3 +339,77 @@ async def test_archive_leaves_a_directory_that_is_not_a_task_worktree_alone(scen
     assert (scene.repo.path / "users-own-work.txt").exists()
     assert scene.repo.git("status", "--porcelain") == "?? users-own-work.txt"
     assert scene.repo.git("log", "--oneline").count("\n") == 0
+
+
+async def ci_failure_run(scene: Scene, head_sha: str) -> db.Run:
+    """把情境推進到「PR 開著、CI 在 head_sha 上失敗」，並建立對應的 ci_failure run。"""
+    await scene.prepare()
+    await db.finish_run(scene.conn, scene.run.id, ExitStatus.SUCCESS)
+    await db.update_task(scene.conn, scene.task.id, pr_number=7, pr_state="open", head_sha=head_sha)
+    return await db.create_run(
+        scene.conn, scene.task.id, RunTrigger.CI_FAILURE, "placeholder", head_sha
+    )
+
+
+async def test_prepare_for_a_ci_failure_puts_the_failed_log_into_the_run_input(
+    scene: Scene,
+) -> None:
+    run = await ci_failure_run(scene, "abc123")
+    scene.github.statuses[7] = pr_status(
+        "abc123",
+        CiState.FAILED,
+        failed_checks=(FailedCheck("pytest", 11), FailedCheck("external/lint", None)),
+    )
+    scene.github.job_logs[11] = "pytest\tRun tests\t2026-01-01T00:00:00.0Z AssertionError: boom\n"
+
+    await scene.stages.prepare(scene.task, run, scene.record)
+
+    prompt = (await db.get_run(scene.conn, run.id)).input_text
+    assert "abc123" in prompt
+    assert "## Failed check: pytest" in prompt
+    assert "AssertionError: boom" in prompt
+    assert "2026-01-01T" not in prompt
+    assert "external/lint" in prompt
+
+
+async def test_prepare_for_a_ci_failure_fails_when_no_log_can_be_fetched(scene: Scene) -> None:
+    run = await ci_failure_run(scene, "abc123")
+    scene.github.statuses[7] = pr_status(
+        "abc123", CiState.FAILED, failed_checks=(FailedCheck("pytest", 11),)
+    )
+
+    with pytest.raises(GitHubError, match="no log for job 11"):
+        await scene.stages.prepare(scene.task, run, scene.record)
+
+
+async def test_prepare_for_a_ci_failure_fails_when_only_external_checks_failed(
+    scene: Scene,
+) -> None:
+    run = await ci_failure_run(scene, "abc123")
+    scene.github.statuses[7] = pr_status(
+        "abc123", CiState.FAILED, failed_checks=(FailedCheck("external/lint", None),)
+    )
+
+    with pytest.raises(StageError, match="no CI log"):
+        await scene.stages.prepare(scene.task, run, scene.record)
+
+
+async def test_prepare_for_a_ci_failure_fails_when_the_pull_request_moved_on(
+    scene: Scene,
+) -> None:
+    run = await ci_failure_run(scene, "abc123")
+    scene.github.statuses[7] = pr_status("def456", CiState.PENDING)
+
+    with pytest.raises(StageError, match="another commit"):
+        await scene.stages.prepare(scene.task, run, scene.record)
+
+
+async def test_prepare_for_a_ci_failure_fails_clearly_when_ci_is_no_longer_failing(
+    scene: Scene,
+) -> None:
+    """有人在 GitHub 上重跑了失敗的 job：同一個 commit 上已經沒有失敗的檢查。"""
+    run = await ci_failure_run(scene, "abc123")
+    scene.github.statuses[7] = pr_status("abc123", CiState.PENDING)
+
+    with pytest.raises(StageError, match="no longer failing on this commit"):
+        await scene.stages.prepare(scene.task, run, scene.record)

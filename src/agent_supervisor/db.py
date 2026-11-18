@@ -3,10 +3,16 @@
 不變量由資料庫本身保證：
 - 每個任務同時最多一個未結束的 run（部分唯一索引）
 - `events` 只能新增，不能修改或刪除（trigger）
+
+所有模組共用一條連線，所以每一筆寫入都要先拿到該連線的寫入鎖：
+否則一方的 commit 會把另一方做到一半的交易切開。
 """
 
 import asyncio
 import json
+import weakref
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,7 +20,7 @@ from typing import Any
 
 import aiosqlite
 
-from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
+from agent_supervisor.enums import EventType, ExitStatus, PrState, RunTrigger
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -83,7 +89,11 @@ CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events
 BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 """
 
-FINISHED_PR_STATES = ("merged", "closed")
+FINISHED_PR_STATES = (PrState.MERGED, PrState.CLOSED)
+
+_write_locks: weakref.WeakKeyDictionary[aiosqlite.Connection, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 class NotFoundError(LookupError):
@@ -173,6 +183,34 @@ class TaskUsage:
     is_complete: bool
 
 
+@dataclass(frozen=True)
+class TaskSnapshot:
+    """推導看板欄位與自動修復條件所需的全部資料。"""
+
+    task: Task
+    require_review: bool
+    last_run: Run | None
+    usage: TaskUsage
+
+    @property
+    def has_open_run(self) -> bool:
+        """任務是否有 run 正在執行。未結束的 run 一定是最後一個。"""
+        return self.last_run is not None and self.last_run.ended_at is None
+
+
+@asynccontextmanager
+async def _transaction(conn: aiosqlite.Connection) -> AsyncIterator[None]:
+    """拿到連線的寫入鎖後執行一個交易：正常離開就 commit，否則 rollback。"""
+    lock = _write_locks.setdefault(conn, asyncio.Lock())
+    async with lock:
+        try:
+            yield
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+
+
 def utc_now() -> str:
     """目前的 UTC 時間，ISO 8601 字串。"""
     return datetime.now(UTC).isoformat(timespec="milliseconds")
@@ -203,14 +241,14 @@ async def upsert_project(
     require_review: bool = False,
 ) -> Project:
     """登記一個本機 repo；已登記過就更新它的設定。"""
-    await conn.execute(
-        "INSERT INTO projects (name, repo_path, github_repo, default_branch, require_review)"
-        " VALUES (?, ?, ?, ?, ?)"
-        " ON CONFLICT(repo_path) DO UPDATE SET github_repo = excluded.github_repo,"
-        " default_branch = excluded.default_branch, require_review = excluded.require_review",
-        (Path(repo_path).name, repo_path, github_repo, default_branch, int(require_review)),
-    )
-    await conn.commit()
+    async with _transaction(conn):
+        await conn.execute(
+            "INSERT INTO projects (name, repo_path, github_repo, default_branch, require_review)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(repo_path) DO UPDATE SET github_repo = excluded.github_repo,"
+            " default_branch = excluded.default_branch, require_review = excluded.require_review",
+            (Path(repo_path).name, repo_path, github_repo, default_branch, int(require_review)),
+        )
     project = await get_project_by_path(conn, repo_path)
     assert project is not None
     return project
@@ -242,7 +280,7 @@ async def create_task_with_initial_run(
 ) -> tuple[Task, Run]:
     """在同一個交易內建立任務與它的 initial run。"""
     now = utc_now()
-    try:
+    async with _transaction(conn):
         task_cursor = await conn.execute(
             "INSERT INTO tasks (project_id, title, prompt, agent_type, model, worktree_path,"
             " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -254,10 +292,6 @@ async def create_task_with_initial_run(
             (task_id, RunTrigger.INITIAL, prompt, now),
         )
         run_id = _last_id(run_cursor)
-        await conn.commit()
-    except BaseException:
-        await conn.rollback()
-        raise
     return await get_task(conn, task_id), await get_run(conn, run_id)
 
 
@@ -268,21 +302,134 @@ async def create_run(
     input_text: str,
     source_head_sha: str | None = None,
 ) -> Run:
-    """為既有任務建立一個 run；任務不可執行或已有未結束的 run 時拒絕。"""
-    task = await get_task(conn, task_id)
-    if task.archived_at is not None or task.pr_state in FINISHED_PR_STATES:
-        raise TaskNotRunnableError(f"task {task_id} is archived or its PR is finished")
+    """為既有任務建立一個 run；任務不可執行或已有未結束的 run 時拒絕。
+
+    使用者送訊息代表人已經介入，所以同一個交易內把自動修復次數歸零。
+    """
     try:
-        cursor = await conn.execute(
-            "INSERT INTO runs (task_id, trigger, input_text, source_head_sha, started_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (task_id, trigger, input_text, source_head_sha, utc_now()),
-        )
-        await conn.commit()
+        async with _transaction(conn):
+            task = await get_task(conn, task_id)
+            if task.archived_at is not None or task.pr_state in FINISHED_PR_STATES:
+                raise TaskNotRunnableError(f"task {task_id} is archived or its PR is finished")
+            run_id = await _insert_run(conn, task_id, trigger, input_text, source_head_sha)
+            if trigger is RunTrigger.USER_MESSAGE:
+                await conn.execute(
+                    "UPDATE tasks SET ci_fix_attempts = 0, updated_at = ? WHERE id = ?",
+                    (utc_now(), task_id),
+                )
     except aiosqlite.IntegrityError as error:
-        await conn.rollback()
         raise RunAlreadyActiveError(f"task {task_id} already has an active run") from error
-    return await get_run(conn, _last_id(cursor))
+    return await get_run(conn, run_id)
+
+
+async def create_ci_failure_run(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    input_text: str,
+    *,
+    condition: Callable[[TaskSnapshot], bool],
+) -> Run | None:
+    """條件成立時建立一個 ci_failure run，並記下已處理的 commit、把修復次數加一。
+
+    重新檢查條件、建立 run、更新兩個防迴圈欄位都在同一個交易內；
+    條件不成立時什麼都不寫，回傳 None。
+    """
+    async with _transaction(conn):
+        snapshot = await get_snapshot(conn, task_id)
+        if not condition(snapshot):
+            return None
+        head_sha = snapshot.task.head_sha
+        run_id = await _insert_run(conn, task_id, RunTrigger.CI_FAILURE, input_text, head_sha)
+        await conn.execute(
+            "UPDATE tasks SET last_handled_head_sha = ?, ci_fix_attempts = ci_fix_attempts + 1,"
+            " updated_at = ? WHERE id = ?",
+            (head_sha, utc_now(), task_id),
+        )
+    return await get_run(conn, run_id)
+
+
+async def set_run_input_text(conn: aiosqlite.Connection, run_id: int, input_text: str) -> None:
+    """在 agent 啟動前補上這次實際要送給它的內容（例如抓到的 CI log）。"""
+    async with _transaction(conn):
+        await conn.execute("UPDATE runs SET input_text = ? WHERE id = ?", (input_text, run_id))
+
+
+async def get_snapshot(conn: aiosqlite.Connection, task_id: int) -> TaskSnapshot:
+    """取得任務目前的快照：任務、專案是否要求 review、最後一個 run、累計用量。"""
+    task = await get_task(conn, task_id)
+    project = await get_project(conn, task.project_id)
+    row = await _fetch_one(
+        conn, "SELECT * FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1", (task_id,)
+    )
+    return TaskSnapshot(
+        task=task,
+        require_review=project.require_review,
+        last_run=None if row is None else _to_run(row),
+        usage=await get_task_usage(conn, task_id),
+    )
+
+
+async def list_snapshots(conn: aiosqlite.Connection) -> list[TaskSnapshot]:
+    """列出所有任務的快照，依任務編號。"""
+    cursor = await conn.execute("SELECT id FROM tasks ORDER BY id")
+    return [await get_snapshot(conn, row["id"]) for row in await cursor.fetchall()]
+
+
+async def list_tasks_with_open_pr(conn: aiosqlite.Connection) -> list[Task]:
+    """列出 PR 開著且未封存的任務，也就是 Poller 要查詢的對象。"""
+    cursor = await conn.execute(
+        "SELECT * FROM tasks WHERE pr_number IS NOT NULL AND pr_state = ?"
+        " AND archived_at IS NULL ORDER BY id",
+        (PrState.OPEN,),
+    )
+    return [Task(**dict(row)) for row in await cursor.fetchall()]
+
+
+async def apply_github_state(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    *,
+    expected_head_sha: str | None,
+    pr_state: str,
+    head_sha: str,
+    ci_state: str,
+    review_state: str,
+) -> bool:
+    """把 Poller 查到的 GitHub 狀態當成一組寫入，回傳是否有變化。
+
+    兩種情況會丟棄這次結果：查詢期間 `head_sha` 被別人改掉（例如剛 push）；
+    或 PR 還開著、GitHub 回報的卻是我們更早 push 過的 commit，表示它的資料還沒跟上最新的 push。
+    PR 已經合併或關閉時不做第二項檢查：它的最新 commit 不會再變，停在舊的 commit 是正常的。
+    有變化才寫一筆 `ci_status` 事件，沒變就什麼都不寫。
+    """
+    new_state = {
+        "pr_state": pr_state,
+        "head_sha": head_sha,
+        "ci_state": ci_state,
+        "review_state": review_state,
+    }
+    async with _transaction(conn):
+        task = await get_task(conn, task_id)
+        if task.head_sha != expected_head_sha:
+            return False
+        is_lagging = (
+            pr_state == PrState.OPEN
+            and head_sha != task.head_sha
+            and await _was_pushed_earlier(conn, task_id, head_sha)
+        )
+        if is_lagging:
+            return False
+        if all(getattr(task, name) == value for name, value in new_state.items()):
+            return False
+        await conn.execute(
+            "UPDATE tasks SET pr_state = ?, head_sha = ?, ci_state = ?, review_state = ?,"
+            " updated_at = ? WHERE id = ?",
+            (pr_state, head_sha, ci_state, review_state, utc_now(), task_id),
+        )
+        await _insert_event(
+            conn, task_id, None, EventType.CI_STATUS, {"pr_number": task.pr_number, **new_state}
+        )
+    return True
 
 
 async def get_task(conn: aiosqlite.Connection, task_id: int) -> Task:
@@ -323,11 +470,11 @@ async def list_open_runs(conn: aiosqlite.Connection) -> list[Run]:
 
 async def set_task_session_id(conn: aiosqlite.Connection, task_id: int, session_id: str) -> None:
     """保存任務的 agent session id。"""
-    await conn.execute(
-        "UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?",
-        (session_id, utc_now(), task_id),
-    )
-    await conn.commit()
+    async with _transaction(conn):
+        await conn.execute(
+            "UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?",
+            (session_id, utc_now(), task_id),
+        )
 
 
 TASK_UPDATABLE_FIELDS = frozenset(
@@ -343,21 +490,21 @@ async def update_task(conn: aiosqlite.Connection, task_id: int, **fields: Any) -
     if not fields:
         return
     assignments = ", ".join(f"{name} = ?" for name in fields)
-    await conn.execute(
-        # 欄位名稱只會來自上面的白名單，不是外部輸入。
-        f"UPDATE tasks SET {assignments}, updated_at = ? WHERE id = ?",
-        (*fields.values(), utc_now(), task_id),
-    )
-    await conn.commit()
+    async with _transaction(conn):
+        await conn.execute(
+            # 欄位名稱只會來自上面的白名單，不是外部輸入。
+            f"UPDATE tasks SET {assignments}, updated_at = ? WHERE id = ?",
+            (*fields.values(), utc_now(), task_id),
+        )
 
 
 async def archive_task(conn: aiosqlite.Connection, task_id: int) -> None:
     """把任務標成已封存。"""
     now = utc_now()
-    await conn.execute(
-        "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?", (now, now, task_id)
-    )
-    await conn.commit()
+    async with _transaction(conn):
+        await conn.execute(
+            "UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?", (now, now, task_id)
+        )
 
 
 async def finish_run(
@@ -370,12 +517,12 @@ async def finish_run(
     cost_usd: float | None = None,
 ) -> bool:
     """把 run 結案。已經結案的 run 不會被改寫，回傳是否真的寫入。"""
-    cursor = await conn.execute(
-        "UPDATE runs SET ended_at = ?, exit_status = ?, tokens_in = ?, tokens_out = ?, cost_usd = ?"
-        " WHERE id = ? AND ended_at IS NULL",
-        (utc_now(), exit_status, tokens_in, tokens_out, cost_usd, run_id),
-    )
-    await conn.commit()
+    async with _transaction(conn):
+        cursor = await conn.execute(
+            "UPDATE runs SET ended_at = ?, exit_status = ?, tokens_in = ?, tokens_out = ?,"
+            " cost_usd = ? WHERE id = ? AND ended_at IS NULL",
+            (utc_now(), exit_status, tokens_in, tokens_out, cost_usd, run_id),
+        )
     return cursor.rowcount == 1
 
 
@@ -387,12 +534,8 @@ async def append_event(
     payload: dict[str, Any],
 ) -> int:
     """新增一筆事件，回傳它的 id。"""
-    cursor = await conn.execute(
-        "INSERT INTO events (task_id, run_id, ts, type, payload) VALUES (?, ?, ?, ?, ?)",
-        (task_id, run_id, utc_now(), str(event_type), json.dumps(payload, ensure_ascii=False)),
-    )
-    await conn.commit()
-    return _last_id(cursor)
+    async with _transaction(conn):
+        return await _insert_event(conn, task_id, run_id, event_type, payload)
 
 
 async def list_events(
@@ -434,6 +577,45 @@ async def get_last_usage_raw(conn: aiosqlite.Connection, task_id: int) -> dict[s
         (task_id, EventType.STATE_CHANGE),
     )
     return None if row is None else json.loads(row["usage_raw"])
+
+
+async def _was_pushed_earlier(conn: aiosqlite.Connection, task_id: int, head_sha: str) -> bool:
+    row = await _fetch_one(
+        conn,
+        "SELECT 1 FROM events WHERE task_id = ? AND type = ?"
+        " AND json_extract(payload, '$.head_sha') = ? LIMIT 1",
+        (task_id, EventType.PUSHED, head_sha),
+    )
+    return row is not None
+
+
+async def _insert_run(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    trigger: RunTrigger,
+    input_text: str,
+    source_head_sha: str | None,
+) -> int:
+    cursor = await conn.execute(
+        "INSERT INTO runs (task_id, trigger, input_text, source_head_sha, started_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (task_id, trigger, input_text, source_head_sha, utc_now()),
+    )
+    return _last_id(cursor)
+
+
+async def _insert_event(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    run_id: int | None,
+    event_type: EventType | str,
+    payload: dict[str, Any],
+) -> int:
+    cursor = await conn.execute(
+        "INSERT INTO events (task_id, run_id, ts, type, payload) VALUES (?, ?, ?, ?, ?)",
+        (task_id, run_id, utc_now(), str(event_type), json.dumps(payload, ensure_ascii=False)),
+    )
+    return _last_id(cursor)
 
 
 def _to_project(row: aiosqlite.Row) -> Project:

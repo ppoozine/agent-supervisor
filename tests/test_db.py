@@ -1,5 +1,6 @@
 """db.py 的測試：schema、交易與不變量。"""
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -231,3 +232,198 @@ async def test_last_usage_raw_returns_latest_recorded_usage(conn: aiosqlite.Conn
     )
 
     assert await db.get_last_usage_raw(conn, task.id) == {"n": 1}
+
+
+async def with_failed_ci(conn: aiosqlite.Connection, head_sha: str = "sha-1") -> db.Task:
+    """建立一個任務：initial run 已成功、PR 開著、CI 在 head_sha 上失敗。"""
+    task, run = await make_task(conn)
+    await db.finish_run(conn, run.id, ExitStatus.SUCCESS, tokens_in=1, tokens_out=1, cost_usd=0.1)
+    await db.update_task(
+        conn, task.id, pr_number=7, pr_state="open", head_sha=head_sha, ci_state="failed"
+    )
+    return await db.get_task(conn, task.id)
+
+
+async def test_ci_failure_run_records_the_commit_and_counts_the_attempt(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn)
+
+    run = await db.create_ci_failure_run(conn, task.id, "fix it", condition=lambda _: True)
+
+    assert run is not None
+    assert (run.trigger, run.source_head_sha) == (RunTrigger.CI_FAILURE, "sha-1")
+    after = await db.get_task(conn, task.id)
+    assert (after.last_handled_head_sha, after.ci_fix_attempts) == ("sha-1", 1)
+
+
+async def test_ci_failure_run_is_not_created_when_the_condition_fails(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn)
+    seen: list[db.TaskSnapshot] = []
+
+    def condition(snapshot: db.TaskSnapshot) -> bool:
+        seen.append(snapshot)
+        return False
+
+    run = await db.create_ci_failure_run(conn, task.id, "fix it", condition=condition)
+
+    assert run is None
+    assert seen[0].task.id == task.id and not seen[0].has_open_run
+    after = await db.get_task(conn, task.id)
+    assert (after.last_handled_head_sha, after.ci_fix_attempts) == (None, 0)
+    assert len(await db.list_runs(conn, task.id)) == 1
+
+
+async def test_ci_failure_run_leaves_the_counters_alone_when_a_run_is_already_open(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn)
+    await db.create_run(conn, task.id, RunTrigger.USER_MESSAGE, "hold on")
+
+    with pytest.raises(aiosqlite.IntegrityError):
+        await db.create_ci_failure_run(conn, task.id, "fix it", condition=lambda _: True)
+
+    after = await db.get_task(conn, task.id)
+    assert (after.last_handled_head_sha, after.ci_fix_attempts) == (None, 0)
+
+
+async def test_user_message_resets_the_fix_attempts(conn: aiosqlite.Connection) -> None:
+    task = await with_failed_ci(conn)
+    fix = await db.create_ci_failure_run(conn, task.id, "fix it", condition=lambda _: True)
+    assert fix is not None
+    await db.finish_run(conn, fix.id, ExitStatus.SUCCESS)
+    assert (await db.get_task(conn, task.id)).ci_fix_attempts == 1
+
+    await db.create_run(conn, task.id, RunTrigger.USER_MESSAGE, "try another way")
+
+    assert (await db.get_task(conn, task.id)).ci_fix_attempts == 0
+
+
+async def test_github_state_is_written_as_a_group_with_one_event(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn, "sha-1")
+
+    changed = await db.apply_github_state(
+        conn,
+        task.id,
+        expected_head_sha="sha-1",
+        pr_state="open",
+        head_sha="sha-1",
+        ci_state="passed",
+        review_state="approved",
+    )
+
+    assert changed
+    after = await db.get_task(conn, task.id)
+    assert (after.ci_state, after.review_state) == ("passed", "approved")
+    events = [event for event in await db.list_events(conn, task.id) if event.type == "ci_status"]
+    assert len(events) == 1
+    assert events[0].run_id is None
+    assert events[0].payload == {
+        "pr_number": 7,
+        "pr_state": "open",
+        "head_sha": "sha-1",
+        "ci_state": "passed",
+        "review_state": "approved",
+    }
+
+
+async def test_github_state_is_discarded_when_the_head_moved_during_the_query(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn, "sha-1")
+    await db.update_task(conn, task.id, head_sha="sha-2", ci_state="pending")
+
+    changed = await db.apply_github_state(
+        conn,
+        task.id,
+        expected_head_sha="sha-1",
+        pr_state="open",
+        head_sha="sha-1",
+        ci_state="failed",
+        review_state="none",
+    )
+
+    assert not changed
+    after = await db.get_task(conn, task.id)
+    assert (after.head_sha, after.ci_state) == ("sha-2", "pending")
+    assert [event.type for event in await db.list_events(conn, task.id)] == []
+
+
+async def test_unchanged_github_state_writes_no_event(conn: aiosqlite.Connection) -> None:
+    task = await with_failed_ci(conn, "sha-1")
+
+    changed = await db.apply_github_state(
+        conn,
+        task.id,
+        expected_head_sha="sha-1",
+        pr_state="open",
+        head_sha="sha-1",
+        ci_state="failed",
+        review_state="none",
+    )
+
+    assert not changed
+    assert await db.list_events(conn, task.id) == []
+
+
+async def test_snapshot_reports_the_last_run_and_usage(conn: aiosqlite.Connection) -> None:
+    task = await with_failed_ci(conn)
+    await db.create_run(conn, task.id, RunTrigger.USER_MESSAGE, "more")
+
+    snapshot = await db.get_snapshot(conn, task.id)
+
+    assert snapshot.has_open_run
+    assert snapshot.last_run is not None and snapshot.last_run.trigger == RunTrigger.USER_MESSAGE
+    assert snapshot.usage.cost_usd == pytest.approx(0.1)
+    assert snapshot.require_review is False
+
+
+async def test_only_open_unarchived_pull_requests_are_polled(conn: aiosqlite.Connection) -> None:
+    open_task = await with_failed_ci(conn)
+    merged, _ = await make_task(conn)
+    await db.update_task(conn, merged.id, pr_number=8, pr_state="merged")
+    no_pr, _ = await make_task(conn)
+    archived, run = await make_task(conn)
+    await db.update_task(conn, archived.id, pr_number=9, pr_state="open")
+    await db.finish_run(conn, run.id, ExitStatus.SUCCESS)
+    await db.archive_task(conn, archived.id)
+
+    polled = await db.list_tasks_with_open_pr(conn)
+
+    assert [task.id for task in polled] == [open_task.id]
+    assert no_pr.id not in [task.id for task in polled]
+
+
+async def test_a_concurrent_write_cannot_commit_half_of_another_transaction(
+    conn: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """另一個工作的寫入不能把做到一半的交易提前 commit。
+
+    讓交易在寫入 run 之後、更新任務之前失敗，期間另一個工作寫了一筆事件。
+    兩者沒有被寫入鎖隔開的話，那筆事件的 commit 會把寫到一半的 run 一起存進去。
+    """
+    task = await with_failed_ci(conn)
+    insert_run = db._insert_run
+    other_write: list[asyncio.Task[int]] = []
+
+    async def insert_then_fail(*args: object) -> int:
+        await insert_run(*args)  # type: ignore[arg-type]
+        other_write.append(
+            asyncio.create_task(db.append_event(conn, task.id, None, EventType.CI_STATUS, {}))
+        )
+        for _ in range(20):  # 讓另一個工作有機會執行
+            await asyncio.sleep(0.001)
+        raise RuntimeError("failed halfway")
+
+    monkeypatch.setattr(db, "_insert_run", insert_then_fail)
+
+    with pytest.raises(RuntimeError, match="failed halfway"):
+        await db.create_ci_failure_run(conn, task.id, "fix it", condition=lambda _: True)
+    await other_write[0]
+
+    assert len(await db.list_runs(conn, task.id)) == 1
+    assert len(await db.list_events(conn, task.id)) == 1

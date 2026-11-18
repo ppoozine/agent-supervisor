@@ -33,3 +33,28 @@ class EventType(StrEnum):
     PR_OPENED = "pr_opened"
     CI_STATUS = "ci_status"
     STATE_CHANGE = "state_change"
+
+
+class PrState(StrEnum):
+    """`tasks.pr_state` 的合法值。"""
+
+    OPEN = "open"
+    MERGED = "merged"
+    CLOSED = "closed"
+
+
+class CiState(StrEnum):
+    """`tasks.ci_state` 的合法值：`head_sha` 上所有 CI 檢查合起來的結果。"""
+
+    NONE = "none"
+    PENDING = "pending"
+    PASSED = "passed"
+    FAILED = "failed"
+
+
+class ReviewState(StrEnum):
+    """`tasks.review_state` 的合法值。"""
+
+    NONE = "none"
+    APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
