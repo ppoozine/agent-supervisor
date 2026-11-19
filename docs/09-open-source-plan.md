@@ -16,7 +16,7 @@
 | 2 | 定位：給誰用、和現有工具差在哪 | 已決定（決策第 142 筆） |
 | 3 | 支援哪些 agent；設定頁與偵測 | 部分決定：第一版是 Claude Code 與 Codex；設定頁的細節未談 |
 | 4 | 文件與介面的語言；支援的平台 | 已決定（決策第 143、144 筆） |
-| 5 | 開源的時機與第一版的範圍 | 已決定（決策第 145 到 147 筆） |
+| 5 | 開源的時機與第一版的範圍 | 已決定（決策第 145 到 148 筆） |
 | 6 | 重排 roadmap，寫下一個階段的任務單 | 討論中 |
 
 ---
@@ -266,7 +266,7 @@
 | 1 | 這個 repo 的 CI | GitHub Actions 跑 pytest、ruff、前端測試與 build，macOS 與 Linux 都跑 |
 | 2 | 英文化 | 註解與 docstring、介面文字；`CLAUDE.md` 的慣例跟著改 |
 | 3 | Linux 支援 | 五個平台相關的模組在 Linux 上確認並修正 |
-| 4 | 安裝 | 名稱定案、前端檔案打包進套件、一行指令裝得起來、啟動時檢查 `gh` 與各 agent |
+| 4 | 安裝 | 從 GitHub 一行指令裝得起來、前端檔案由 CI 打包並附在 GitHub Release 上、啟動時檢查 `gh` 與各 agent |
 | 5 | Agent 設定頁 | 偵測安裝與登入狀態、API key 的引導、條文的說明 |
 | 6 | 對外的文件 | README、使用說明、信任模型與已知限制、貢獻指南 |
 | 7 | 修掉「會卡住」的五項 | PR 重新開啟、無法結案的任務、中斷後的殘留、改寫歷史、超過上限後不能送訊息 |
@@ -279,9 +279,9 @@
 - 做完上面八項才把 repo 設成公開，同時發版。別人第一眼看到的要是裝得起來、文件齊全的東西。
 - 公開的那一版是 `0.3.0`，不是 `1.0`：`0.x` 表示介面還可能變動。HTTP API 與 adapter 介面在有外部使用者之前不承諾穩定。
 
-### 名稱（決策第 147 筆）
+### 名稱與發布方式（決策第 147、148 筆）
 
-**專案與 repo 維持 `agent-supervisor`，PyPI 上的套件叫 `ai-agent-supervisor`，import 名稱維持 `agent_supervisor`，指令暫定改成 `agsv`。** 下面是查詢的過程與考慮過的名字。
+**不發布到 PyPI，從 GitHub 安裝；專案、repo、import 名稱都維持不變；指令暫定改成 `agsv`。** 下面是查詢的過程與考慮過的名字。
 
 2026-11-20 查 PyPI：
 
@@ -309,12 +309,17 @@
 - **派工**（`agent-dispatcher`）：可以註冊，但 `agent-dispatch` 只差一個字母、領域又接近；而且派工只講到開頭，這個工具的重點在派出去之後。
 - **監工與發包**：這個工具做的事和營造業的發包流程幾乎一對一（發包、各工班在自己的工區施工、監工、驗收不過叫回來修、驗收通過業主簽收），所以 supervisor 與 foreman 才是對的字。可以註冊的有 `site-supervisor`、`site-foreman`、`pr-supervisor`、`fleet-supervisor`、`agent-overseer`、`clerk-of-works` 等。
 
-**最後的決定**是不換掉 supervisor 這個字，只在套件名前面加 `ai-`：
+**最後的決定**是不換掉 supervisor 這個字，也不發布到 PyPI（第 148 筆）：
+
+- 安裝方式是從 GitHub：`uv tool install git+https://github.com/<owner>/agent-supervisor`，或下載 GitHub Release 上附的套件檔。想改程式的人 clone 或 fork。
+- 不上 PyPI 就不需要套件名，名稱的問題直接消失；也少一條要維護的發布流程。定位是「讀得懂、可以拿來改」，這種專案的使用者本來就會 clone。
+- 之後想上 PyPI 的話，`ai-agent-supervisor` 在 2026-11-20 查過是可以註冊的（PyPI、npm、Homebrew 都沒有同名的）。
+- 前端的檔案由 CI build 好、打包進套件、附在 GitHub Release 上，只想用的人不需要 Node.js。
 
 | 名稱 | 值 | 說明 |
 | --- | --- | --- |
 | 專案 / repo | `agent-supervisor` | 不變 |
-| PyPI 套件 | `ai-agent-supervisor` | 2026-11-20 查過 PyPI、npm、Homebrew 都沒有同名的 |
+| PyPI 套件 | 不發布 | 之後要發的話用 `ai-agent-supervisor` |
 | import 名稱 | `agent_supervisor` | 不變。PyPI 上那個 `agent-supervisor` 裝進去的模組也叫這個名字，兩個裝進同一個環境會互相蓋掉；但這個工具是獨立執行的應用程式，建議的安裝方式會給它自己的環境，在文件裡註明即可 |
 | 指令 | 暫定 `agsv` | `asv` 和 Airspeed Velocity 的指令相同，而指令不管怎麼裝最後都在同一個 `PATH` 上，躲不掉。做到「安裝與打包」那個任務時才改 |
 
