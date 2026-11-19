@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     review_state TEXT NOT NULL DEFAULT 'none',
     last_handled_head_sha TEXT,
     ci_fix_attempts INTEGER NOT NULL DEFAULT 0,
+    last_handled_feedback_event_id INTEGER,
+    feedback_attempts INTEGER NOT NULL DEFAULT 0,
     archived_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -90,6 +92,13 @@ BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 """
 
 FINISHED_PR_STATES = (PrState.MERGED, PrState.CLOSED)
+
+# 後來才加的欄位：（資料表, 欄位, 定義）。舊的資料庫在啟動時補上。
+# 新增欄位時這裡與上面的 SCHEMA 都要寫。
+ADDED_COLUMNS = (
+    ("tasks", "last_handled_feedback_event_id", "INTEGER"),
+    ("tasks", "feedback_attempts", "INTEGER NOT NULL DEFAULT 0"),
+)
 
 _write_locks: weakref.WeakKeyDictionary[aiosqlite.Connection, asyncio.Lock] = (
     weakref.WeakKeyDictionary()
@@ -144,6 +153,8 @@ class Task:
     review_state: str
     last_handled_head_sha: str | None
     ci_fix_attempts: int
+    last_handled_feedback_event_id: int | None
+    feedback_attempts: int
     archived_at: str | None
     created_at: str
     updated_at: str
@@ -195,6 +206,8 @@ class TaskSnapshot:
     require_review: bool
     last_run: Run | None
     usage: TaskUsage
+    pending_feedback: int = 0
+    """PR 上還沒餵回 agent 的留言數。"""
 
     @property
     def has_open_run(self) -> bool:
@@ -251,8 +264,13 @@ async def connect(db_path: str | Path) -> aiosqlite.Connection:
 
 
 async def init_schema(conn: aiosqlite.Connection) -> None:
-    """建立資料表、索引與 trigger（已存在則略過）。"""
+    """建立資料表、索引與 trigger（已存在則略過），並替舊的資料庫補上後來才加的欄位。"""
     await conn.executescript(SCHEMA)
+    for table, column, definition in ADDED_COLUMNS:
+        # 資料表與欄位名稱只會來自上面的常數，不是外部輸入。
+        cursor = await conn.execute(f"PRAGMA table_info({table})")
+        if column not in {row["name"] for row in await cursor.fetchall()}:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     await conn.commit()
 
 
@@ -334,7 +352,7 @@ async def create_run(
 ) -> Run:
     """為既有任務建立一個 run；任務不可執行或已有未結束的 run 時拒絕。
 
-    使用者送訊息代表人已經介入，所以同一個交易內把自動修復次數歸零。
+    使用者送訊息代表人已經介入，所以同一個交易內把自動修復與留言處理的次數歸零。
     """
     try:
         async with _transaction(conn):
@@ -344,7 +362,8 @@ async def create_run(
             run_id = await _insert_run(conn, task_id, trigger, input_text, source_head_sha)
             if trigger is RunTrigger.USER_MESSAGE:
                 await conn.execute(
-                    "UPDATE tasks SET ci_fix_attempts = 0, updated_at = ? WHERE id = ?",
+                    "UPDATE tasks SET ci_fix_attempts = 0, feedback_attempts = 0, updated_at = ?"
+                    " WHERE id = ?",
                     (utc_now(), task_id),
                 )
     except aiosqlite.IntegrityError as error:
@@ -378,6 +397,80 @@ async def create_ci_failure_run(
     return await get_run(conn, run_id)
 
 
+async def create_feedback_run(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    *,
+    build_prompt: Callable[[list[Event]], str],
+    condition: Callable[[TaskSnapshot], bool],
+) -> Run | None:
+    """條件成立時建立一個 review_feedback run，內容是所有還沒處理的留言。
+
+    讀出留言、建立 run、把「處理到哪一則」往前推、次數加一都在同一個交易內，
+    所以同一則留言不會被餵回兩次，也不會有留言在中間被跳過。
+    條件不成立時什麼都不寫，回傳 None。
+    """
+    async with _transaction(conn):
+        snapshot = await get_snapshot(conn, task_id)
+        pending = await list_pending_feedback(conn, task_id)
+        if not pending or not condition(snapshot):
+            return None
+        run_id = await _insert_run(
+            conn, task_id, RunTrigger.REVIEW_FEEDBACK, build_prompt(pending), None
+        )
+        await conn.execute(
+            "UPDATE tasks SET last_handled_feedback_event_id = ?,"
+            " feedback_attempts = feedback_attempts + 1, updated_at = ? WHERE id = ?",
+            (pending[-1].id, utc_now(), task_id),
+        )
+    return await get_run(conn, run_id)
+
+
+_PENDING_FEEDBACK = (
+    " FROM events e JOIN tasks t ON t.id = e.task_id"
+    " WHERE e.task_id = ? AND e.type = ?"
+    " AND e.id > COALESCE(t.last_handled_feedback_event_id, 0)"
+    " AND json_extract(e.payload, '$.ignored') IS NULL"
+)
+
+
+async def list_pending_feedback(conn: aiosqlite.Connection, task_id: int) -> list[Event]:
+    """任務還沒餵回 agent 的留言，依記錄的順序。被略過的留言（例如機器人的）不算。"""
+    cursor = await conn.execute(
+        "SELECT e.*" + _PENDING_FEEDBACK + " ORDER BY e.id", (task_id, EventType.REVIEW_COMMENT)
+    )
+    return [_to_event(row) for row in await cursor.fetchall()]
+
+
+async def list_feedback_ids(conn: aiosqlite.Connection, task_id: int) -> set[str]:
+    """任務已經記錄過的留言在 GitHub 上的編號，包含被略過的。"""
+    cursor = await conn.execute(
+        "SELECT json_extract(payload, '$.github_id') AS github_id FROM events"
+        " WHERE task_id = ? AND type = ?",
+        (task_id, EventType.REVIEW_COMMENT),
+    )
+    return {row["github_id"] for row in await cursor.fetchall()}
+
+
+async def record_feedback(
+    conn: aiosqlite.Connection, task_id: int, payloads: list[dict[str, Any]]
+) -> int:
+    """把留言寫成 `review_comment` 事件，已經記過的略過；回傳新增了幾則要處理的留言。"""
+    async with _transaction(conn):
+        known = await list_feedback_ids(conn, task_id)
+        added = 0
+        for payload in payloads:
+            if payload["github_id"] in known:
+                continue
+            known.add(payload["github_id"])
+            await _insert_event(conn, task_id, None, EventType.REVIEW_COMMENT, payload)
+            added += payload.get("ignored") is None
+        if added:
+            # 讓卡片的指紋跟著變，看板才會更新。
+            await conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (utc_now(), task_id))
+    return added
+
+
 async def set_run_input_text(conn: aiosqlite.Connection, run_id: int, input_text: str) -> None:
     """在 agent 啟動前補上這次實際要送給它的內容（例如抓到的 CI log）。"""
     async with _transaction(conn):
@@ -391,11 +484,16 @@ async def get_snapshot(conn: aiosqlite.Connection, task_id: int) -> TaskSnapshot
     row = await _fetch_one(
         conn, "SELECT * FROM runs WHERE task_id = ? ORDER BY id DESC LIMIT 1", (task_id,)
     )
+    pending = await _fetch_one(
+        conn, "SELECT COUNT(*) AS total" + _PENDING_FEEDBACK, (task_id, EventType.REVIEW_COMMENT)
+    )
+    assert pending is not None
     return TaskSnapshot(
         task=task,
         require_review=project.require_review,
         last_run=None if row is None else _to_run(row),
         usage=await get_task_usage(conn, task_id),
+        pending_feedback=int(pending["total"]),
     )
 
 
