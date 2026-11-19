@@ -327,3 +327,89 @@ async def test_dispatch_stops_between_tasks_when_asked_to(loop: Loop) -> None:
     await loop.runner.wait(runs[0].id)
     assert (await loop.task()).ci_fix_attempts == 0
     assert len(await loop.runs()) == 1
+
+
+async def comments(loop: Loop, *github_ids: str) -> None:
+    """Poller 在 PR 上看到了新的留言。"""
+    payloads = [
+        {"github_id": github_id, "author": "alice", "body": f"fix {github_id}", "ignored": None}
+        for github_id in github_ids
+    ]
+    await db.record_feedback(loop.conn, loop.task_id, payloads)
+
+
+async def test_comments_are_fed_back_to_the_same_session_in_one_run(loop: Loop) -> None:
+    await loop.start()
+    await loop.ci("passed")
+    await comments(loop, "IC_1", "IC_2")
+    assert await loop.board() == status.BoardStatus(Column.WORKING, "Addressing review")
+
+    run = await loop.fix(pushes="sha-2")
+
+    call = loop.adapter.calls[-1]
+    assert (run.trigger, run.exit_status) == (RunTrigger.REVIEW_FEEDBACK, ExitStatus.SUCCESS)
+    assert call.session_id == "session-1"
+    assert "fix IC_1" in call.prompt and "fix IC_2" in call.prompt
+    assert (await loop.task()).feedback_attempts == 1
+
+
+async def test_the_same_comment_is_never_fed_back_twice(loop: Loop) -> None:
+    await loop.start()
+    await loop.ci("passed")
+    await comments(loop, "IC_1")
+    await loop.fix(pushes="sha-2")
+    await loop.ci("passed")
+
+    assert await loop.dispatch() == []
+    assert await loop.board() == status.BoardStatus(Column.READY_TO_MERGE, "Ready")
+
+
+async def test_comments_seen_in_this_round_wait_for_the_next_one(loop: Loop) -> None:
+    await loop.start()
+    await loop.ci("passed")
+    await comments(loop, "IC_1")
+
+    held = await loop.dispatcher.dispatch_once(hold_feedback={loop.task_id})
+    await comments(loop, "IC_2")
+    run = await loop.fix(pushes="sha-2")
+
+    assert held == []
+    assert "fix IC_1" in run.input_text and "fix IC_2" in run.input_text
+    assert len(await loop.runs()) == 2
+
+
+async def test_comments_are_handled_before_a_failed_ci(loop: Loop) -> None:
+    await loop.start()
+    await loop.ci("failed")
+    await comments(loop, "IC_1")
+
+    run = await loop.fix(pushes=None)
+    after = await loop.task()
+
+    assert run.trigger is RunTrigger.REVIEW_FEEDBACK
+    assert (after.ci_fix_attempts, after.last_handled_head_sha) == (0, None)
+    # 處理留言沒有產生新的 commit：同一個 commit 的 CI 失敗接著照常修復。
+    fix = await loop.fix(pushes="sha-2")
+    assert fix.trigger is RunTrigger.CI_FAILURE
+
+
+async def test_addressing_feedback_stops_after_five_rounds_until_a_person_steps_in(
+    loop: Loop,
+) -> None:
+    await loop.start()
+    await loop.ci("passed")
+    for round_number in range(1, 6):
+        await comments(loop, f"IC_{round_number}")
+        await loop.fix(pushes=f"sha-{round_number + 1}")
+        await loop.ci("passed")
+    await comments(loop, "IC_6")
+
+    assert await loop.dispatch() == []
+    assert await loop.board() == status.BoardStatus(Column.NEEDS_YOU, "Changes requested")
+
+    loop.adapter.scripts.append([result()])
+    message = await loop.runner.send_message(loop.task_id, "carry on")
+    await loop.runner.wait(message.id)
+
+    resumed = await loop.fix(pushes=None)
+    assert resumed.trigger is RunTrigger.REVIEW_FEEDBACK

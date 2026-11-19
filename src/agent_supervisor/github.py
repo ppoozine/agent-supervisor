@@ -4,13 +4,14 @@ import json
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from agent_supervisor.enums import CiState, PrState, ReviewState
 from agent_supervisor.process import CommandResult, run_command
 
 PR_FIELDS = "number,state,headRefOid,url"
-STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup"
+STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews"
 
 # 檢查結果的對應，依據見 docs/02-mvp-spec.md 的「ci_state 的意思」。
 # 不在這兩組裡的值（還在跑、等人核准、過期、沒看過的新值）一律當成還沒結束。
@@ -58,6 +59,35 @@ class PullRequestStatus:
     ci_state: CiState
     review_state: ReviewState
     failed_checks: tuple[FailedCheck, ...]
+    feedback_ids: tuple[str, ...] = ()
+    """PR 上一般留言與已送出的 review 的編號，用來判斷有沒有新的留言要抓。"""
+
+
+class FeedbackKind(StrEnum):
+    """PR 上留言的三種形式。"""
+
+    COMMENT = "comment"
+    REVIEW = "review"
+    INLINE_COMMENT = "inline_comment"
+
+
+@dataclass(frozen=True)
+class FeedbackItem:
+    """PR 上的一則留言。`github_id` 是 GitHub 的 node id，三種留言共用同一個編號空間。
+
+    `path` 與 `line` 只有逐行留言才有；`review_state` 只有 review 才有。
+    """
+
+    github_id: str
+    kind: FeedbackKind
+    author: str
+    is_bot: bool
+    body: str
+    created_at: str
+    url: str
+    path: str | None = None
+    line: int | None = None
+    review_state: str | None = None
 
 
 class GitHub:
@@ -102,6 +132,40 @@ class GitHub:
         except _UNEXPECTED_OUTPUT_ERRORS as error:
             raise GitHubError(f"gh pr view returned unexpected output: {error!r}") from error
 
+    async def list_feedback(self, repo: str, number: int) -> list[FeedbackItem]:
+        """列出 PR 上所有的留言，依時間排序：一般留言、已送出的 review、逐行留言。
+
+        用 REST API 而不是 `gh pr view`：後者看不出作者是不是機器人，也沒有逐行留言。
+        還沒送出的 review（只有本人看得到）與它底下的逐行留言不算。
+        """
+        comments = await self._list(f"repos/{repo}/issues/{number}/comments")
+        reviews = await self._list(f"repos/{repo}/pulls/{number}/reviews")
+        inline_comments = await self._list(f"repos/{repo}/pulls/{number}/comments")
+        try:
+            pending_reviews = {item["id"] for item in reviews if item["state"] == "PENDING"}
+            items = [_to_feedback(item, FeedbackKind.COMMENT) for item in comments]
+            items += [
+                _to_feedback(item, FeedbackKind.REVIEW)
+                for item in reviews
+                if item["id"] not in pending_reviews
+            ]
+            items += [
+                _to_feedback(item, FeedbackKind.INLINE_COMMENT)
+                for item in inline_comments
+                if item.get("pull_request_review_id") not in pending_reviews
+            ]
+        except _UNEXPECTED_OUTPUT_ERRORS as error:
+            raise GitHubError(f"gh api returned unexpected feedback: {error!r}") from error
+        return sorted(items, key=lambda item: item.created_at)
+
+    async def _list(self, path: str) -> list[dict[str, Any]]:
+        """讀完一個分頁的 REST 列表。`--slurp` 把每一頁包成外層陣列的一個元素。"""
+        output = await self._gh(["api", "--paginate", "--slurp", f"{path}?per_page=100"])
+        try:
+            return [item for page in json.loads(output) for item in page]
+        except _UNEXPECTED_OUTPUT_ERRORS as error:
+            raise GitHubError(f"gh api {path} returned unexpected output: {error!r}") from error
+
     async def fetch_job_log(self, repo: str, job_id: int) -> str:
         """抓一個 GitHub Actions job 的 log：優先只要失敗的步驟，沒有就抓整份。
 
@@ -140,6 +204,32 @@ def parse_pull_request_status(data: dict[str, Any]) -> PullRequestStatus:
         ci_state=_combine(results),
         review_state=_REVIEW_STATES.get(data.get("reviewDecision") or "", ReviewState.NONE),
         failed_checks=failed,
+        feedback_ids=_feedback_ids(data),
+    )
+
+
+def _feedback_ids(data: dict[str, Any]) -> tuple[str, ...]:
+    comments = [str(item["id"]) for item in data.get("comments") or []]
+    reviews = [
+        str(item["id"]) for item in data.get("reviews") or [] if item.get("state") != "PENDING"
+    ]
+    return tuple(comments + reviews)
+
+
+def _to_feedback(item: dict[str, Any], kind: FeedbackKind) -> FeedbackItem:
+    user = item.get("user") or {}
+    line = item.get("line") or item.get("original_line")
+    return FeedbackItem(
+        github_id=str(item["node_id"]),
+        kind=kind,
+        author=str(user.get("login") or "unknown"),
+        is_bot=user.get("type") == "Bot",
+        body=str(item.get("body") or ""),
+        created_at=str(item.get("created_at") or item.get("submitted_at") or ""),
+        url=str(item.get("html_url") or ""),
+        path=item.get("path"),
+        line=None if line is None else int(line),
+        review_state=item.get("state") if kind is FeedbackKind.REVIEW else None,
     )
 
 

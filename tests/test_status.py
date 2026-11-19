@@ -11,6 +11,7 @@ from agent_supervisor.status import (
     Column,
     Limits,
     board_status,
+    can_address_feedback,
     can_auto_fix,
 )
 
@@ -24,6 +25,7 @@ def snapshot(
     cost_usd: float = 1.0,
     tokens: int = 100,
     require_review: bool = False,
+    pending_feedback: int = 0,
     **task_fields: Any,
 ) -> db.TaskSnapshot:
     """建立一個快照。預設是：PR 開著、CI 通過、最後一次 run 成功。
@@ -38,6 +40,8 @@ def snapshot(
         "review_state": "none",
         "last_handled_head_sha": None,
         "ci_fix_attempts": 0,
+        "last_handled_feedback_event_id": None,
+        "feedback_attempts": 0,
         "archived_at": None,
     }
     fields.update(task_fields)
@@ -69,7 +73,13 @@ def snapshot(
         cost_usd=None,
     )
     usage = db.TaskUsage(cost_usd=cost_usd, tokens=tokens, is_complete=True)
-    return db.TaskSnapshot(task=task, require_review=require_review, last_run=run, usage=usage)
+    return db.TaskSnapshot(
+        task=task,
+        require_review=require_review,
+        last_run=run,
+        usage=usage,
+        pending_feedback=pending_feedback,
+    )
 
 
 def failing(**overrides: Any) -> db.TaskSnapshot:
@@ -101,6 +111,7 @@ def test_task_with_a_failed_ci_on_a_new_commit_can_be_fixed() -> None:
         pytest.param({"exit_status": ExitStatus.LIMIT_REACHED}, id="7-last-run-hit-limit"),
         pytest.param({"exit_status": ExitStatus.INTERRUPTED}, id="7-last-run-interrupted"),
         pytest.param({"review_state": "changes_requested"}, id="8-changes-requested"),
+        pytest.param({"pending_feedback": 1}, id="8-comments-waiting"),
     ],
 )
 def test_each_broken_condition_blocks_auto_fix(overrides: dict[str, Any]) -> None:
@@ -292,3 +303,87 @@ def test_board_status_priorities_and_combinations(
     overrides: dict[str, Any], column: Column, label: str
 ) -> None:
     assert board_status(snapshot(**overrides), LIMITS) == BoardStatus(column, label)
+
+
+def test_task_with_waiting_comments_can_have_them_addressed() -> None:
+    assert can_address_feedback(snapshot(pending_feedback=2), LIMITS)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"pending_feedback": 0}, id="no-comments-waiting"),
+        pytest.param({"feedback_attempts": 5}, id="attempts-used-up"),
+        pytest.param({"cost_usd": 5.0}, id="cost-limit-reached"),
+        pytest.param({"tokens": 1000}, id="token-limit-reached"),
+        pytest.param({"exit_status": None}, id="run-in-progress"),
+        pytest.param({"pr_state": "merged"}, id="pr-merged"),
+        pytest.param({"archived_at": "t"}, id="archived"),
+        pytest.param({"exit_status": ExitStatus.STOPPED}, id="last-run-stopped"),
+        pytest.param({"exit_status": ExitStatus.ERROR}, id="last-run-error"),
+    ],
+)
+def test_each_broken_condition_blocks_addressing_feedback(overrides: dict[str, Any]) -> None:
+    assert not can_address_feedback(snapshot(**{"pending_feedback": 1, **overrides}), LIMITS)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "column", "label"),
+    [
+        pytest.param({"pending_feedback": 1}, Column.WORKING, "Addressing review", id="waiting"),
+        pytest.param(
+            {"exit_status": None, "trigger": RunTrigger.REVIEW_FEEDBACK},
+            Column.WORKING,
+            "Addressing review",
+            id="run-in-progress",
+        ),
+        # 留言優先於 CI 失敗：處理留言會產生新的 commit
+        pytest.param(
+            {"pending_feedback": 1, "ci_state": "failed"},
+            Column.WORKING,
+            "Addressing review",
+            id="comments-beat-failed-ci",
+        ),
+        pytest.param(
+            {"pending_feedback": 1, "feedback_attempts": 5},
+            Column.NEEDS_YOU,
+            "Changes requested",
+            id="attempts-used-up",
+        ),
+        pytest.param(
+            {"pending_feedback": 1, "cost_usd": 5.0},
+            Column.NEEDS_YOU,
+            "Changes requested",
+            id="over-budget",
+        ),
+        pytest.param(
+            {"pending_feedback": 1, "exit_status": ExitStatus.STOPPED},
+            Column.NEEDS_YOU,
+            "Stopped",
+            id="stopped-beats-comments",
+        ),
+        # GitHub 在重新審查之前一直回報「要求修改」；留言處理過之後不再擋住流程
+        pytest.param(
+            {"review_state": "changes_requested", "last_handled_feedback_event_id": 9},
+            Column.READY_TO_MERGE,
+            "Ready",
+            id="changes-requested-already-addressed",
+        ),
+        pytest.param(
+            {"review_state": "changes_requested"},
+            Column.NEEDS_YOU,
+            "Changes requested",
+            id="changes-requested-without-any-comment",
+        ),
+    ],
+)
+def test_board_status_with_review_feedback(
+    overrides: dict[str, Any], column: Column, label: str
+) -> None:
+    assert board_status(snapshot(**overrides), LIMITS) == BoardStatus(column, label)
+
+
+def test_failed_ci_is_fixed_again_once_the_requested_changes_were_addressed() -> None:
+    addressed = failing(review_state="changes_requested", last_handled_feedback_event_id=9)
+
+    assert can_auto_fix(addressed, LIMITS)
