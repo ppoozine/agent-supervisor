@@ -207,7 +207,7 @@ Agent 正常結束這一輪之後，Runner 依序做下面的事。`initial`、`
 
 看板欄位不存進資料庫，每次由 `status.py` 的純函式從 run、PR、CI、review 狀態算出來。
 
-**先判斷是否離開看板**：任務已封存，或 `pr_state` 為 `merged` / `closed` 且沒有 run 正在執行，就不出現在四個欄位裡，改列在 Archive 區（標籤 `Archived` / `Merged` / `Closed`）。
+**先判斷是否離開看板**：任務已封存，或 `pr_state` 為 `merged` / `closed` 且沒有 run 正在執行，就不出現在四個欄位裡，改列在 Archive 區。標籤優先顯示 PR 的結果（`Merged` / `Closed`）；已封存而 PR 還開著或沒有 PR 時是 `Archived`。
 
 PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run（`exit_status` 為 `stopped`，不做收尾），停下之後卡片才離開看板。
 
@@ -338,6 +338,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 - worktree 裡有未 commit 的變更時，supervisor 先把它們 commit 到任務的 branch，再清掉 worktree。這個 commit 只留在本機，不 push。
 - 封存只清掉 worktree，branch 保留，所以成果不會因為封存而消失。
 - 補 commit 失敗時（例如 commit hook 擋下）拒絕封存並回報原因，不刪除 worktree。
+- 封存不會關掉 PR，也沒有取消封存。PR 還開著的任務封存之後，Poller 仍然繼續查它，所以之後在 GitHub 上合併或關閉，卡片的標籤會跟著變；但不再自動修復 CI，也不能再送訊息。
 
 ## API
 
@@ -409,6 +410,7 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 - **花費**：`cost_usd` 是 `null` 時顯示 token 數；有數字時前面加 `~` 表示估算值；`usage_is_complete` 為否時後面加 `+`，表示實際的數字比這個高。
 - **連線**：先連上 `/stream` 再抓資料。連線出錯時前端自己關掉，2 秒後重開（瀏覽器的 `EventSource` 在 daemon 沒開時不會自己重試）。每次連上都重新抓專案、agent、看板；開著的詳情頁從已經有的最後一筆事件之後補抓，用編號去掉重複的。
 - **Log 分頁與 Events 分頁用同一份事件**：Log 把 agent 的訊息、指令與輸出、工具呼叫排成容易讀的樣子，Events 原樣列出並可依類型篩選。
+- **封存前的確認**：任務的 PR 還開著時，按 Archive 先跳出確認框說明後果，確認才送出。只做在介面上，API 與 CLI 不擋。
 - **錯誤**：API 回的 `message` 直接顯示在操作的旁邊。
 
 ## 背景工作與 Agent adapter
@@ -418,7 +420,7 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 | 工作 | 負責 |
 | --- | --- |
 | Runner | 啟動或續接 agent session，把事件寫進 `events`，結束時回填用量並做收尾 |
-| Poller | 每 30 秒查詢有開 PR 的任務，把 `pr_state`、`head_sha`、`ci_state`、`review_state` 當成一組一起更新 |
+| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），把 `pr_state`、`head_sha`、`ci_state`、`review_state` 當成一組一起更新 |
 | Dispatcher | 發現符合自動修復條件的任務就建立 `ci_failure` run，抓 log，交給 Runner |
 
 Poller 用一次 `gh pr view` 查回四個欄位。Review 狀態照 GitHub 回報的寫入：收尾時 push 之後會先設成 `none`，但 GitHub 預設不會因為新的 commit 撤銷核准，所以下一次輪詢可能又變回 `approved`。單一任務查詢失敗不影響其他任務，下一輪再查。
