@@ -10,6 +10,7 @@ import signal
 import sys
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
+from pathlib import Path
 
 import uvicorn
 
@@ -29,6 +30,8 @@ from agent_supervisor.supervisor import Supervisor, build_supervisor
 
 HOST = "127.0.0.1"
 GRACEFUL_SHUTDOWN_SECONDS = 3
+# 前端 `npm run build` 的產物；沒有 build 過就只提供 API。
+WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 EXIT_OK, EXIT_ALREADY_RUNNING = 0, 2
 logger = logging.getLogger("agent_supervisor.daemon")
 
@@ -114,7 +117,12 @@ async def _run_until_quit(
     await feed.start()
     server = _Server(
         uvicorn.Config(
-            create_app(supervisor, feed, is_closing=quit_requested.is_set),
+            create_app(
+                supervisor,
+                feed,
+                is_closing=quit_requested.is_set,
+                static_dir=WEB_DIST if WEB_DIST.is_dir() else None,
+            ),
             host=HOST,
             port=config.api_port,
             log_level="info",

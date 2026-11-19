@@ -59,7 +59,7 @@ class Daemon:
         async with asyncio.timeout(10.0):
             while True:
                 try:
-                    await self.client.get("/projects")
+                    await self.client.get("/api/projects")
                     return
                 except httpx.TransportError:
                     await asyncio.sleep(0.02)
@@ -67,17 +67,17 @@ class Daemon:
     async def task(self, script: list[Any]) -> dict[str, Any]:
         self.adapter.scripts.append(script)
         project = await self.client.post(
-            "/projects", json={"repo_path": str(self.repo.path), "github_repo": "owner/demo"}
+            "/api/projects", json={"repo_path": str(self.repo.path), "github_repo": "owner/demo"}
         )
         response = await self.client.post(
-            "/tasks",
+            "/api/tasks",
             json={"project_id": project.json()["id"], "prompt": "do it", "agent_type": "fake"},
         )
         assert response.status_code == 201, response.text
         return response.json()  # type: ignore[no-any-return]
 
     async def card(self, task_id: int) -> dict[str, Any]:
-        return (await self.client.get(f"/tasks/{task_id}")).json()  # type: ignore[no-any-return]
+        return (await self.client.get(f"/api/tasks/{task_id}")).json()  # type: ignore[no-any-return]
 
     async def until(self, task_id: int, **expected: Any) -> dict[str, Any]:
         """等到卡片的某些欄位變成指定的值。"""
@@ -132,7 +132,7 @@ async def test_interrupt_ends_the_daemon_even_with_a_stream_open(asv: Daemon) ->
     lines: list[str] = []
 
     async with asyncio.timeout(15.0):
-        async with asv.client.stream("GET", "/stream", timeout=None) as response:
+        async with asv.client.stream("GET", "/api/stream", timeout=None) as response:
             assert response.headers["content-type"].startswith("text/event-stream")
             reading = response.aiter_lines()
             async for line in reading:
@@ -159,7 +159,7 @@ async def test_stop_signal_stops_the_runs_but_the_daemon_keeps_serving(asv: Daem
     stopped = await asv.until(created["id"], has_open_run=False)
 
     assert stopped["label"] == "Stopped"
-    assert (await asv.client.get("/projects")).status_code == 200
+    assert (await asv.client.get("/api/projects")).status_code == 200
     assert await asv.quit() == 0
 
 
