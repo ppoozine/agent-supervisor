@@ -1,5 +1,6 @@
 """worktree.py 的測試。使用真的 git，遠端是本機的 bare repo，不碰網路。"""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -191,3 +192,101 @@ async def test_ensure_repository_accepts_a_repo_and_rejects_anything_else(
         await worktree.ensure_repository(inside)
     with pytest.raises(worktree.GitError):
         await worktree.ensure_repository(git_repo.path / ".git")
+
+
+async def conflicting_worktree(repo: GitRepo, tmp_path: Path) -> Path:
+    """一個 worktree，它和 origin 的 main 改了 README 的同一行。"""
+    path = await make_worktree(repo, tmp_path)
+    (path / "README.md").write_text("from the task\n")
+    await worktree.commit_all(path, "task change")
+    repo.push_to_main("README.md", "from main\n")
+    return path
+
+
+async def test_merge_with_a_conflict_stops_and_reports_the_files(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    path = await conflicting_worktree(git_repo, tmp_path)
+
+    conflicted = await worktree.start_merge(path, "main")
+
+    assert conflicted == ["README.md"]
+    assert await worktree.is_merge_in_progress(path)
+    assert await worktree.files_with_conflict_markers(path) == ["README.md"]
+    assert "<<<<<<< " in (path / "README.md").read_text()
+
+
+async def test_resolved_file_no_longer_counts_as_having_markers(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    path = await conflicting_worktree(git_repo, tmp_path)
+    await worktree.start_merge(path, "main")
+
+    (path / "README.md").write_text("from the task and from main\n")
+
+    assert await worktree.files_with_conflict_markers(path) == []
+    merge_commit = await worktree.commit_all(path, "merge main")
+    assert len(git_repo.git("rev-list", "--parents", "-1", merge_commit, cwd=path).split()) == 3
+    assert not await worktree.is_merge_in_progress(path)
+
+
+async def test_merge_without_a_conflict_reports_nothing(git_repo: GitRepo, tmp_path: Path) -> None:
+    path = await make_worktree(git_repo, tmp_path)
+    (path / "feature.txt").write_text("new\n")
+    await worktree.commit_all(path, "task change")
+    git_repo.push_to_main("README.md", "from main\n")
+
+    assert await worktree.start_merge(path, "main") == []
+    assert await worktree.files_with_conflict_markers(path) == []
+
+
+async def test_merge_when_already_up_to_date_reports_nothing(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    path = await make_worktree(git_repo, tmp_path)
+
+    assert await worktree.start_merge(path, "main") == []
+    assert not await worktree.is_merge_in_progress(path)
+
+
+async def test_merge_blocked_by_local_changes_fails_and_leaves_them_alone(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    path = await conflicting_worktree(git_repo, tmp_path)
+    (path / "README.md").write_text("not committed yet\n")
+
+    with pytest.raises(worktree.GitError, match="git merge origin/main failed"):
+        await worktree.start_merge(path, "main")
+
+    assert (path / "README.md").read_text() == "not committed yet\n"
+    assert not await worktree.is_merge_in_progress(path)
+
+
+async def test_aborting_a_merge_restores_the_branch(git_repo: GitRepo, tmp_path: Path) -> None:
+    path = await conflicting_worktree(git_repo, tmp_path)
+    await worktree.start_merge(path, "main")
+
+    await worktree.abort_merge(path)
+
+    assert (path / "README.md").read_text() == "from the task\n"
+    assert not await worktree.has_uncommitted_changes(path)
+
+
+async def test_tasks_started_at_the_same_time_do_not_fight_over_the_fetch(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    """同時 fetch 同一個遠端分支會互搶鎖；遠端有新的 commit 時才看得出來。"""
+    other = tmp_path / "other-clone"
+    git_repo.git("clone", "-q", str(git_repo.origin), str(other), cwd=tmp_path)
+    git_repo.git("config", "user.email", "t@example.com", cwd=other)
+    git_repo.git("config", "user.name", "T", cwd=other)
+    (other / "new.txt").write_text("from elsewhere\n")
+    git_repo.git("add", "new.txt", cwd=other)
+    git_repo.git("commit", "-q", "-m", "remote change", cwd=other)
+    git_repo.git("push", "-q", "origin", "main", cwd=other)
+
+    paths = await asyncio.gather(
+        *(make_worktree(git_repo, tmp_path, f"task-{number}") for number in range(1, 5))
+    )
+
+    assert all((path / "new.txt").exists() for path in paths)

@@ -347,7 +347,7 @@ async def test_feed_notices_changes_that_write_no_event(api: Api) -> None:
     await api.feed.start()
     subscription = api.feed.subscribe()
 
-    await db.update_task(api.conn, created["id"], ci_state=CiState.PASSED)
+    await db.update_task(api.conn, created["id"], ci_state=CiState.PASSED, merge_state="clean")
     await api.feed.publish_changes()
 
     (card,) = await collect(subscription)
@@ -388,7 +388,9 @@ async def test_stream_replays_missed_events_then_continues_live(
             chunks.append(chunk)
             if len(chunks) == 1 + len(events) - 2:
                 # 補送完了：這時再發生的事也要收得到。
-                await db.update_task(api.conn, created["id"], ci_state=CiState.PASSED)
+                await db.update_task(
+                    api.conn, created["id"], ci_state=CiState.PASSED, merge_state="clean"
+                )
                 await api.feed.publish_changes()
             if chunk.startswith("event: task"):
                 api.is_closing = True

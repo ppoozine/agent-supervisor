@@ -138,6 +138,25 @@ class Runner:
             self._launch(await db.get_task(self._conn, task_id), run)
         return run
 
+    async def start_conflict_fix(self, task_id: int) -> db.Run | None:
+        """PR 和基底分支有衝突時建立 merge_conflict run 並開始執行；不符合條件就回傳 None。
+
+        合併在準備階段才開始，那時 run 已經存在、可以被中止。
+        """
+        limits = status.Limits(self._config.task_cost_limit_usd, self._config.task_token_limit)
+        async with self._lock_for(task_id):
+            run = await db.create_conflict_run(
+                self._conn,
+                task_id,
+                "The pull request conflicts with its base branch;"
+                " the merge is started before the agent runs.",
+                condition=lambda snapshot: status.can_resolve_conflict(snapshot, limits),
+            )
+            if run is None:
+                return None
+            self._launch(await db.get_task(self._conn, task_id), run)
+        return run
+
     async def start_feedback(self, task_id: int) -> db.Run | None:
         """PR 上有還沒處理的留言時建立 review_feedback run 並開始執行；不符合條件就回傳 None。
 

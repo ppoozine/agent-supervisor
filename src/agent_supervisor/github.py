@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from agent_supervisor.enums import CiState, PrState, ReviewState
+from agent_supervisor.enums import CiState, MergeState, PrState, ReviewState
 from agent_supervisor.process import CommandResult, run_command
 
 PR_FIELDS = "number,state,headRefOid,url"
-STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews"
+STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews,mergeable"
 
 # 檢查結果的對應，依據見 docs/02-mvp-spec.md 的「ci_state 的意思」。
 # 不在這兩組裡的值（還在跑、等人核准、過期、沒看過的新值）一律當成還沒結束。
@@ -21,6 +21,8 @@ _REVIEW_STATES = {
     "APPROVED": ReviewState.APPROVED,
     "CHANGES_REQUESTED": ReviewState.CHANGES_REQUESTED,
 }
+# GitHub 還沒算出來時回 UNKNOWN；沒看過的值也當成未知，不當成有衝突或沒有衝突。
+_MERGE_STATES = {"MERGEABLE": MergeState.CLEAN, "CONFLICTING": MergeState.CONFLICTING}
 _ACTIONS_JOB_URL = re.compile(r"/actions/runs/\d+/job/(\d+)")
 # 解析 `gh` 的輸出時，內容不是預期的 JSON 形狀會遇到的例外（JSON 格式錯誤屬於 ValueError）。
 _UNEXPECTED_OUTPUT_ERRORS = (AttributeError, KeyError, TypeError, ValueError)
@@ -61,6 +63,7 @@ class PullRequestStatus:
     failed_checks: tuple[FailedCheck, ...]
     feedback_ids: tuple[str, ...] = ()
     """PR 上一般留言與已送出的 review 的編號，用來判斷有沒有新的留言要抓。"""
+    merge_state: MergeState = MergeState.UNKNOWN
 
 
 class FeedbackKind(StrEnum):
@@ -205,6 +208,7 @@ def parse_pull_request_status(data: dict[str, Any]) -> PullRequestStatus:
         review_state=_REVIEW_STATES.get(data.get("reviewDecision") or "", ReviewState.NONE),
         failed_checks=failed,
         feedback_ids=_feedback_ids(data),
+        merge_state=_MERGE_STATES.get(str(data.get("mergeable") or ""), MergeState.UNKNOWN),
     )
 
 

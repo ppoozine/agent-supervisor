@@ -289,7 +289,7 @@ async def test_status_is_fetched_with_one_gh_call() -> None:
             "--repo",
             "owner/repo",
             "--json",
-            "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews",
+            "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews,mergeable",
         ]
     ]
 
@@ -412,3 +412,20 @@ async def test_unexpected_feedback_output_is_a_github_error() -> None:
 
     with pytest.raises(GitHubError):
         await GitHub(gh).list_feedback("owner/repo", 7)
+
+
+@pytest.mark.parametrize(
+    ("mergeable", "expected"),
+    [
+        ("MERGEABLE", "clean"),
+        ("CONFLICTING", "conflicting"),
+        ("UNKNOWN", "unknown"),
+        ("SOMETHING_NEW", "unknown"),
+        (None, "unknown"),
+    ],
+)
+def test_mergeable_maps_to_a_merge_state(mergeable: str | None, expected: str) -> None:
+    data = pr_view(PASS)
+    data["mergeable"] = mergeable
+
+    assert parse_pull_request_status(data).merge_state == expected

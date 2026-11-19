@@ -13,7 +13,7 @@ import aiosqlite
 
 from agent_supervisor import ci_log, db, worktree
 from agent_supervisor.config import Config
-from agent_supervisor.enums import CiState, EventType, ReviewState, RunTrigger
+from agent_supervisor.enums import CiState, EventType, MergeState, ReviewState, RunTrigger
 from agent_supervisor.github import GitHub
 from agent_supervisor.runner import EventWriter
 
@@ -31,10 +31,38 @@ class RunStages:
         self._github = github
 
     async def prepare(self, task: db.Task, run: db.Run, record: EventWriter) -> None:
-        """確保任務有自己的 worktree；ci_failure run 另外要抓失敗的 CI log。"""
+        """確保任務有自己的 worktree，再依 run 的種類準備：抓 CI log，或開始合併。"""
         await self._ensure_worktree(task)
         if run.trigger is RunTrigger.CI_FAILURE:
             await self._load_ci_failure(task, run)
+        if run.trigger is RunTrigger.MERGE_CONFLICT:
+            await self._start_merge(task, run)
+
+    async def _start_merge(self, task: db.Task, run: db.Run) -> None:
+        """把基底分支合併進任務的 branch，停在有衝突的狀態，交給 agent 解。
+
+        合併由 supervisor 開始、收尾時由 supervisor commit：有些 agent 在 worktree 裡
+        不能執行 git 的寫入指令，但改檔案沒有問題。以本機的 git 為準，不以 GitHub 的回報為準。
+        """
+        current = await db.get_task(self._conn, task.id)
+        if current.worktree_path is None:
+            raise StageError(f"task {current.id} has no worktree to merge in")
+        project = await db.get_project(self._conn, current.project_id)
+        path = Path(current.worktree_path)
+        if await worktree.is_merge_in_progress(path):
+            raise StageError("a merge is already in progress in this worktree")
+        if await worktree.has_uncommitted_changes(path):
+            raise StageError("the worktree has uncommitted changes; cannot start a merge")
+        conflicted = await worktree.start_merge(path, project.default_branch)
+        if not conflicted:
+            if await worktree.is_merge_in_progress(path):
+                await worktree.abort_merge(path)
+            raise StageError(
+                f"merging {project.default_branch} produced no conflict locally; nothing to resolve"
+            )
+        await db.set_run_input_text(
+            self._conn, run.id, _conflict_prompt(project.default_branch, conflicted)
+        )
 
     async def _ensure_worktree(self, task: db.Task) -> None:
         current = await db.get_task(self._conn, task.id)
@@ -91,10 +119,11 @@ class RunStages:
         project = await db.get_project(self._conn, current.project_id)
         path = Path(current.worktree_path)
 
-        if await worktree.has_uncommitted_changes(path):
-            await worktree.commit_all(
-                path, f"chore(agent): save uncommitted changes from run {run.id}"
-            )
+        # 合併到一半時即使沒有任何變更也要 commit：衝突全部選「保留自己這邊」的話，
+        # 內容和合併前一模一樣，但沒有這個 commit，合併就不算完成。
+        is_merging = await worktree.is_merge_in_progress(path)
+        if is_merging or await worktree.has_uncommitted_changes(path):
+            await self._commit(path, project, run)
         if await worktree.count_commits_ahead(path, project.default_branch) == 0:
             return
         if project.github_repo is None:
@@ -105,6 +134,25 @@ class RunStages:
         if current.pr_number is None:
             await self._ensure_pull_request(current, project, record)
 
+    async def _commit(self, path: Path, project: db.Project, run: db.Run) -> None:
+        """補 commit。合併到一半時先確認衝突真的解掉了，不能把衝突標記發布出去。
+
+        不論這個 run 是什麼原因開始的都要檢查：上一個解衝突的 run 可能被中止，
+        留下合併到一半的工作目錄給這一個 run。
+        """
+        if not await worktree.is_merge_in_progress(path):
+            await worktree.commit_all(
+                path, f"chore(agent): save uncommitted changes from run {run.id}"
+            )
+            return
+        unresolved = await worktree.files_with_conflict_markers(path)
+        if unresolved:
+            raise StageError(f"conflict markers are still present in: {', '.join(unresolved)}")
+        await worktree.commit_all(
+            path,
+            f"chore(agent): merge {project.default_branch} and resolve conflicts (run {run.id})",
+        )
+
     async def archive(self, task: db.Task) -> None:
         """清掉任務的 worktree。未 commit 的變更先 commit 到 branch，不 push。"""
         current = await db.get_task(self._conn, task.id)
@@ -113,6 +161,9 @@ class RunStages:
             return
         project = await db.get_project(self._conn, current.project_id)
         path = Path(current.worktree_path)
+        if await worktree.is_merge_in_progress(path):
+            # 解到一半的合併不保留：commit 下去等於把衝突標記存進 branch。任務自己的 commit 都還在。
+            await worktree.abort_merge(path)
         if await worktree.has_uncommitted_changes(path):
             await worktree.commit_all(path, "chore(agent): save uncommitted changes before archive")
         await worktree.remove(Path(project.repo_path), path)
@@ -128,6 +179,7 @@ class RunStages:
             head_sha=sha,
             ci_state=CiState.PENDING,
             review_state=ReviewState.NONE,
+            merge_state=MergeState.UNKNOWN,
         )
         await record(EventType.PUSHED, {"branch": task.branch, "head_sha": sha})
 
@@ -150,3 +202,17 @@ class RunStages:
         )
         await db.update_task(self._conn, task.id, pr_number=created.number, pr_state=created.state)
         await record(EventType.PR_OPENED, {"number": created.number, "url": created.url})
+
+
+def _conflict_prompt(base_branch: str, conflicted: list[str]) -> str:
+    files = "\n".join(f"- {name}" for name in conflicted)
+    return (
+        f"The pull request for this task conflicts with the latest {base_branch} branch."
+        f" A merge of {base_branch} into this branch has been started for you and stopped"
+        " at the conflicts. These files contain conflict markers:\n\n"
+        f"{files}\n\n"
+        "Resolve every conflict by editing the files so that the intent of both sides is kept,"
+        " and remove all conflict markers. Run the tests if you can."
+        " Do not run git merge, git rebase, git commit, git push or git merge --abort;"
+        " the merge is committed and pushed for you when you finish."
+    )

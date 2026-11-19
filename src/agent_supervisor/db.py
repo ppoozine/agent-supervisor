@@ -13,14 +13,14 @@ import json
 import weakref
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
-from agent_supervisor.enums import EventType, ExitStatus, PrState, RunTrigger
+from agent_supervisor.enums import EventType, ExitStatus, MergeState, PrState, RunTrigger
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     ci_fix_attempts INTEGER NOT NULL DEFAULT 0,
     last_handled_feedback_event_id INTEGER,
     feedback_attempts INTEGER NOT NULL DEFAULT 0,
+    merge_state TEXT NOT NULL DEFAULT 'unknown',
+    last_handled_conflict_head_sha TEXT,
     archived_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -98,6 +100,8 @@ FINISHED_PR_STATES = (PrState.MERGED, PrState.CLOSED)
 ADDED_COLUMNS = (
     ("tasks", "last_handled_feedback_event_id", "INTEGER"),
     ("tasks", "feedback_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("tasks", "merge_state", "TEXT NOT NULL DEFAULT 'unknown'"),
+    ("tasks", "last_handled_conflict_head_sha", "TEXT"),
 )
 
 _write_locks: weakref.WeakKeyDictionary[aiosqlite.Connection, asyncio.Lock] = (
@@ -155,6 +159,8 @@ class Task:
     ci_fix_attempts: int
     last_handled_feedback_event_id: int | None
     feedback_attempts: int
+    merge_state: str
+    last_handled_conflict_head_sha: str | None
     archived_at: str | None
     created_at: str
     updated_at: str
@@ -397,6 +403,32 @@ async def create_ci_failure_run(
     return await get_run(conn, run_id)
 
 
+async def create_conflict_run(
+    conn: aiosqlite.Connection,
+    task_id: int,
+    input_text: str,
+    *,
+    condition: Callable[[TaskSnapshot], bool],
+) -> Run | None:
+    """條件成立時建立一個 merge_conflict run，並記下已處理的 commit、把修復次數加一。
+
+    做法和 `create_ci_failure_run` 相同，但用自己的「已處理」欄位：
+    同一個 commit 可能既有衝突又有 CI 失敗，兩者不能互相蓋掉。修復次數則是共用的。
+    """
+    async with _transaction(conn):
+        snapshot = await get_snapshot(conn, task_id)
+        if not condition(snapshot):
+            return None
+        head_sha = snapshot.task.head_sha
+        run_id = await _insert_run(conn, task_id, RunTrigger.MERGE_CONFLICT, input_text, head_sha)
+        await conn.execute(
+            "UPDATE tasks SET last_handled_conflict_head_sha = ?,"
+            " ci_fix_attempts = ci_fix_attempts + 1, updated_at = ? WHERE id = ?",
+            (head_sha, utc_now(), task_id),
+        )
+    return await get_run(conn, run_id)
+
+
 async def create_feedback_run(
     conn: aiosqlite.Connection,
     task_id: int,
@@ -533,7 +565,7 @@ async def list_tasks_with_open_pr(conn: aiosqlite.Connection) -> list[Task]:
         "SELECT * FROM tasks WHERE pr_number IS NOT NULL AND pr_state = ? ORDER BY id",
         (PrState.OPEN,),
     )
-    return [Task(**dict(row)) for row in await cursor.fetchall()]
+    return [_to_task(row) for row in await cursor.fetchall()]
 
 
 async def apply_github_state(
@@ -545,8 +577,12 @@ async def apply_github_state(
     head_sha: str,
     ci_state: str,
     review_state: str,
+    merge_state: str = MergeState.UNKNOWN,
 ) -> bool:
     """把 Poller 查到的 GitHub 狀態當成一組寫入，回傳是否有變化。
+
+    「能不能合併」GitHub 要算一下才知道，剛 push 完或基底分支剛變動時會回報未知。
+    同一個 commit 上已經知道答案時，未知不會把它蓋掉，否則這個值會來回跳動。
 
     兩種情況會丟棄這次結果：查詢期間 `head_sha` 被別人改掉（例如剛 push）；
     或 PR 還開著、GitHub 回報的卻是我們更早 push 過的 commit，表示它的資料還沒跟上最新的 push。
@@ -558,11 +594,14 @@ async def apply_github_state(
         "head_sha": head_sha,
         "ci_state": ci_state,
         "review_state": review_state,
+        "merge_state": merge_state,
     }
     async with _transaction(conn):
         task = await get_task(conn, task_id)
         if task.head_sha != expected_head_sha:
             return False
+        if merge_state == MergeState.UNKNOWN and head_sha == task.head_sha:
+            new_state["merge_state"] = task.merge_state
         is_lagging = (
             pr_state == PrState.OPEN
             and head_sha != task.head_sha
@@ -574,8 +613,8 @@ async def apply_github_state(
             return False
         await conn.execute(
             "UPDATE tasks SET pr_state = ?, head_sha = ?, ci_state = ?, review_state = ?,"
-            " updated_at = ? WHERE id = ?",
-            (pr_state, head_sha, ci_state, review_state, utc_now(), task_id),
+            " merge_state = ?, updated_at = ? WHERE id = ?",
+            (*new_state.values(), utc_now(), task_id),
         )
         await _insert_event(
             conn, task_id, None, EventType.CI_STATUS, {"pr_number": task.pr_number, **new_state}
@@ -588,7 +627,7 @@ async def get_task(conn: aiosqlite.Connection, task_id: int) -> Task:
     row = await _fetch_one(conn, "SELECT * FROM tasks WHERE id = ?", (task_id,))
     if row is None:
         raise NotFoundError(f"task {task_id} not found")
-    return Task(**dict(row))
+    return _to_task(row)
 
 
 async def get_run(conn: aiosqlite.Connection, run_id: int) -> Run:
@@ -629,7 +668,16 @@ async def set_task_session_id(conn: aiosqlite.Connection, task_id: int, session_
 
 
 TASK_UPDATABLE_FIELDS = frozenset(
-    {"branch", "worktree_path", "pr_number", "pr_state", "head_sha", "ci_state", "review_state"}
+    {
+        "branch",
+        "worktree_path",
+        "pr_number",
+        "pr_state",
+        "head_sha",
+        "ci_state",
+        "review_state",
+        "merge_state",
+    }
 )
 
 
@@ -807,6 +855,14 @@ async def _insert_event(
         (task_id, run_id, utc_now(), str(event_type), json.dumps(payload, ensure_ascii=False)),
     )
     return _last_id(cursor)
+
+
+_TASK_FIELDS = frozenset(field.name for field in fields(Task))
+
+
+def _to_task(row: aiosqlite.Row) -> Task:
+    # 資料庫被比較新的版本開過的話會多出不認得的欄位；略過它們，舊版才不會讀不了。
+    return Task(**{name: value for name, value in dict(row).items() if name in _TASK_FIELDS})
 
 
 def _to_project(row: aiosqlite.Row) -> Project:

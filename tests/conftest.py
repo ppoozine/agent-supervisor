@@ -21,6 +21,13 @@ class GitRepo:
         )
         return completed.stdout.strip()
 
+    def push_to_main(self, name: str, content: str) -> None:
+        """在主要的工作目錄改一個檔案、commit 並 push 到 origin 的 main。"""
+        (self.path / name).write_text(content)
+        self.git("add", name)
+        self.git("commit", "-q", "-m", f"change {name} on main")
+        self.git("push", "-q", "origin", "main")
+
 
 @pytest.fixture
 def git_repo(tmp_path: Path) -> GitRepo:
