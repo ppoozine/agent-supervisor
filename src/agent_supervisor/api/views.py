@@ -33,6 +33,7 @@ def card_view(
         "pr_state": task.pr_state,
         "ci_state": task.ci_state,
         "review_state": task.review_state,
+        "merge_state": task.merge_state,
         "ci_fix_attempts": task.ci_fix_attempts,
         "max_ci_fix_attempts": status.MAX_CI_FIX_ATTEMPTS,
         "cost_usd": snapshot.usage.cost_usd if reports_cost else None,

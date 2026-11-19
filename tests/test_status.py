@@ -13,6 +13,7 @@ from agent_supervisor.status import (
     board_status,
     can_address_feedback,
     can_auto_fix,
+    can_resolve_conflict,
 )
 
 LIMITS = Limits(cost_usd=5.0, tokens=1000)
@@ -42,6 +43,8 @@ def snapshot(
         "ci_fix_attempts": 0,
         "last_handled_feedback_event_id": None,
         "feedback_attempts": 0,
+        "merge_state": "clean",
+        "last_handled_conflict_head_sha": None,
         "archived_at": None,
     }
     fields.update(task_fields)
@@ -112,6 +115,7 @@ def test_task_with_a_failed_ci_on_a_new_commit_can_be_fixed() -> None:
         pytest.param({"exit_status": ExitStatus.INTERRUPTED}, id="7-last-run-interrupted"),
         pytest.param({"review_state": "changes_requested"}, id="8-changes-requested"),
         pytest.param({"pending_feedback": 1}, id="8-comments-waiting"),
+        pytest.param({"merge_state": "conflicting"}, id="9-merge-conflict"),
     ],
 )
 def test_each_broken_condition_blocks_auto_fix(overrides: dict[str, Any]) -> None:
@@ -387,3 +391,91 @@ def test_failed_ci_is_fixed_again_once_the_requested_changes_were_addressed() ->
     addressed = failing(review_state="changes_requested", last_handled_feedback_event_id=9)
 
     assert can_auto_fix(addressed, LIMITS)
+
+
+def conflicting(**overrides: Any) -> db.TaskSnapshot:
+    """一個符合全部解衝突條件的快照，再套用指定的差異。"""
+    return snapshot(**{"merge_state": "conflicting", **overrides})
+
+
+def test_task_with_a_conflict_on_a_new_commit_can_have_it_resolved() -> None:
+    assert can_resolve_conflict(conflicting(), LIMITS)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"merge_state": "clean"}, id="no-conflict"),
+        pytest.param({"merge_state": "unknown"}, id="not-computed-yet"),
+        pytest.param({"last_handled_conflict_head_sha": "sha-2"}, id="commit-already-handled"),
+        pytest.param({"head_sha": None}, id="no-commit-known"),
+        pytest.param({"ci_fix_attempts": 3}, id="fix-attempts-used-up"),
+        pytest.param({"cost_usd": 5.0}, id="cost-limit-reached"),
+        pytest.param({"exit_status": None}, id="run-in-progress"),
+        pytest.param({"pr_state": "closed"}, id="pr-closed"),
+        pytest.param({"archived_at": "t"}, id="archived"),
+        pytest.param({"exit_status": ExitStatus.STOPPED}, id="last-run-stopped"),
+        pytest.param({"pending_feedback": 1}, id="comments-waiting"),
+    ],
+)
+def test_each_broken_condition_blocks_resolving_a_conflict(overrides: dict[str, Any]) -> None:
+    assert not can_resolve_conflict(conflicting(**overrides), LIMITS)
+
+
+def test_ci_failure_handled_on_a_commit_does_not_hide_a_conflict_on_it() -> None:
+    assert can_resolve_conflict(conflicting(last_handled_head_sha="sha-2"), LIMITS)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "column", "label"),
+    [
+        pytest.param(
+            {"merge_state": "conflicting"}, Column.WORKING, "Resolving conflict", id="waiting"
+        ),
+        pytest.param(
+            {"exit_status": None, "trigger": RunTrigger.MERGE_CONFLICT},
+            Column.WORKING,
+            "Resolving conflict",
+            id="run-in-progress",
+        ),
+        # 留言 > 衝突 > CI 失敗
+        pytest.param(
+            {"merge_state": "conflicting", "pending_feedback": 1},
+            Column.WORKING,
+            "Addressing review",
+            id="comments-beat-conflict",
+        ),
+        pytest.param(
+            {"merge_state": "conflicting", "ci_state": "failed"},
+            Column.WORKING,
+            "Resolving conflict",
+            id="conflict-beats-failed-ci",
+        ),
+        pytest.param(
+            {"merge_state": "conflicting", "last_handled_conflict_head_sha": "sha-2"},
+            Column.NEEDS_YOU,
+            "Merge conflict",
+            id="still-conflicting-after-a-run",
+        ),
+        pytest.param(
+            {"merge_state": "conflicting", "ci_fix_attempts": 3},
+            Column.NEEDS_YOU,
+            "Merge conflict",
+            id="attempts-used-up",
+        ),
+        # CI 通過但有衝突，或還不知道有沒有衝突：都不能說可以合併
+        pytest.param(
+            {"merge_state": "unknown"}, Column.IN_REVIEW, "Checking mergeability", id="unknown"
+        ),
+        pytest.param(
+            {"merge_state": "unknown", "ci_state": "pending"},
+            Column.IN_REVIEW,
+            "CI running",
+            id="unknown-while-ci-runs",
+        ),
+    ],
+)
+def test_board_status_with_merge_conflicts(
+    overrides: dict[str, Any], column: Column, label: str
+) -> None:
+    assert board_status(snapshot(**overrides), LIMITS) == BoardStatus(column, label)

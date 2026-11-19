@@ -91,6 +91,7 @@ class Poller:
             head_sha=status.head_sha,
             ci_state=status.ci_state,
             review_state=status.review_state,
+            merge_state=status.merge_state,
         )
         if not changed:
             return None

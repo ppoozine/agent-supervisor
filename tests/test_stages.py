@@ -13,6 +13,7 @@ from agent_supervisor.enums import (
     CiState,
     EventType,
     ExitStatus,
+    MergeState,
     PrState,
     ReviewState,
     RunTrigger,
@@ -36,10 +37,11 @@ def pr_status(
     review_state: ReviewState = ReviewState.NONE,
     failed_checks: tuple[FailedCheck, ...] = (),
     feedback_ids: tuple[str, ...] = (),
+    merge_state: MergeState = MergeState.CLEAN,
 ) -> PullRequestStatus:
-    """建立一組 Poller 會查到的狀態。"""
+    """建立一組 Poller 會查到的狀態。預設沒有衝突。"""
     return PullRequestStatus(
-        pr_state, head_sha, ci_state, review_state, failed_checks, feedback_ids
+        pr_state, head_sha, ci_state, review_state, failed_checks, feedback_ids, merge_state
     )
 
 
@@ -428,3 +430,114 @@ async def test_prepare_for_a_ci_failure_fails_clearly_when_ci_is_no_longer_faili
 
     with pytest.raises(StageError, match="no longer failing on this commit"):
         await scene.stages.prepare(scene.task, run, scene.record)
+
+
+async def conflict_run(scene: Scene, trigger: RunTrigger = RunTrigger.MERGE_CONFLICT) -> Path:
+    """任務的 branch 與 main 改了同一行，並且已經有一個要處理它的 run。"""
+    path = await scene.prepare()
+    (path / "README.md").write_text("from the task\n")
+    await scene.finalize()
+    await db.finish_run(scene.conn, scene.run.id, ExitStatus.SUCCESS)
+    scene.repo.push_to_main("README.md", "from main\n")
+    scene.run = await db.create_run(scene.conn, scene.task.id, trigger, "placeholder", "sha")
+    return path
+
+
+async def test_prepare_for_a_conflict_starts_the_merge_and_tells_the_agent_which_files(
+    scene: Scene,
+) -> None:
+    path = await conflict_run(scene)
+
+    await scene.prepare()
+
+    prompt = (await db.get_run(scene.conn, scene.run.id)).input_text
+    assert "- README.md" in prompt
+    assert "Do not run git merge" in prompt
+    assert await worktree.is_merge_in_progress(path)
+
+
+async def test_finalize_publishes_the_merge_once_the_conflict_is_resolved(scene: Scene) -> None:
+    path = await conflict_run(scene)
+    await scene.prepare()
+    (path / "README.md").write_text("from the task and from main\n")
+
+    task = await scene.finalize()
+
+    parents = scene.repo.git("rev-list", "--parents", "-1", "HEAD", cwd=path).split()
+    assert len(parents) == 3
+    assert scene.remote_sha() == await worktree.head_sha(path) == task.head_sha
+    assert task.merge_state == "unknown"
+    assert "resolve conflicts" in scene.repo.git("log", "-1", "--format=%s", cwd=path)
+
+
+async def test_finalize_refuses_to_publish_leftover_conflict_markers(scene: Scene) -> None:
+    path = await conflict_run(scene)
+    await scene.prepare()
+    before = scene.remote_sha()
+
+    with pytest.raises(StageError, match="conflict markers are still present in: README"):
+        await scene.finalize()
+
+    assert scene.remote_sha() == before
+    assert await worktree.is_merge_in_progress(path)
+
+
+async def test_later_run_of_any_kind_cannot_publish_a_half_finished_merge(scene: Scene) -> None:
+    """解衝突的 run 被中止後，下一個 run（例如使用者的訊息）也不能把標記推出去。"""
+    await conflict_run(scene)
+    await scene.prepare()
+    await db.finish_run(scene.conn, scene.run.id, ExitStatus.STOPPED)
+    scene.run = await db.create_run(scene.conn, scene.task.id, RunTrigger.USER_MESSAGE, "go on")
+    before = scene.remote_sha()
+
+    with pytest.raises(StageError, match="conflict markers"):
+        await scene.finalize()
+
+    assert scene.remote_sha() == before
+
+
+async def test_prepare_for_a_conflict_fails_when_there_is_nothing_to_resolve(scene: Scene) -> None:
+    path = await scene.prepare()
+    (path / "feature.txt").write_text("new\n")
+    await scene.finalize()
+    await db.finish_run(scene.conn, scene.run.id, ExitStatus.SUCCESS)
+    scene.repo.push_to_main("README.md", "from main\n")
+    scene.run = await db.create_run(
+        scene.conn, scene.task.id, RunTrigger.MERGE_CONFLICT, "placeholder", "sha"
+    )
+
+    with pytest.raises(StageError, match="no conflict locally"):
+        await scene.prepare()
+
+    assert not await worktree.is_merge_in_progress(path)
+    assert not await worktree.has_uncommitted_changes(path)
+
+
+async def test_archive_drops_a_half_finished_merge_instead_of_saving_the_markers(
+    scene: Scene,
+) -> None:
+    path = await conflict_run(scene)
+    await scene.prepare()
+    task_commit = scene.remote_sha()
+
+    await scene.stages.archive(scene.task)
+
+    assert not path.exists()
+    assert scene.task.branch is not None
+    assert scene.repo.git("rev-parse", scene.task.branch) == task_commit
+
+
+async def test_merge_resolved_by_keeping_the_task_side_is_still_committed(scene: Scene) -> None:
+    """全部選「保留自己這邊」時內容和合併前一樣，git 看不到變更，但合併仍然要完成。"""
+    path = await conflict_run(scene)
+    await scene.prepare()
+    (path / "README.md").write_text("from the task\n")
+    scene.repo.git("add", "README.md", cwd=path)
+    assert not await worktree.has_uncommitted_changes(path)
+
+    await scene.finalize()
+
+    parents = scene.repo.git("rev-list", "--parents", "-1", "HEAD", cwd=path).split()
+    assert len(parents) == 3
+    assert scene.remote_sha() == await worktree.head_sha(path)
+    assert not await worktree.is_merge_in_progress(path)

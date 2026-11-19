@@ -328,6 +328,7 @@ async def test_github_state_is_written_as_a_group_with_one_event(
         "head_sha": "sha-1",
         "ci_state": "passed",
         "review_state": "approved",
+        "merge_state": "unknown",
     }
 
 
@@ -458,6 +459,7 @@ async def test_database_from_an_older_version_gains_the_new_columns(tmp_path: Pa
         None,
         0,
     )
+    assert (task.merge_state, task.last_handled_conflict_head_sha) == ("unknown", None)
 
 
 def comment(github_id: str, **fields: object) -> dict[str, object]:
@@ -532,3 +534,63 @@ async def test_user_message_resets_the_feedback_attempts(conn: aiosqlite.Connect
     await db.create_run(conn, task.id, RunTrigger.USER_MESSAGE, "carry on")
 
     assert (await db.get_task(conn, task.id)).feedback_attempts == 0
+
+
+async def poll(conn: aiosqlite.Connection, task_id: int, head_sha: str, merge_state: str) -> bool:
+    task = await db.get_task(conn, task_id)
+    return await db.apply_github_state(
+        conn,
+        task_id,
+        expected_head_sha=task.head_sha,
+        pr_state="open",
+        head_sha=head_sha,
+        ci_state=task.ci_state,
+        review_state="none",
+        merge_state=merge_state,
+    )
+
+
+async def test_unknown_merge_state_does_not_replace_a_known_one_on_the_same_commit(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn, "sha-1")
+    await poll(conn, task.id, "sha-1", "conflicting")
+
+    changed = await poll(conn, task.id, "sha-1", "unknown")
+
+    assert not changed
+    assert (await db.get_task(conn, task.id)).merge_state == "conflicting"
+
+
+async def test_unknown_merge_state_is_stored_for_a_new_commit(conn: aiosqlite.Connection) -> None:
+    task = await with_failed_ci(conn, "sha-1")
+    await poll(conn, task.id, "sha-1", "conflicting")
+
+    changed = await poll(conn, task.id, "sha-by-hand", "unknown")
+
+    assert changed
+    assert (await db.get_task(conn, task.id)).merge_state == "unknown"
+
+
+async def test_conflict_run_uses_its_own_marker_and_the_shared_fix_counter(
+    conn: aiosqlite.Connection,
+) -> None:
+    task = await with_failed_ci(conn, "sha-1")
+
+    run = await db.create_conflict_run(conn, task.id, "merge", condition=lambda snapshot: True)
+
+    after = await db.get_task(conn, task.id)
+    assert run is not None
+    assert (run.trigger, run.source_head_sha) == (RunTrigger.MERGE_CONFLICT, "sha-1")
+    assert (after.last_handled_conflict_head_sha, after.last_handled_head_sha) == ("sha-1", None)
+    assert after.ci_fix_attempts == 1
+
+
+async def test_task_can_be_read_from_a_database_with_columns_from_a_newer_version(
+    conn: aiosqlite.Connection,
+) -> None:
+    task, _ = await make_task(conn)
+    await conn.execute("ALTER TABLE tasks ADD COLUMN added_by_a_newer_version TEXT")
+    await conn.commit()
+
+    assert (await db.get_task(conn, task.id)).title == "demo"

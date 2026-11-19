@@ -10,6 +10,7 @@ class RunTrigger(StrEnum):
     CI_FAILURE = "ci_failure"
     USER_MESSAGE = "user_message"
     REVIEW_FEEDBACK = "review_feedback"
+    MERGE_CONFLICT = "merge_conflict"
 
 
 class ExitStatus(StrEnum):
@@ -60,3 +61,11 @@ class ReviewState(StrEnum):
     NONE = "none"
     APPROVED = "approved"
     CHANGES_REQUESTED = "changes_requested"
+
+
+class MergeState(StrEnum):
+    """`tasks.merge_state` 的合法值：PR 能不能合併進基底分支。"""
+
+    UNKNOWN = "unknown"
+    CLEAN = "clean"
+    CONFLICTING = "conflicting"

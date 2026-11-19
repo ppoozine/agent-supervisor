@@ -73,8 +73,10 @@ class Loop:
         await self.runner.wait(run.id)
 
     async def ci(self, state: str, **fields: object) -> None:
-        """Poller 查到了 CI 結果。"""
-        await db.update_task(self.conn, self.task_id, ci_state=state, **fields)
+        """Poller 查到了 CI 結果。預設同時查到 PR 沒有衝突。"""
+        await db.update_task(
+            self.conn, self.task_id, **{"ci_state": state, "merge_state": "clean", **fields}
+        )
 
     async def dispatch(self) -> list[db.Run]:
         return await self.dispatcher.dispatch_once()
@@ -413,3 +415,32 @@ async def test_addressing_feedback_stops_after_five_rounds_until_a_person_steps_
 
     resumed = await loop.fix(pushes=None)
     assert resumed.trigger is RunTrigger.REVIEW_FEEDBACK
+
+
+async def test_conflict_is_handed_to_the_agent_once_per_commit(loop: Loop) -> None:
+    await loop.start()
+    await loop.ci("passed", merge_state="conflicting")
+    assert await loop.board() == status.BoardStatus(Column.WORKING, "Resolving conflict")
+
+    run = await loop.fix(pushes=None)
+    after = await loop.task()
+
+    assert (run.trigger, run.source_head_sha) == (RunTrigger.MERGE_CONFLICT, "sha-1")
+    assert (after.last_handled_conflict_head_sha, after.ci_fix_attempts) == ("sha-1", 1)
+    # agent 沒有產生新的 commit、衝突還在：不再自動處理，等人來看。
+    assert await loop.dispatch() == []
+    assert await loop.board() == status.BoardStatus(Column.NEEDS_YOU, "Merge conflict")
+
+
+async def test_comments_then_conflict_then_failed_ci(loop: Loop) -> None:
+    await loop.start()
+    await loop.ci("failed", merge_state="conflicting")
+    await comments(loop, "IC_1")
+
+    first = await loop.fix(pushes=None)
+    second = await loop.fix(pushes="sha-2")
+
+    assert [first.trigger, second.trigger] == [
+        RunTrigger.REVIEW_FEEDBACK,
+        RunTrigger.MERGE_CONFLICT,
+    ]

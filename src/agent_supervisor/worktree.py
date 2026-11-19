@@ -6,6 +6,7 @@
 
 import asyncio
 import re
+import weakref
 from pathlib import Path
 
 from agent_supervisor.process import run_command
@@ -16,8 +17,21 @@ MAX_BRANCH_LENGTH = 60
 GITHUB_URL = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 
 
+# 每個事件迴圈一把鎖。同一個 repo 的各個 worktree 共用同一份 git 資料，
+# 兩個 fetch 同時更新同一個遠端分支會互搶鎖，其中一個會失敗。
+_fetch_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+    weakref.WeakKeyDictionary()
+)
+
+
 class GitError(RuntimeError):
     """git 指令失敗。"""
+
+
+async def fetch(path: Path, branch: str) -> None:
+    """更新遠端的一個分支。同一時間只進行一個 fetch。"""
+    async with _fetch_locks.setdefault(asyncio.get_running_loop(), asyncio.Lock()):
+        await _git(path, "fetch", REMOTE, branch)
 
 
 def branch_name(task_id: int, title: str) -> str:
@@ -33,7 +47,7 @@ def branch_name(task_id: int, title: str) -> str:
 
 async def create(repo_path: Path, worktree_path: Path, *, branch: str, base_branch: str) -> None:
     """先更新遠端的基底分支，再從它建立新的 branch 與 worktree。"""
-    await _git(repo_path, "fetch", REMOTE, base_branch)
+    await fetch(repo_path, base_branch)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     await _git(
         repo_path, "worktree", "add", "-b", branch, str(worktree_path), f"{REMOTE}/{base_branch}"
@@ -55,6 +69,63 @@ async def commit_all(worktree_path: Path, message: str) -> str:
     await _git(worktree_path, "add", "-A")
     await _git(worktree_path, "commit", "-m", message)
     return await head_sha(worktree_path)
+
+
+async def start_merge(worktree_path: Path, base_branch: str) -> list[str]:
+    """把遠端最新的基底分支合併進目前的 branch，不 commit；回傳有衝突的檔案。
+
+    有衝突時 git 會以非零結束，這是預期的結果：工作目錄停在合併到一半的狀態，
+    衝突的檔案裡留著標記，等人或 agent 解掉之後再 commit。
+    沒有衝突時回傳空清單（合併的結果已經放進暫存區，或本來就不需要合併）。
+    其他失敗（例如工作目錄有未 commit 的變更擋住）拋出 `GitError`，並還原到合併之前。
+    """
+    await fetch(worktree_path, base_branch)
+    arguments = ["git", "merge", "--no-commit", "--no-ff", f"{REMOTE}/{base_branch}"]
+    result = await run_command(arguments, cwd=worktree_path)
+    conflicted = await unmerged_files(worktree_path)
+    if result.returncode != 0 and not conflicted:
+        if await is_merge_in_progress(worktree_path):
+            await abort_merge(worktree_path)
+        detail = (result.stderr or result.stdout).strip()
+        raise GitError(f"git merge {REMOTE}/{base_branch} failed: {detail}")
+    return conflicted
+
+
+async def is_merge_in_progress(worktree_path: Path) -> bool:
+    """工作目錄是否停在合併到一半的狀態。"""
+    result = await run_command(
+        ["git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD"], cwd=worktree_path
+    )
+    return result.returncode == 0
+
+
+async def unmerged_files(worktree_path: Path) -> list[str]:
+    """合併後還沒標成已解決的檔案。"""
+    output = await _git(worktree_path, "diff", "--name-only", "--diff-filter=U")
+    return [line for line in output.splitlines() if line]
+
+
+async def files_with_conflict_markers(worktree_path: Path) -> list[str]:
+    """還沒標成已解決、而且內容裡還留著衝突標記的檔案。
+
+    只看 git 認定有衝突的檔案，所以內容剛好長得像標記的其他檔案不會被誤判。
+    """
+    files = await unmerged_files(worktree_path)
+    return [name for name in files if await asyncio.to_thread(_has_markers, worktree_path / name)]
+
+
+def _has_markers(path: Path) -> bool:
+    try:
+        text = path.read_text(errors="replace")
+    except OSError:
+        # 例如其中一邊把檔案刪掉了：沒有內容可以檢查。
+        return False
+    return any(line.startswith(("<<<<<<< ", ">>>>>>> ")) for line in text.splitlines())
+
+
+async def abort_merge(worktree_path: Path) -> None:
+    """放棄合併到一半的狀態，回到合併之前。"""
+    await _git(worktree_path, "merge", "--abort")
 
 
 async def head_sha(worktree_path: Path) -> str:

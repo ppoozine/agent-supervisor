@@ -9,7 +9,14 @@ import pytest
 
 from agent_supervisor import db
 from agent_supervisor.config import Config
-from agent_supervisor.enums import CiState, EventType, ExitStatus, PrState, ReviewState
+from agent_supervisor.enums import (
+    CiState,
+    EventType,
+    ExitStatus,
+    MergeState,
+    PrState,
+    ReviewState,
+)
 from agent_supervisor.github import FeedbackItem, FeedbackKind, GitHubError
 from agent_supervisor.poller import Poller
 from agent_supervisor.runner import EventWriter, Runner
@@ -48,6 +55,7 @@ class Scene:
             pr_state="open",
             head_sha=head_sha,
             ci_state="pending",
+            merge_state="clean",
         )
         return await db.get_task(self.conn, run.task_id)
 
@@ -290,3 +298,16 @@ async def test_failing_comment_query_keeps_the_status_and_is_reported(scene: Sce
     assert (await db.get_task(scene.conn, task.id)).ci_state == "passed"
     assert [task_id for task_id, _ in report.errors] == [task.id]
     assert report.new_feedback == ()
+
+
+async def test_poll_stores_whether_the_pull_request_conflicts(scene: Scene) -> None:
+    task = await scene.task_with_pr()
+    scene.github.statuses[7] = pr_status(
+        "sha-1", CiState.PENDING, merge_state=MergeState.CONFLICTING
+    )
+
+    await scene.poller.poll_once()
+
+    (event,) = await scene.ci_events(task.id)
+    assert (await db.get_task(scene.conn, task.id)).merge_state == "conflicting"
+    assert event.payload["merge_state"] == "conflicting"

@@ -1,6 +1,7 @@
 """Dispatcher：發現需要 agent 處理的任務，就交給 Runner 建立對應的 run。
 
-兩種情況：PR 上有還沒處理的留言（review_feedback），或 CI 失敗（ci_failure）。
+三種情況，依優先順序：PR 上有還沒處理的留言（review_feedback）、
+PR 和基底分支有衝突（merge_conflict）、CI 失敗（ci_failure）。
 這裡只負責「找出候選」。條件的最終檢查、建立 run、更新防迴圈欄位
 由 Runner 在任務鎖與同一個資料庫交易內完成，所以這裡看到的舊資料不會造成重複派工。
 """
@@ -31,7 +32,9 @@ class Dispatcher:
 
         每個任務派工前都先問 `should_stop`；回答 True 就不再派剩下的任務。
         `hold_feedback` 裡的任務這一輪先不處理留言：留言可能還沒留完，等下一輪。
-        留言優先於 CI 失敗：處理留言會產生新的 commit，舊 commit 的失敗就不用修了。
+        留言優先於衝突與 CI 失敗：處理留言會產生新的 commit，舊 commit 的失敗就不用修了。
+        衝突優先於 CI 失敗：有衝突的 PR 上 CI 不會跑，要先解掉才知道 CI 的結果。
+        這個順序和 `status.board_status` 判斷 Working 標籤的順序一致。
         """
         started: list[db.Run] = []
         for snapshot in await db.list_snapshots(self._conn):
@@ -50,6 +53,8 @@ class Dispatcher:
             if task_id in hold_feedback:
                 return None
             return await self._runner.start_feedback(task_id)
+        if status.can_resolve_conflict(snapshot, self._limits):
+            return await self._runner.start_conflict_fix(task_id)
         if status.can_auto_fix(snapshot, self._limits):
             return await self._runner.start_ci_fix(task_id)
         return None

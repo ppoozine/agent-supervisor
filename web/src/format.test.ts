@@ -67,3 +67,14 @@ test('a review comment shows who wrote it, where, and whether it was skipped', (
   expect(inline?.text).toBe('comment by alice on calc.py:21: off by one')
   expect(bot?.text).toBe('comment by ci[bot] (not sent to the agent: bot): coverage 90%')
 })
+
+test('a status change mentions a merge conflict only when there is one', () => {
+  const status = { ci_state: 'passed', review_state: 'none' }
+
+  expect(toLogLine(makeEvent(1, 'ci_status', { ...status, merge_state: 'clean' }))?.text).toBe(
+    'CI passed · review none',
+  )
+  expect(
+    toLogLine(makeEvent(2, 'ci_status', { ...status, merge_state: 'conflicting' }))?.text,
+  ).toBe('CI passed · review none · merge conflict')
+})

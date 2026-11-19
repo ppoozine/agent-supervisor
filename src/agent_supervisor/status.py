@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from agent_supervisor.db import TaskSnapshot
-from agent_supervisor.enums import CiState, ExitStatus, PrState, ReviewState, RunTrigger
+from agent_supervisor.enums import (
+    CiState,
+    ExitStatus,
+    MergeState,
+    PrState,
+    ReviewState,
+    RunTrigger,
+)
 
 MAX_CI_FIX_ATTEMPTS = 3
 MAX_FEEDBACK_ATTEMPTS = 5
@@ -50,6 +57,7 @@ _FINISHED_PR_LABELS = {PrState.MERGED: "Merged", PrState.CLOSED: "Closed"}
 _WORKING_LABELS = {
     RunTrigger.CI_FAILURE: "Fixing CI",
     RunTrigger.REVIEW_FEEDBACK: "Addressing review",
+    RunTrigger.MERGE_CONFLICT: "Resolving conflict",
 }
 
 
@@ -59,12 +67,35 @@ def has_remaining_budget(snapshot: TaskSnapshot, limits: Limits) -> bool:
 
 
 def can_auto_fix(snapshot: TaskSnapshot, limits: Limits) -> bool:
-    """任務是否符合自動修復條件；八條全部成立才算。"""
+    """任務是否符合自動修復條件；九條全部成立才算。"""
     task = snapshot.task
     last_run = snapshot.last_run
     if task.ci_state != CiState.FAILED:
         return False
+    if task.merge_state == MergeState.CONFLICTING:
+        return False
     if task.head_sha is None or task.head_sha == task.last_handled_head_sha:
+        return False
+    if task.ci_fix_attempts >= MAX_CI_FIX_ATTEMPTS:
+        return False
+    if not has_remaining_budget(snapshot, limits):
+        return False
+    if snapshot.has_open_run:
+        return False
+    if task.pr_state != PrState.OPEN or task.archived_at is not None:
+        return False
+    if last_run is None or last_run.exit_status is not ExitStatus.SUCCESS:
+        return False
+    return not has_unaddressed_review(snapshot)
+
+
+def can_resolve_conflict(snapshot: TaskSnapshot, limits: Limits) -> bool:
+    """任務是否符合「請 agent 解衝突」的條件；全部成立才算。"""
+    task = snapshot.task
+    last_run = snapshot.last_run
+    if task.merge_state != MergeState.CONFLICTING:
+        return False
+    if task.head_sha is None or task.head_sha == task.last_handled_conflict_head_sha:
         return False
     if task.ci_fix_attempts >= MAX_CI_FIX_ATTEMPTS:
         return False
@@ -124,6 +155,8 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
         return BoardStatus(Column.WORKING, _working_label(snapshot))
     if can_address_feedback(snapshot, limits):
         return BoardStatus(Column.WORKING, "Addressing review")
+    if can_resolve_conflict(snapshot, limits):
+        return BoardStatus(Column.WORKING, "Resolving conflict")
     if can_auto_fix(snapshot, limits):
         return BoardStatus(Column.WORKING, "Fixing CI")
 
@@ -133,11 +166,16 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
         return BoardStatus(Column.NEEDS_YOU, "No changes")
     if has_unaddressed_review(snapshot):
         return BoardStatus(Column.NEEDS_YOU, "Changes requested")
+    if task.merge_state == MergeState.CONFLICTING:
+        return BoardStatus(Column.NEEDS_YOU, "Merge conflict")
     if task.ci_state == CiState.FAILED:
         label = "CI failed" if has_remaining_budget(snapshot, limits) else "Over budget"
         return BoardStatus(Column.NEEDS_YOU, label)
 
     if task.ci_state == CiState.PASSED:
+        if task.merge_state != MergeState.CLEAN:
+            # GitHub 還沒算出能不能合併：不知道就不能說可以合併。
+            return BoardStatus(Column.IN_REVIEW, "Checking mergeability")
         if not snapshot.require_review or task.review_state == ReviewState.APPROVED:
             return BoardStatus(Column.READY_TO_MERGE, "Ready")
         return BoardStatus(Column.IN_REVIEW, "Review pending")
