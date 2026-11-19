@@ -305,7 +305,7 @@ PR 上出現新的留言時，自動餵回同一個 agent session 處理。流�
 
 - 用 REST API 查完整內容。`gh pr view --json comments,reviews` 看不出作者是不是機器人（`cli-triage[bot]` 會顯示成 `cli-triage`，也沒有型別欄位），而且完全沒有逐行留言。
 - 三種留言都有 `node_id`，和 `gh pr view` 回的 `id` 是同一個值，用它當作留言的編號。
-- 每一則逐行留言都屬於某一個 review；單獨留一則逐行留言時，GitHub 會自動建立一個內文是空的 `COMMENTED` review 來裝它。
+- 每一則逐行留言都屬於某一個 review；單獨留一則逐行留言，或在既有的討論串裡回覆時，GitHub 都會自動建立一個內文是空的 `COMMENTED` review 來裝它。所以只看 review 的編號就知道有沒有新的逐行留言。
 - **還沒送出的 review 查得到**（狀態是 `PENDING`），因為查詢用的就是使用者本人的帳號。這種 review 與它底下的逐行留言一律略過，等送出後才算。
 - 多查三次 API 的成本只在有新留言時才付：Poller 原本那一次 `gh pr view` 順便帶回一般留言與已送出 review 的編號，全部都記錄過就不再多查。
 
@@ -355,9 +355,11 @@ PR 和基底分支有衝突時，自動請同一個 agent session 解掉。流�
 
 **GitHub 怎麼回報**（任務 8 實測）：`gh pr view --json mergeable` 的值是 `MERGEABLE`、`CONFLICTING` 或 `UNKNOWN`。
 
-- 基底分支有新的 commit 之後，GitHub 要重新算：實測先繼續回報舊的 `MERGEABLE` 約 3 秒，接著 `UNKNOWN` 約 3 秒，然後才是 `CONFLICTING`。剛 push 完也一樣會經過 `UNKNOWN`。
+- 基底分支有新的 commit 之後，GitHub 要重新算：實測先繼續回報舊的 `MERGEABLE` 約 3 秒，接著 `UNKNOWN` 約 3 秒，然後才是 `CONFLICTING`。
+- 對 PR 的 branch push 之後也一樣：實測 push 後第 3 秒是 `UNKNOWN`，第 6 秒有了答案。
+- GitHub 是有人問才算：一陣子沒被查詢的 PR，第一次查可能回 `UNKNOWN`，再查一次才有答案。
 - 有衝突時，舊 commit 上的 CI 結果仍然是通過。所以不看 `mergeable` 的話，卡片會停在 Ready to merge，按下合併才發現不行。
-- 有衝突的 PR 上，新 push 的 commit 不會跑 `pull_request` 觸發的 CI（GitHub 產生不了合併後的結果）。
+- 有衝突的 PR 上，新 push 的 commit 不會跑 `pull_request` 觸發的 CI（GitHub 產生不了合併後的結果）。實測 push 後一分鐘，新 commit 上仍然沒有任何檢查，`ci_state` 是 `none`。
 
 `merge_state` 的對應：`MERGEABLE` 是 `clean`，`CONFLICTING` 是 `conflicting`，其餘（含沒看過的新值）是 `unknown`。同一個 commit 上已經知道答案時，後來查到的 `unknown` 不會把它蓋掉，否則這個值會來回跳動、每跳一次就寫一筆事件。`unknown` 既不當成有衝突，也不當成沒有衝突：不會派工，卡片也不會進 Ready to merge。
 
@@ -484,6 +486,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | `POST /api/tasks/{id}/stop` | 中止正在跑的 run；沒有 run 在跑時回報錯誤 |
 | `POST /api/tasks/{id}/archive` | 封存並清掉 worktree；條件見「中止與封存」 |
 | `GET /api/tasks/{id}/events` | 稽核紀錄，分頁 |
+| `GET /api/tasks/{id}/diff` | 任務的 branch 相對於基底分支的 diff |
 | `GET /api/usage?project_id=` | token 與花費彙總 |
 | `GET /api/agents` | 這個 daemon 能用的 agent 種類，以及各自是否回報花費；給開任務的表單用 |
 | `GET /api/stream` | SSE：狀態變更與 agent log |
@@ -492,11 +495,12 @@ API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠
 
 **回應的內容**
 
-- 看板的一張卡片（`GET /tasks` 的每一筆、`GET /tasks/{id}` 的基本欄位）帶著推導出的 `column` 與 `label`，以及畫卡片需要的欄位：agent 種類、標題、branch、PR 編號與狀態、CI 與 review 狀態、修復次數、更新時間、用量。
+- 看板的一張卡片（`GET /tasks` 的每一筆、`GET /tasks/{id}` 的基本欄位）帶著推導出的 `column` 與 `label`，以及畫卡片需要的欄位：agent 種類、標題、branch、PR 編號與狀態、最新的 commit、CI、review 與能不能合併的狀態、修復次數、更新時間、用量。
 - `cost_usd` 為 `null` 表示這種 agent 不回報花費（由 adapter 的 `capabilities.reports_cost` 判斷），花費是未知而不是零；這時改看 `tokens`。`usage_is_complete` 為否表示有 run 的用量拿不到（例如被中止），數字偏低。
 - `POST /tasks` 在任務與 `initial` run 建立後就回應，worktree 與 agent 在背景進行。worktree 建立失敗是那個 run 以 `error` 結束，不是 HTTP 錯誤。
 - `POST /tasks/{id}/stop` 只中止指定任務的 run，等它完全停下才回應。
 - `GET /tasks/{id}/events` 用 `after`（事件編號）與 `limit` 分頁，可用 `type` 篩選；回應的 `next_after` 不是 `null` 時還有下一頁。
+- `GET /tasks/{id}/diff` 回 `diff`（git 的 unified diff 文字）、`is_truncated`、`base_branch`。內容是 branch 從基底分支分出來之後的所有變更（`git diff origin/<基底分支>...<branch>`），和 GitHub 上 PR 的 Files changed 相同；基底分支後來的 commit 不算。只包含已經 commit 的內容，agent 改到一半還沒 commit 的不在裡面。在專案的 repo 裡查而不是在 worktree 裡，所以已封存的任務也看得到。任務還沒有 branch 或沒有任何 commit 時 `diff` 是空字串，不是錯誤。超過 400,000 個字元時從最後一個完整的行截斷，`is_truncated` 為真。
 
 **錯誤回應**
 
@@ -540,6 +544,7 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 - **不自己推導狀態**：卡片放哪一欄、顯示什麼標籤，一律用 API 回的 `column` 與 `label`；前端只決定標籤的顏色。Stop 能不能按只看 `has_open_run`。
 - **花費**：`cost_usd` 是 `null` 時顯示 token 數；有數字時前面加 `~` 表示估算值；`usage_is_complete` 為否時後面加 `+`，表示實際的數字比這個高。
 - **連線**：先連上 `/stream` 再抓資料。連線出錯時前端自己關掉，2 秒後重開（瀏覽器的 `EventSource` 在 daemon 沒開時不會自己重試）。每次連上都重新抓專案、agent、看板；開著的詳情頁從已經有的最後一筆事件之後補抓，用編號去掉重複的。
+- **Diff 分頁**：把 `GET /tasks/{id}/diff` 回的文字依檔案分段，每個檔案標出新增與刪除的行數，新增的行綠底、刪除的行紅底。卡片的 `head_sha` 變了就重新抓，所以開著的分頁會跟上新的 push。不做並排檢視、語法上色與逐行留言。
 - **Log 分頁與 Events 分頁用同一份事件**：Log 把 agent 的訊息、指令與輸出、工具呼叫排成容易讀的樣子，Events 原樣列出並可依類型篩選。
 - **封存前的確認**：任務的 PR 還開著時，按 Archive 先跳出確認框說明後果，確認才送出。只做在介面上，API 與 CLI 不擋。
 - **錯誤**：API 回的 `message` 直接顯示在操作的旁邊。

@@ -79,13 +79,14 @@
 - 分頁一「Log」：agent 的即時輸出
 - 分頁二「Events」：稽核紀錄，依時間排列，可依類型篩選
 - 分頁三「Runs」：每一次 run 的觸發原因、時間、花費
+- 分頁四「Diff」（階段 3 加入，畫面上排在 Log 之後）：branch 相對於基底分支的變更，依檔案分段
 - 下方輸入框：對同一個 session 追加指令
 - 按鈕：Stop、Archive。沒有 run 在執行時 Stop 不可按
 
 **不做（階段 3 之後）**
 
 - 搜尋、通知鈴鐺、Settings 頁
-- 內嵌 terminal、diff 檢視
+- 內嵌 terminal；diff 的並排檢視、語法上色、逐行留言
 - 淺色主題
 
 **永遠不做**

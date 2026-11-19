@@ -141,10 +141,10 @@ Slack 或 email。
 ```
 
 **我要驗證的事**
-- [ ] 開一個任務，agent push 之後 Diff 分頁看得到變更，內容和 GitHub 上 PR 的 Files changed 一致
-- [ ] agent 再 push 一次，不重新整理，Diff 分頁跟著更新
-- [ ] 已封存的任務也看得到 diff
-- [ ] 還在跑第一個 run、沒有 commit 的任務顯示沒有變更
+- [x] 開一個任務，agent push 之後 Diff 分頁看得到變更，內容和 GitHub 上 PR 的 Files changed 一致
+- [x] agent 再 push 一次，不重新整理，Diff 分頁跟著更新
+- [x] 已封存的任務也看得到 diff
+- [x] 還在跑第一個 run、沒有 commit 的任務顯示沒有變更
 
 ---
 
@@ -152,7 +152,7 @@ Slack 或 email。
 
 一個 PR 從開出到可合併，中間經過一次 CI 失敗、一次留言要求修改，人只做了「留言」和「按合併」兩個動作。
 
-- [ ] 在 sandbox 開一個會讓 CI 失敗的任務；CI 自動修好之後留一則留言要求修改；agent 改完、CI 通過，卡片到 Ready to merge。全程只留了一則留言
+- [x] 在 sandbox 開一個會讓 CI 失敗的任務；CI 自動修好之後留一則留言要求修改；agent 改完、CI 通過，卡片到 Ready to merge。全程只留了一則留言
 
 ## 階段 3 做完後
 

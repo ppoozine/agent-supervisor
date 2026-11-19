@@ -6,6 +6,7 @@ import { makeCard, makeDetail, makeEvent } from '../testing'
 import type { Project } from '../types'
 import { AddProjectForm } from './AddProjectForm'
 import { Board } from './Board'
+import { DiffTab } from './DiffTab'
 import { NewTaskDialog } from './NewTaskDialog'
 import { TaskCard } from './TaskCard'
 import { TaskPage } from './TaskPage'
@@ -19,6 +20,7 @@ vi.mock('../api', async (importOriginal) => ({
   sendMessage: vi.fn(),
   stopTask: vi.fn(),
   archiveTask: vi.fn(),
+  getDiff: vi.fn(),
 }))
 
 const project: Project = {
@@ -297,3 +299,57 @@ test('archiving a task without an open pull request does not ask', async () => {
   await waitFor(() => expect(api.archiveTask).toHaveBeenCalledWith(7))
   expect(screen.queryByRole('dialog')).toBeNull()
 })
+
+const ONE_FILE = `diff --git a/calc.py b/calc.py
+index 1111111..2222222 100644
+--- a/calc.py
++++ b/calc.py
+@@ -1,2 +1,2 @@
+ def add(a, b):
+-    return a - b
++    return a + b
+`
+
+function diffOf(diff: string, isTruncated = false) {
+  return { diff, is_truncated: isTruncated, base_branch: 'main' }
+}
+
+test('the diff tab shows each changed file with its added and removed lines', async () => {
+  vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE))
+  render(<DiffTab taskId={7} headSha="sha-1" connectionCount={1} />)
+
+  const file = await screen.findByRole('region', { name: 'calc.py' })
+
+  expect(within(file).getByText('+1')).toBeTruthy()
+  expect(within(file).getByText('−1')).toBeTruthy()
+  expect(within(file).getByText(/return a \+ b/).className).toContain('diff-added')
+  expect(within(file).getByText(/return a - b/).className).toContain('diff-removed')
+  expect(screen.getByText(/1 file changed against main/)).toBeTruthy()
+})
+
+test('the diff tab reloads when the task gets a new commit', async () => {
+  vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE))
+  const { rerender } = render(<DiffTab taskId={7} headSha="sha-1" connectionCount={1} />)
+  await screen.findByRole('region', { name: 'calc.py' })
+
+  vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE.replaceAll('calc.py', 'other.py')))
+  rerender(<DiffTab taskId={7} headSha="sha-2" connectionCount={1} />)
+
+  expect(await screen.findByRole('region', { name: 'other.py' })).toBeTruthy()
+  expect(api.getDiff).toHaveBeenCalledTimes(2)
+})
+
+test('a task without commits says there are no changes instead of failing', async () => {
+  vi.mocked(api.getDiff).mockResolvedValue(diffOf(''))
+  render(<DiffTab taskId={7} headSha={null} connectionCount={1} />)
+
+  expect(await screen.findByText(/沒有變更/)).toBeTruthy()
+})
+
+test('a truncated diff says so', async () => {
+  vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE, true))
+  render(<DiffTab taskId={7} headSha="sha-1" connectionCount={1} />)
+
+  expect(await screen.findByText(/後面的部分沒有顯示/)).toBeTruthy()
+})
+

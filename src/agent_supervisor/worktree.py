@@ -128,6 +128,17 @@ async def abort_merge(worktree_path: Path) -> None:
     await _git(worktree_path, "merge", "--abort")
 
 
+async def diff_against_base(repo_path: Path, base_branch: str, branch: str) -> str:
+    """branch 從基底分支分出來之後的所有變更，也就是 PR 的 Files changed 會顯示的內容。
+
+    在專案的 repo 裡執行而不是在 worktree 裡：封存之後 worktree 不在了，但 branch 還在。
+    只看已經 commit 的內容。用三個點的寫法，所以基底分支後來的 commit 不會算進來。
+    """
+    return await _git(
+        repo_path, "diff", "--no-color", "--no-ext-diff", f"{REMOTE}/{base_branch}...{branch}", "--"
+    )
+
+
 async def head_sha(worktree_path: Path) -> str:
     """目前的 commit。"""
     return await _git(worktree_path, "rev-parse", "HEAD")

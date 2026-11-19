@@ -1,5 +1,5 @@
 // 所有對 daemon 的呼叫都經過這裡。錯誤一律轉成 ApiError，訊息可以直接顯示。
-import type { Agent, Card, EventPage, EventRow, Project, TaskDetail } from './types'
+import type { Agent, Card, EventPage, EventRow, Project, TaskDetail, TaskDiff } from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -63,6 +63,7 @@ export const sendMessage = (taskId: number, text: string) =>
 export const stopTask = (taskId: number) => request<TaskDetail>('POST', `/tasks/${taskId}/stop`)
 export const archiveTask = (taskId: number) =>
   request<TaskDetail>('POST', `/tasks/${taskId}/archive`)
+export const getDiff = (taskId: number) => request<TaskDiff>('GET', `/tasks/${taskId}/diff`)
 
 const EVENT_PAGE_SIZE = 500
 
