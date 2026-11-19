@@ -171,3 +171,23 @@ def test_branch_name_uses_task_id_and_ascii_title_words() -> None:
     )
     assert worktree.branch_name(8, "修正測試") == "asv/task-8"
     assert len(worktree.branch_name(9, "word " * 40)) <= 60
+
+
+async def test_ensure_repository_accepts_a_repo_and_rejects_anything_else(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    inside = git_repo.path / "nested"
+    inside.mkdir()
+
+    await worktree.ensure_repository(git_repo.path)
+
+    with pytest.raises(worktree.GitError, match="not a git repository"):
+        await worktree.ensure_repository(plain)
+    with pytest.raises(worktree.GitError, match="is not a directory"):
+        await worktree.ensure_repository(tmp_path / "missing")
+    with pytest.raises(worktree.GitError, match="is inside the repository"):
+        await worktree.ensure_repository(inside)
+    with pytest.raises(worktree.GitError):
+        await worktree.ensure_repository(git_repo.path / ".git")

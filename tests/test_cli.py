@@ -607,3 +607,15 @@ async def test_interrupt_during_dispatch_starts_no_further_fix_runs(
 
 def test_both_agent_types_can_be_selected() -> None:
     assert set(cli.default_adapters()) == {"claude_code", "codex"}
+
+
+async def test_serve_is_refused_while_another_instance_is_running(
+    asv: Cli, capsys: pytest.CaptureFixture[str]
+) -> None:
+    lock = InstanceLock.acquire(asv.config.lock_path)
+
+    code = await asv(FakeAdapter([]), "serve")
+
+    lock.release()
+    assert code == 2
+    assert "already running" in capsys.readouterr().err

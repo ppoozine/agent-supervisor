@@ -163,6 +163,8 @@ class Runner:
         """封存任務。有 run 在執行時拒絕；封存階段失敗時任務維持未封存。"""
         async with self._lock_for(task_id):
             task = await db.get_task(self._conn, task_id)
+            if task.archived_at is not None:
+                raise db.TaskNotRunnableError(f"task {task_id} is already archived")
             if await db.get_open_run(self._conn, task_id) is not None:
                 raise db.RunAlreadyActiveError(f"task {task_id} has an active run; stop it first")
             await self._archive(task)

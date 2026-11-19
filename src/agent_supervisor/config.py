@@ -35,6 +35,7 @@ class Config:
     max_turns_per_run: int = 50
     run_timeout_seconds: float = 1800.0
     poll_interval_seconds: float = 30.0
+    api_port: int = 8765
     ci_log_max_chars: int = 20_000
     permission: PermissionPolicy = field(
         default_factory=lambda: PermissionPolicy(tool_rules=DEFAULT_TOOL_RULES)
@@ -54,6 +55,11 @@ class Config:
     def lock_path(self) -> Path:
         """確保同時只有一個 daemon 的鎖檔位置。"""
         return self.data_dir / "daemon.lock"
+
+
+def absolute_path(value: str) -> Path:
+    """把使用者給的路徑變成絕對路徑（展開 `~`、解開符號連結）。CLI 與 API 共用。"""
+    return Path(value).expanduser().resolve()
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:

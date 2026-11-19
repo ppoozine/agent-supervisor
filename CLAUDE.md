@@ -13,8 +13,9 @@
 | `docs/02-mvp-spec.md` | MVP 規格：資料表、API、背景工作、adapter 介面 |
 | `docs/03-decisions.md` | 決策紀錄 |
 | `docs/04-phase1-tasks.md` | 階段 1 與 1.5 的任務單與驗證清單 |
-| `docs/05-ui-reference.md` | 介面參考截圖、卡片內容、MVP 介面範圍（階段 2 才用到） |
+| `docs/05-ui-reference.md` | 介面參考截圖、卡片內容、MVP 介面範圍 |
 | `docs/06-diagrams.md` | 架構圖與流程圖 |
+| `docs/07-phase2-tasks.md` | 階段 2 的任務單與驗證清單 |
 | `docs/codex-notes.md` | Codex 介面的調查與實測結果（任務 0 的產出） |
 | `docs/claude-sdk-notes.md` | Claude Agent SDK 的調查與實測結果 |
 
@@ -22,7 +23,7 @@
 
 ## 目前階段
 
-階段 1.5（第二個 adapter），版本 `0.x`。階段 1 的任務 1 到 3 已完成並合併；現在做 `docs/04-phase1-tasks.md` 的任務 4（Codex adapter）。一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
+階段 2（看板介面），版本 `0.x`，做完發 `0.1`。任務 0 到 4 已完成並合併；現在依 `docs/07-phase2-tasks.md` 做任務 5（API + SSE + 常駐 daemon），之後是任務 6（React 看板）。階段 1.5 的完成標準有 4 項沒有實測就進了階段 2（決策第 94 筆）。一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
 
 ## 技術選型
 
@@ -32,7 +33,7 @@
 - SQLite（標準庫 `sqlite3` 或 `aiosqlite`），不使用 ORM
 - 全程 asyncio；背景工作與 API 跑在同一個 process
 - 測試用 `pytest` + `pytest-asyncio`，lint / format 用 `ruff`
-- 前端（階段 2、開發順序第 6 步才開始）：React + Vite，放在 `web/`
+- 前端（任務 6 才開始）：React + Vite，放在 `web/`
 
 ## 專案結構
 
@@ -45,7 +46,9 @@ src/agent_supervisor/
   enums.py           # 共用的列舉值：run 的觸發原因、結案結果、事件型別
   runner.py          # run 的生命週期：建立、準備、agent 執行、收尾、結案
   recovery.py        # 單一 daemon 的鎖、啟動時處理未結束的 run
-  cli.py             # 階段 1 的驗證用指令 asv
+  cli.py             # 指令 asv：serve 啟動 daemon，其餘是階段 1 留下的前景模式
+  supervisor.py      # 組裝 Runner / Poller / Dispatcher，以及「輪詢一輪再派工」
+  daemon.py          # 常駐的 daemon：啟動順序、訊號、背景輪詢、關閉
   stages.py          # run 的準備（建 worktree）與收尾（commit、push、開 PR）、封存
   process.py         # 執行外部指令的共用底層，逾時或取消時終止子程序
   worktree.py        # git worktree 與 branch 管理（所有 git 指令）
@@ -56,7 +59,12 @@ src/agent_supervisor/
   status.py          # 自動修復條件、看板欄位與狀態標籤（純函式）
   db.py              # schema 與查詢
   config.py
-  api/               # FastAPI 路由與 SSE
+  api/
+    app.py           # 十個 REST 端點與 GET /stream
+    feed.py          # 偵測資料庫的變化並推送給 SSE 連線
+    views.py         # 把資料轉成回應內容（純函式）
+    errors.py        # 錯誤回應的形狀與對應
+    guard.py         # 只接受對本機、從本機網頁發出的請求
 tests/
 docs/
 ```
@@ -104,6 +112,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 uv sync
 uv run pytest
 uv run asv --help
+uv run asv serve          # 啟動 daemon，API 在 http://127.0.0.1:8765
 uv run ruff check .
 uv run ruff format .
 ```
