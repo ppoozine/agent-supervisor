@@ -427,10 +427,12 @@ async def list_task_fingerprints(conn: aiosqlite.Connection) -> dict[int, tuple[
 
 
 async def list_tasks_with_open_pr(conn: aiosqlite.Connection) -> list[Task]:
-    """列出 PR 開著且未封存的任務，也就是 Poller 要查詢的對象。"""
+    """列出 PR 開著的任務，也就是 Poller 要查詢的對象。
+
+    已封存的任務也算：封存不會關掉 PR，之後它被合併或關閉時仍然要知道。
+    """
     cursor = await conn.execute(
-        "SELECT * FROM tasks WHERE pr_number IS NOT NULL AND pr_state = ?"
-        " AND archived_at IS NULL ORDER BY id",
+        "SELECT * FROM tasks WHERE pr_number IS NOT NULL AND pr_state = ? ORDER BY id",
         (PrState.OPEN,),
     )
     return [Task(**dict(row)) for row in await cursor.fetchall()]

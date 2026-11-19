@@ -382,7 +382,7 @@ async def test_snapshot_reports_the_last_run_and_usage(conn: aiosqlite.Connectio
     assert snapshot.require_review is False
 
 
-async def test_only_open_unarchived_pull_requests_are_polled(conn: aiosqlite.Connection) -> None:
+async def test_open_pull_requests_are_polled_even_when_archived(conn: aiosqlite.Connection) -> None:
     open_task = await with_failed_ci(conn)
     merged, _ = await make_task(conn)
     await db.update_task(conn, merged.id, pr_number=8, pr_state="merged")
@@ -394,7 +394,7 @@ async def test_only_open_unarchived_pull_requests_are_polled(conn: aiosqlite.Con
 
     polled = await db.list_tasks_with_open_pr(conn)
 
-    assert [task.id for task in polled] == [open_task.id]
+    assert [task.id for task in polled] == [open_task.id, archived.id]
     assert no_pr.id not in [task.id for task in polled]
 
 

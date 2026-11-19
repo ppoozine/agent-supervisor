@@ -198,3 +198,15 @@ async def test_finished_pull_request_is_recorded_even_if_it_stays_on_an_earlier_
     assert (await db.get_task(scene.conn, task.id)).pr_state == final_state
     assert [change.task_id for change in report.changes] == [task.id]
     assert await db.list_tasks_with_open_pr(scene.conn) == []
+
+
+async def test_archived_task_still_learns_how_its_pull_request_ended(scene: Scene) -> None:
+    """封存不會關掉 PR；之後在 GitHub 上合併，任務仍然要知道。"""
+    task = await scene.task_with_pr()
+    await db.archive_task(scene.conn, task.id)
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED, pr_state=PrState.MERGED)
+
+    report = await scene.poller.poll_once()
+
+    assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.MERGED
+    assert [change.task_id for change in report.changes] == [task.id]

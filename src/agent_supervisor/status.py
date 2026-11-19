@@ -78,10 +78,11 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
     """推導卡片所在的欄位與狀態標籤。由上往下判斷，先符合者優先。"""
     task = snapshot.task
     last_run = snapshot.last_run
-    if task.archived_at is not None:
-        return BoardStatus(Column.ARCHIVE, "Archived")
+    # PR 的結果比「封存過」有用，所以已封存的任務也優先顯示它。
     if task.pr_state in _FINISHED_PR_LABELS and not snapshot.has_open_run:
         return BoardStatus(Column.ARCHIVE, _FINISHED_PR_LABELS[PrState(task.pr_state)])
+    if task.archived_at is not None:
+        return BoardStatus(Column.ARCHIVE, "Archived")
 
     if snapshot.has_open_run:
         return BoardStatus(Column.WORKING, _working_label(snapshot))

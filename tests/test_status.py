@@ -118,6 +118,22 @@ def test_two_fix_attempts_still_allow_a_third() -> None:
         pytest.param({"archived_at": "t"}, Column.ARCHIVE, "Archived", id="archived"),
         pytest.param({"pr_state": "merged"}, Column.ARCHIVE, "Merged", id="merged"),
         pytest.param({"pr_state": "closed"}, Column.ARCHIVE, "Closed", id="closed"),
+        # 已封存的任務優先顯示 PR 的結果；PR 還開著時才是 Archived
+        pytest.param(
+            {"archived_at": "t", "pr_state": "merged"},
+            Column.ARCHIVE,
+            "Merged",
+            id="archived-merged",
+        ),
+        pytest.param(
+            {"archived_at": "t", "pr_state": "closed"},
+            Column.ARCHIVE,
+            "Closed",
+            id="archived-closed",
+        ),
+        pytest.param(
+            {"archived_at": "t", "pr_state": "open"}, Column.ARCHIVE, "Archived", id="archived-open"
+        ),
         # Working
         pytest.param({"exit_status": None}, Column.WORKING, "Working", id="run-in-progress"),
         pytest.param(
