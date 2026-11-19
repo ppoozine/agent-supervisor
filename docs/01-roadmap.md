@@ -14,7 +14,7 @@
 | 1 | 核心迴圈 | 不含介面，在 terminal 跑通「開任務 → PR → CI 失敗 → 自動修」 | – |
 | 1.5 | 第二個 adapter | Codex adapter，跑通同一套核心迴圈 | – |
 | 2 | 看板介面 | API、SSE、React 四欄看板 | `0.1`（MVP 完成） |
-| 3 | 回饋迴圈補齊 | Review 留言、merge conflict、通知、diff 檢視 | `0.2` |
+| 3 | 回饋迴圈補齊 | PR 留言、merge conflict、通知、diff 檢視 | `0.2`（已完成） |
 | 4 | 自動派工 | Orchestrator 拆任務、issue 觸發 | `0.3` |
 | 5 | 治理 | 權限政策、核准關卡、預算、稽核查詢、sandbox | `0.4` |
 | 6 | 自製 API agent | 直接呼叫模型 API 的第三個 adapter | `0.5` |
@@ -97,12 +97,14 @@
 **目標**：除了 CI，其他會打斷流程的事件也自動處理。
 
 - PR 上的留言 → 轉回負責的 agent（觸發條件是「有新的留言」，見 `03-decisions.md` 第 119 筆）
-- Merge conflict → 請 agent 解衝突
-- 卡片進 Needs you 時發通知
+- Merge conflict → 請 agent 解衝突（用 merge，不用 rebase）
+- 卡片進 Needs you 時發通知（macOS 的系統通知）
 - 任務詳情頁內直接看 diff
-- 有了 diff 檢視之後，再評估要不要在詳情頁加合併按鈕（見 `03-decisions.md` 第 114 筆）
+- 有了 diff 檢視之後，再評估要不要在詳情頁加合併按鈕（見 `03-decisions.md` 第 114 筆）。評估已完成，要不要做還沒決定，記在「尚未決定」
 
 **完成標準**：一個 PR 從開出到可合併，中間經過一次 CI 失敗、一次留言要求修改，人只做了「留言」和「按合併」兩個動作。任務單見 `08-phase3-tasks.md`。
+
+**狀態**：2026-11-19 完成，完成標準已在 sandbox 實測通過，版本 `0.2.0`。
 
 ---
 
