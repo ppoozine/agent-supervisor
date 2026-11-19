@@ -95,18 +95,18 @@
 ```
 
 **我要驗證的事**（也就是階段 2 的完成標準，做到這裡發 `0.1`）
-- [ ] 從瀏覽器加入 sandbox 專案、開一個任務，卡片出現在 Working
-- [ ] 不重新整理，卡片隨著狀態變化移動到對應的欄位，最後到 Ready to merge
-- [ ] 任務詳情頁的 Log 分頁即時看到 agent 的輸出
+- [x] 從瀏覽器加入 sandbox 專案、開一個任務，卡片出現在 Working
+- [x] 不重新整理，卡片隨著狀態變化移動到對應的欄位，最後到 Ready to merge
+- [x] 任務詳情頁的 Log 分頁即時看到 agent 的輸出
 - [ ] 開一個會讓 CI 失敗的任務，看到卡片回到 Working（Fixing CI）再到 Ready to merge
-- [ ] 查得到這個任務花了多少錢；Codex 任務顯示的是 token 數
-- [ ] 開任務時可以選 agent，Claude Code 與 Codex 各開一個都能跑完
-- [ ] 在詳情頁送一則訊息，新的 run 出現在 Runs 分頁
-- [ ] 按 Stop 後 run 停下，卡片進 Needs you；沒有 run 時 Stop 不可按
-- [ ] 按 Archive 後卡片移到 Archive 區；在 GitHub 上合併 PR 後卡片也移過去
-- [ ] Events 分頁可以依類型篩選
-- [ ] 把 daemon 關掉再開，頁面自動重新連上並顯示最新狀態
-- [ ] 操作被拒絕時（例如 run 執行中送訊息）畫面上看得到原因
+- [x] 查得到這個任務花了多少錢；Codex 任務顯示的是 token 數
+- [x] 開任務時可以選 agent，Claude Code 與 Codex 各開一個都能跑完
+- [x] 在詳情頁送一則訊息，新的 run 出現在 Runs 分頁
+- [x] 按 Stop 後 run 停下，卡片進 Needs you；沒有 run 時 Stop 不可按
+- [x] 按 Archive 後卡片移到 Archive 區；在 GitHub 上合併 PR 後卡片也移過去
+- [x] Events 分頁可以依類型篩選
+- [x] 把 daemon 關掉再開，頁面自動重新連上並顯示最新狀態
+- [x] 操作被拒絕時（例如 run 執行中送訊息）畫面上看得到原因
 
 ---
 

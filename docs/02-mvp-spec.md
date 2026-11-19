@@ -343,19 +343,20 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 
 | 端點 | 用途 |
 | --- | --- |
-| `POST /projects` | 加入本機 repo；路徑要是 repo 工作目錄的最上層，已經加入過就回報錯誤 |
-| `GET /projects` | 專案列表 |
-| `POST /tasks` | 開任務：建立任務與 `initial` run，接著建 worktree、啟動 agent |
-| `GET /tasks?project_id=` | 看板資料，含推導出的欄位 |
-| `GET /tasks/{id}` | 任務詳情，含這個任務所有的 run |
-| `POST /tasks/{id}/messages` | 對同一個 session 追加指令；已有 run 在執行時回報錯誤 |
-| `POST /tasks/{id}/stop` | 中止正在跑的 run；沒有 run 在跑時回報錯誤 |
-| `POST /tasks/{id}/archive` | 封存並清掉 worktree；條件見「中止與封存」 |
-| `GET /tasks/{id}/events` | 稽核紀錄，分頁 |
-| `GET /usage?project_id=` | token 與花費彙總 |
-| `GET /stream` | SSE：狀態變更與 agent log |
+| `POST /api/projects` | 加入本機 repo；路徑要是 repo 工作目錄的最上層，已經加入過就回報錯誤 |
+| `GET /api/projects` | 專案列表 |
+| `POST /api/tasks` | 開任務：建立任務與 `initial` run，接著建 worktree、啟動 agent |
+| `GET /api/tasks?project_id=` | 看板資料，含推導出的欄位 |
+| `GET /api/tasks/{id}` | 任務詳情，含這個任務所有的 run |
+| `POST /api/tasks/{id}/messages` | 對同一個 session 追加指令；已有 run 在執行時回報錯誤 |
+| `POST /api/tasks/{id}/stop` | 中止正在跑的 run；沒有 run 在跑時回報錯誤 |
+| `POST /api/tasks/{id}/archive` | 封存並清掉 worktree；條件見「中止與封存」 |
+| `GET /api/tasks/{id}/events` | 稽核紀錄，分頁 |
+| `GET /api/usage?project_id=` | token 與花費彙總 |
+| `GET /api/agents` | 這個 daemon 能用的 agent 種類，以及各自是否回報花費；給開任務的表單用 |
+| `GET /api/stream` | SSE：狀態變更與 agent log |
 
-API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。
+API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。所有端點都在 `/api` 底下；`/` 留給前端的檔案（見「前端」）。下文提到端點時省略 `/api`。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。
 
 **回應的內容**
 
@@ -397,6 +398,18 @@ API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠
 - 每條連線有一個有上限的佇列；對方讀得太慢、佇列滿了就結束這條連線，讓它重連後用編號補上，不拖住其他人。
 - 沒有訊息時每 15 秒送一行註解，避免連線被中途的設備關掉。
 - 前端要**先連上 `/stream`，再抓 `GET /tasks` 與事件分頁**，事件用編號去掉重複的。順序反過來的話，抓完資料到連上之間發生的變化會漏掉。
+
+## 前端
+
+React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.md`。
+
+- **由誰提供**：`npm run build` 的產物在 `web/dist`，daemon 啟動時如果有這個目錄就把它掛在 `/`，開 `http://127.0.0.1:8765` 就是看板。沒有 build 過時 daemon 只提供 API。開發時跑 `npm run dev`（連接埠 5173），Vite 把 `/api` 轉給 daemon。
+- **兩個畫面**：看板（`#/`）與任務詳情頁（`#/tasks/{id}`），用網址的 hash 切換。
+- **不自己推導狀態**：卡片放哪一欄、顯示什麼標籤，一律用 API 回的 `column` 與 `label`；前端只決定標籤的顏色。Stop 能不能按只看 `has_open_run`。
+- **花費**：`cost_usd` 是 `null` 時顯示 token 數；有數字時前面加 `~` 表示估算值；`usage_is_complete` 為否時後面加 `+`，表示實際的數字比這個高。
+- **連線**：先連上 `/stream` 再抓資料。連線出錯時前端自己關掉，2 秒後重開（瀏覽器的 `EventSource` 在 daemon 沒開時不會自己重試）。每次連上都重新抓專案、agent、看板；開著的詳情頁從已經有的最後一筆事件之後補抓，用編號去掉重複的。
+- **Log 分頁與 Events 分頁用同一份事件**：Log 把 agent 的訊息、指令與輸出、工具呼叫排成容易讀的樣子，Events 原樣列出並可依類型篩選。
+- **錯誤**：API 回的 `message` 直接顯示在操作的旁邊。
 
 ## 背景工作與 Agent adapter
 
