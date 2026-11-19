@@ -23,7 +23,7 @@
 
 ## 目前階段
 
-階段 2（看板介面），版本 `0.x`，做完發 `0.1`。任務 0 到 4 已完成並合併；現在依 `docs/07-phase2-tasks.md` 做任務 5（API + SSE + 常駐 daemon），之後是任務 6（React 看板）。階段 1.5 的完成標準有 4 項沒有實測就進了階段 2（決策第 94 筆）。一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
+階段 2（看板介面），版本 `0.x`，做完發 `0.1`。任務 0 到 5 已完成並合併；現在依 `docs/07-phase2-tasks.md` 做任務 6（React 看板與任務詳情頁），這是階段 2 的最後一個任務。階段 1.5 的完成標準有 4 項沒有實測就進了階段 2（決策第 94 筆）。一次做一個任務，不要提前做後面的步驟，也不要做規格「不包含」清單裡的功能。進入新階段時我會更新這一段。
 
 ## 技術選型
 
@@ -33,7 +33,7 @@
 - SQLite（標準庫 `sqlite3` 或 `aiosqlite`），不使用 ORM
 - 全程 asyncio；背景工作與 API 跑在同一個 process
 - 測試用 `pytest` + `pytest-asyncio`，lint / format 用 `ruff`
-- 前端（任務 6 才開始）：React + Vite，放在 `web/`
+- 前端：React + Vite + TypeScript，放在 `web/`；不裝路由、資料抓取、樣式的套件，測試用 vitest
 
 ## 專案結構
 
@@ -60,13 +60,20 @@ src/agent_supervisor/
   db.py              # schema 與查詢
   config.py
   api/
-    app.py           # 十個 REST 端點與 GET /stream
+    app.py           # `/api` 底下的 REST 端點與 GET /api/stream；有 web/dist 時掛在 /
     feed.py          # 偵測資料庫的變化並推送給 SSE 連線
     views.py         # 把資料轉成回應內容（純函式）
     errors.py        # 錯誤回應的形狀與對應
     guard.py         # 只接受對本機、從本機網頁發出的請求
 tests/
 docs/
+web/                 # 前端：React + Vite
+  src/
+    api.ts           # 所有對 daemon 的呼叫與錯誤形狀
+    stream.ts        # SSE 連線與自動重連
+    format.ts        # 把資料排成畫面上的文字（純函式）
+    App.tsx          # 版面、資料的載入與推送
+    components/      # 看板、卡片、表單、任務詳情頁
 ```
 
 import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名的知名套件。
@@ -112,7 +119,13 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 uv sync
 uv run pytest
 uv run asv --help
-uv run asv serve          # 啟動 daemon，API 在 http://127.0.0.1:8765
+uv run asv serve          # 啟動 daemon；看板與 API 在 http://127.0.0.1:8765
 uv run ruff check .
 uv run ruff format .
+
+cd web
+npm install
+npm run build             # 產生 web/dist，daemon 啟動時會提供它
+npm run dev               # 開發用，http://localhost:5173，/api 轉給 daemon
+npm test
 ```
