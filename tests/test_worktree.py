@@ -290,3 +290,37 @@ async def test_tasks_started_at_the_same_time_do_not_fight_over_the_fetch(
     )
 
     assert all((path / "new.txt").exists() for path in paths)
+
+
+async def test_diff_shows_only_what_the_branch_changed(git_repo: GitRepo, tmp_path: Path) -> None:
+    path = await make_worktree(git_repo, tmp_path)
+    (path / "feature.txt").write_text("new\n")
+    await worktree.commit_all(path, "task change")
+    # 基底分支後來的 commit 不是這個任務的變更，不該出現在 diff 裡。
+    git_repo.push_to_main("README.md", "from main\n")
+    await worktree.fetch(git_repo.path, "main")
+
+    diff = await worktree.diff_against_base(git_repo.path, "main", "asv/task-1")
+
+    assert "+++ b/feature.txt" in diff and "+new" in diff
+    assert "README.md" not in diff
+
+
+async def test_diff_ignores_changes_that_are_not_committed(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    path = await make_worktree(git_repo, tmp_path)
+    (path / "draft.txt").write_text("not committed\n")
+
+    assert await worktree.diff_against_base(git_repo.path, "main", "asv/task-1") == ""
+
+
+async def test_diff_is_still_available_after_the_worktree_is_removed(
+    git_repo: GitRepo, tmp_path: Path
+) -> None:
+    path = await make_worktree(git_repo, tmp_path)
+    (path / "feature.txt").write_text("new\n")
+    await worktree.commit_all(path, "task change")
+    await worktree.remove(git_repo.path, path)
+
+    assert "+new" in await worktree.diff_against_base(git_repo.path, "main", "asv/task-1")

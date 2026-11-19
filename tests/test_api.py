@@ -12,6 +12,7 @@ import pytest
 
 from agent_supervisor import db
 from agent_supervisor.api import feed as feed_module
+from agent_supervisor.api import views
 from agent_supervisor.api.app import create_app
 from agent_supervisor.api.feed import ChangeFeed, StreamMessage, stream_text
 from agent_supervisor.config import Config
@@ -708,3 +709,58 @@ async def test_failing_listener_does_not_stop_the_feed(api: Api) -> None:
 
     (card,) = await collect(subscription)
     assert card.data["column"] == "Needs you"
+
+
+async def test_diff_shows_what_the_task_changed(api: Api) -> None:
+    created = await api.task([session_started(), write_file("a.txt"), result()])
+    await api.finished(created["id"])
+
+    response = await api.client.get(f"/api/tasks/{created['id']}/diff")
+
+    body = response.json()
+    assert response.status_code == 200
+    assert "+++ b/a.txt" in body["diff"] and "+hello" in body["diff"]
+    assert (body["is_truncated"], body["base_branch"]) == (False, "main")
+
+
+async def test_diff_of_a_task_without_commits_is_empty_not_an_error(api: Api) -> None:
+    created = await api.task([session_started(), result()])
+    await api.finished(created["id"])
+
+    response = await api.client.get(f"/api/tasks/{created['id']}/diff")
+
+    assert (response.status_code, response.json()["diff"]) == (200, "")
+
+
+async def test_diff_of_an_archived_task_is_still_available(api: Api) -> None:
+    created = await api.task([session_started(), write_file("a.txt"), result()])
+    await api.finished(created["id"])
+    await api.client.post(f"/api/tasks/{created['id']}/archive")
+
+    response = await api.client.get(f"/api/tasks/{created['id']}/diff")
+
+    assert "+hello" in response.json()["diff"]
+
+
+async def test_diff_of_an_unknown_task_is_not_found(api: Api) -> None:
+    assert error_of(await api.client.get("/api/tasks/999/diff")) == (404, "not_found")
+
+
+def test_long_diff_is_cut_at_a_line_boundary_and_marked() -> None:
+    line = "+" + "x" * 99 + "\n"
+    text = line * (views.MAX_DIFF_CHARS // len(line) + 10)
+
+    body = views.diff_view(text, base_branch="main")
+
+    assert body["is_truncated"] is True
+    assert len(body["diff"]) <= views.MAX_DIFF_CHARS
+    assert body["diff"].endswith("\n")
+    assert views.diff_view("+short\n", base_branch="main")["is_truncated"] is False
+
+
+async def test_card_carries_the_latest_commit_so_the_diff_tab_can_follow_it(api: Api) -> None:
+    created = await api.task([session_started(), write_file("a.txt"), result()])
+
+    finished = await api.finished(created["id"])
+
+    assert finished["head_sha"] is not None

@@ -177,6 +177,19 @@ def create_app(
         await asyncio.shield(runner.archive(task_id))
         return await task_detail(task_id)
 
+    @api.get("/tasks/{task_id}/diff")
+    async def get_diff(task_id: int) -> dict[str, Any]:
+        """任務的 branch 相對於基底分支的 diff。還沒有 branch 時是空的。"""
+        async with db.consistent_read(conn):
+            task = await db.get_task(conn, task_id)
+            project = await db.get_project(conn, task.project_id)
+        text = ""
+        if task.branch is not None:
+            text = await worktree.diff_against_base(
+                Path(project.repo_path), project.default_branch, task.branch
+            )
+        return views.diff_view(text, base_branch=project.default_branch)
+
     @api.get("/tasks/{task_id}/events")
     async def list_events(
         task_id: int,

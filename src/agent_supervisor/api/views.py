@@ -31,6 +31,7 @@ def card_view(
         "has_open_run": snapshot.has_open_run,
         "pr_number": task.pr_number,
         "pr_state": task.pr_state,
+        "head_sha": task.head_sha,
         "ci_state": task.ci_state,
         "review_state": task.review_state,
         "merge_state": task.merge_state,
@@ -65,3 +66,15 @@ def run_view(run: db.Run) -> dict[str, Any]:
 def event_view(event: db.Event) -> dict[str, Any]:
     """一筆稽核紀錄。"""
     return asdict(event)
+
+
+MAX_DIFF_CHARS = 400_000
+
+
+def diff_view(text: str, *, base_branch: str) -> dict[str, Any]:
+    """一份 diff。太長時從最後一個完整的行截斷，並標明被截斷了。"""
+    is_truncated = len(text) > MAX_DIFF_CHARS
+    if is_truncated:
+        text = text[:MAX_DIFF_CHARS]
+        text = text[: text.rfind("\n") + 1]
+    return {"diff": text, "is_truncated": is_truncated, "base_branch": base_branch}
