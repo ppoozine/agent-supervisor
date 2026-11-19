@@ -152,11 +152,12 @@
 | 144 | 支援 macOS 與 Linux，不支援 Windows | 只支援 macOS；連 Windows 一起支援 | CI 跑在 Linux 上，測試本來就得在那裡過；開源專案的使用者有很大一部分在 Linux。Windows 要重寫訊號、程序群組與檔案鎖，工作量大，先寫明不支援、可以用 WSL |
 | 145 | 公開的第一版包含八項：repo 的 CI、英文化、Linux 支援、安裝、agent 設定頁、對外的文件、修掉會卡住的五項、adapter 開發指南與範例。直接打 endpoint 的 agent 不進第一版 | 連 endpoint agent 一起做完；只做前六項 | 目標是陌生人能裝起來、看得懂、接上自己的 agent（第 142 筆）。會卡住的問題陌生人遇到會直接放棄；adapter 指南是定位的核心。endpoint agent 是最大、風險最高的一項，會把公開的時間拖很久，留到公開後當第一個大功能 |
 | 146 | 做完第一版的八項才把 repo 設成公開，那一版叫 `0.3.0`；HTTP API 與 adapter 介面暫不承諾穩定 | 現在就公開、邊做邊開發；叫 `1.0` | 現在 README 只有兩行、註解是中文、名稱還會改，早來的人會留下不好的印象，而第一印象只有一次。`0.x` 符合介面還會變的實際狀況 |
+| 147 | 專案與 repo 維持叫 `agent-supervisor`，PyPI 上的套件叫 `ai-agent-supervisor`；import 名稱維持 `agent_supervisor`；指令從 `asv` 改掉，暫定 `agsv` | 整個專案改名（查了約一百二十個候選，例如 `site-supervisor`、`pr-supervisor`、`agentherd`）；連 import 名稱一起改 | `agent-supervisor` 在 PyPI 上已經被別人註冊，但 supervisor 仍然是最貼切的字，只在套件名前加 `ai-` 就能註冊，repo 與所有文件都不用改。import 名稱會和那個套件相同，但這個工具裝在自己的環境裡，實際撞到的機會很低，而改它要動到每一個檔案。指令不一樣：不管怎麼裝都在同一個 `PATH` 上，`asv` 會和 Airspeed Velocity 互相蓋掉，所以要換 |
 
 ## 尚未決定
 
 - 是否公開 repo、用哪個授權（Apache-2.0 或 MIT）
-- 套件名稱、指令名稱與 import 名稱。`agent-supervisor` 在 PyPI 上已經被別人註冊，`asv` 是 Airspeed Velocity 的指令，兩個都要另外取，而且要在公開前定案。候選見 `09-open-source-plan.md` 主題 5
+- 指令名稱暫定 `agsv`（第 147 筆），做到安裝與打包的任務時定案
 - 花費上限、token 上限、單一 run 最多輪數與執行時間上限的預設值。程式裡目前是暫定值：5 美元、2,000 萬 token、50 輪、30 分鐘
 - CI log 長度上限的預設值（暫定 20,000 個字元）與輪詢間隔（30 秒）
 - 階段 1 允許清單的預設內容。程式裡目前是暫定值：允許讀檔、搜尋、寫檔、編輯、執行指令、待辦清單；拒絕以 `git push`、`gh`、`sudo` 開頭的指令

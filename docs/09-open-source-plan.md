@@ -16,8 +16,8 @@
 | 2 | 定位：給誰用、和現有工具差在哪 | 已決定（決策第 142 筆） |
 | 3 | 支援哪些 agent；設定頁與偵測 | 部分決定：第一版是 Claude Code 與 Codex；設定頁的細節未談 |
 | 4 | 文件與介面的語言；支援的平台 | 已決定（決策第 143、144 筆） |
-| 5 | 開源的時機與第一版的範圍 | 已決定（決策第 145、146 筆）；名稱待選 |
-| 6 | 重排 roadmap，寫下一個階段的任務單 | 未開始 |
+| 5 | 開源的時機與第一版的範圍 | 已決定（決策第 145 到 147 筆） |
+| 6 | 重排 roadmap，寫下一個階段的任務單 | 討論中 |
 
 ---
 
@@ -279,7 +279,9 @@
 - 做完上面八項才把 repo 設成公開，同時發版。別人第一眼看到的要是裝得起來、文件齊全的東西。
 - 公開的那一版是 `0.3.0`，不是 `1.0`：`0.x` 表示介面還可能變動。HTTP API 與 adapter 介面在有外部使用者之前不承諾穩定。
 
-### 名稱（待選）
+### 名稱（決策第 147 筆）
+
+**專案與 repo 維持 `agent-supervisor`，PyPI 上的套件叫 `ai-agent-supervisor`，import 名稱維持 `agent_supervisor`，指令暫定改成 `agsv`。** 下面是查詢的過程與考慮過的名字。
 
 2026-11-20 查 PyPI：
 
@@ -299,5 +301,20 @@
 | `worktender` | `worktender` | 照顧 worktree 的人 | 獨特、不會撞名。第一次看不容易懂 |
 | `agentsup` | `agentsup` | agent-supervisor 的縮寫 | 和現在的名稱最接近，改動感最小。唸起來不順，也仍然容易和 PyPI 上那個搞混 |
 
-還沒有查的：GitHub 上有沒有同名的知名專案、npm、網域、商標。
+還沒有查的：網域、商標。
+
+後來又查了三個方向，約一百二十個名字：
+
+- **指揮、調度**（orchestrator、conductor）：貼切的字都被同類工具用了。`ai-orchestrator`、`agent-orchestrator` 已被註冊；Conductor 是另一個同類工具的名字。
+- **派工**（`agent-dispatcher`）：可以註冊，但 `agent-dispatch` 只差一個字母、領域又接近；而且派工只講到開頭，這個工具的重點在派出去之後。
+- **監工與發包**：這個工具做的事和營造業的發包流程幾乎一對一（發包、各工班在自己的工區施工、監工、驗收不過叫回來修、驗收通過業主簽收），所以 supervisor 與 foreman 才是對的字。可以註冊的有 `site-supervisor`、`site-foreman`、`pr-supervisor`、`fleet-supervisor`、`agent-overseer`、`clerk-of-works` 等。
+
+**最後的決定**是不換掉 supervisor 這個字，只在套件名前面加 `ai-`：
+
+| 名稱 | 值 | 說明 |
+| --- | --- | --- |
+| 專案 / repo | `agent-supervisor` | 不變 |
+| PyPI 套件 | `ai-agent-supervisor` | 2026-11-20 查過 PyPI、npm、Homebrew 都沒有同名的 |
+| import 名稱 | `agent_supervisor` | 不變。PyPI 上那個 `agent-supervisor` 裝進去的模組也叫這個名字，兩個裝進同一個環境會互相蓋掉；但這個工具是獨立執行的應用程式，建議的安裝方式會給它自己的環境，在文件裡註明即可 |
+| 指令 | 暫定 `agsv` | `asv` 和 Airspeed Velocity 的指令相同，而指令不管怎麼裝最後都在同一個 `PATH` 上，躲不掉。做到「安裝與打包」那個任務時才改 |
 
