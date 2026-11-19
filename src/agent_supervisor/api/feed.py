@@ -27,7 +27,10 @@ IDLE_CHECK_SECONDS = 1.0
 PING_EVERY_IDLE_CHECKS = 15
 # 一個 agent 動作會連續寫好幾筆；稍等一下再一起處理，不用每次 commit 都查一輪。
 SETTLE_SECONDS = 0.05
+NEEDS_YOU = str(status.Column.NEEDS_YOU)
 logger = logging.getLogger("agent_supervisor.feed")
+
+CardListener = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -58,19 +61,26 @@ class Subscription:
 class ChangeFeed:
     """偵測資料庫的變化並分送給訂閱者。"""
 
-    def __init__(self, supervisor: Supervisor) -> None:
+    def __init__(self, supervisor: Supervisor, *, on_needs_you: CardListener | None = None) -> None:
         self._supervisor = supervisor
         self._conn = supervisor.conn
         self._subscriptions: set[Subscription] = set()
         self._changed = asyncio.Event()
         self._last_event_id = 0
         self._fingerprints: dict[int, tuple[Any, ...]] = {}
+        self._on_needs_you = on_needs_you
+        self._columns: dict[int, str] = {}
 
     async def start(self) -> None:
-        """記下目前的狀態當作起點，之後的變化才會被推送。"""
+        """記下目前的狀態當作起點，之後的變化才會被推送。
+
+        每張卡片目前在哪一欄也記下來：原本就在 Needs you 的卡片不算「剛進去」。
+        """
         async with db.consistent_read(self._conn):
             self._last_event_id = await db.get_last_event_id(self._conn)
             self._fingerprints = await db.list_task_fingerprints(self._conn)
+            for task_id in self._fingerprints:
+                self._columns[task_id] = (await self.card(task_id))["column"]
         db.on_commit(self._conn, self._changed.set)
 
     async def run(self) -> None:
@@ -104,6 +114,19 @@ class ChangeFeed:
             self._publish(StreamMessage(EVENT, views.event_view(event), event.id))
         for card in cards:
             self._publish(StreamMessage(TASK, card))
+            self._track_column(card)
+
+    def _track_column(self, card: dict[str, Any]) -> None:
+        """卡片從別的欄位進到 Needs you 時通知一次；停在裡面不重複通知。"""
+        previous = self._columns.get(card["id"])
+        self._columns[card["id"]] = card["column"]
+        if card["column"] != NEEDS_YOU or previous == NEEDS_YOU or self._on_needs_you is None:
+            return
+        try:
+            self._on_needs_you(card)
+        except Exception:
+            # 通知是順便的，出錯不能讓推送停下來。
+            logger.exception("the needs-you listener failed for task %s", card["id"])
 
     async def _new_events(self) -> list[db.Event]:
         events: list[db.Event] = []

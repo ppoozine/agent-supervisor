@@ -61,6 +61,7 @@ src/agent_supervisor/
   status.py          # 留言回饋、解衝突、自動修復三種條件，看板欄位與狀態標籤（純函式）
   db.py              # schema 與查詢
   config.py
+  notifier.py        # 卡片進 Needs you 時發系統通知（目前只有 macOS）
   api/
     app.py           # `/api` 底下的 REST 端點與 GET /api/stream；有 web/dist 時掛在 /
     feed.py          # 偵測資料庫的變化並推送給 SSE 連線

@@ -20,6 +20,7 @@ from agent_supervisor.api.app import create_app
 from agent_supervisor.api.feed import ChangeFeed
 from agent_supervisor.config import Config
 from agent_supervisor.github import GitHub
+from agent_supervisor.notifier import Notifier
 from agent_supervisor.recovery import (
     AlreadyRunningError,
     InstanceLock,
@@ -113,7 +114,8 @@ async def _run_until_quit(
     supervisor: Supervisor, quit_requested: asyncio.Event, stop_requested: asyncio.Event
 ) -> None:
     config = supervisor.config
-    feed = ChangeFeed(supervisor)
+    notifier = Notifier(enabled=config.notify_needs_you)
+    feed = ChangeFeed(supervisor, on_needs_you=notifier.card_needs_you)
     await feed.start()
     server = _Server(
         uvicorn.Config(
