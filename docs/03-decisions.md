@@ -133,6 +133,12 @@
 | 125 | 處理過留言之後，`changes_requested` 不再把卡片留在 Needs you，也不再擋住 CI 自動修復 | 維持原本的規則：只要 `review_state` 是 `changes_requested` 就進 Needs you | GitHub 在 reviewer 重新審查之前會一直回報要求修改。照原本的規則，agent 改完 push 之後卡片仍然進 Needs you、新 commit 的 CI 失敗也不修，階段 3 的完成標準達不到。代價是判斷比較粗：只看「這個任務有沒有處理過留言」，沒有對到是哪一次 review |
 | 126 | 核准的 review 不餵回 agent；機器人的留言不餵回；兩者都照樣記成事件並標上原因 | 全部餵回；略過的留言不記錄 | 核准時的總評通常是「LGTM」，餵回去只會浪費一個 run；機器人（覆蓋率、部署預覽）每次 push 都留言，餵回去會形成迴圈。照樣記錄是為了稽核，也讓 Poller 知道這則已經看過、不用再查 |
 | 127 | 資料表加欄位時，啟動時用 `PRAGMA table_info` 檢查，缺的用 `ALTER TABLE ADD COLUMN` 補上 | 引入 migration 工具；要求使用者刪掉資料庫重來 | 目前只需要「加欄位」這一種變更，一個常數清單加幾行程式就夠。要改欄位型別或搬資料時再考慮版本號 |
+| 128 | 解衝突用 merge，由 supervisor 開始合併、agent 只改檔案、收尾時 supervisor commit | 用 rebase；交給 agent 自己執行 `git merge` | Codex 在 worktree 裡不能執行 git 的寫入指令，只能改檔案。rebase 要 force push，會改寫已經 push 出去的 commit，reviewer 看過的東西會對不上。實測兩種 agent 都能這樣解掉 |
+| 129 | 解衝突的次數和 CI 自動修復共用 `ci_fix_attempts`（合計 3 次），「已處理的 commit」則分開記 | 各自一個次數上限；共用同一個「已處理」欄位 | 兩者都是「supervisor 自己決定再跑一次」，合計 3 次比較好理解，卡片上的 `fixes n/3` 也不用多一個數字。「已處理」不能共用：同一個 commit 可能既有衝突又有 CI 失敗，共用的話處理了一個就會跳過另一個 |
+| 130 | 還不知道有沒有衝突（`merge_state` 是 `unknown`）時卡片不進 Ready to merge；同一個 commit 上已知的答案不會被 `unknown` 蓋掉 | `unknown` 當成沒有衝突 | 實測有衝突時舊的 CI 結果仍然是通過，當成沒有衝突的話卡片會顯示可以合併。GitHub 每次重新計算都會先回 `unknown`，照單全收的話這個值會來回跳、每次都寫事件並推送卡片 |
+| 131 | 收尾時只要 worktree 停在合併到一半的狀態，不論 run 的原因都檢查衝突標記；封存時放棄解到一半的合併 | 只在 `merge_conflict` run 檢查；封存時照樣 commit | 解衝突的 run 被中止後，下一個 run 的收尾會把整個工作目錄 commit 並 push，標記就發布出去了。封存時 commit 則是把標記存進 branch |
+| 132 | 同一時間只進行一個 `git fetch` | 不處理；失敗時重試 | 實測同一個專案同時開兩個任務，兩個 fetch 互搶同一個遠端分支的鎖，其中一個任務直接以錯誤結束。fetch 很短，排隊的代價可以忽略 |
+| 133 | 讀任務時略過資料庫裡不認得的欄位 | 維持原樣：欄位對不上就失敗 | 資料庫被新版補過欄位之後，切回舊版就整個讀不了。開發時在不同的 branch 之間切換很容易遇到 |
 
 ## 尚未決定
 
@@ -175,3 +181,5 @@
 - 這個工具不回覆 PR 上的留言，也不把留言標成已解決；agent 不同意某則留言時，理由只在它最後的訊息裡。要不要把 agent 的回答貼回 PR
 - 留言被編輯後不會再餵回 agent；任務第一次被查到時 PR 上原本就有的留言也會被餵回。兩者要不要改
 - 「處理過留言之後 `changes_requested` 不再擋住流程」（第 125 筆）沒有實測，一個人使用時產生不了這個狀態
+- Agent 自己執行 `git add` 或 `git commit` 把衝突標記存進去的話，收尾的檢查攔不到（只看 git 認定還有衝突的檔案）。要不要對整個合併的結果再掃一次
+- 本機合併沒有衝突但 GitHub 回報有衝突時，run 以錯誤結束。要不要直接把沒有衝突的合併結果 commit 並 push

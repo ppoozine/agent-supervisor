@@ -50,15 +50,15 @@ src/agent_supervisor/
   cli.py             # 指令 asv：serve 啟動 daemon，其餘是階段 1 留下的前景模式
   supervisor.py      # 組裝 Runner / Poller / Dispatcher，以及「輪詢一輪再派工」
   daemon.py          # 常駐的 daemon：啟動順序、訊號、背景輪詢、關閉
-  stages.py          # run 的準備（建 worktree）與收尾（commit、push、開 PR）、封存
+  stages.py          # run 的準備（建 worktree、抓 CI log、開始合併）與收尾（commit、push、開 PR）、封存
   process.py         # 執行外部指令的共用底層，逾時或取消時終止子程序
   worktree.py        # git worktree 與 branch 管理（所有 git 指令）
   github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log；檢查結果換算成 ci_state
   ci_log.py          # 清理與截取 CI log、組出修復指示（純函式）
   feedback.py        # PR 上的留言：哪些要餵回 agent、餵回的內容（純函式）
   poller.py          # 輪詢 PR / CI / review 狀態，把 PR 上新的留言記成事件
-  dispatcher.py      # 找出有新留言或 CI 失敗的任務，交給 Runner 建立對應的 run
-  status.py          # 留言回饋條件、自動修復條件、看板欄位與狀態標籤（純函式）
+  dispatcher.py      # 找出有新留言、有衝突或 CI 失敗的任務，交給 Runner 建立對應的 run
+  status.py          # 留言回饋、解衝突、自動修復三種條件，看板欄位與狀態標籤（純函式）
   db.py              # schema 與查詢
   config.py
   api/
@@ -86,15 +86,15 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 2. **Runner 只透過 `AgentAdapter` 介面控制 agent**。Runner 內不得出現任何 Claude Code 專屬的字串或參數。
 3. **`events` 表只新增，不修改、不刪除**。
 4. **防無限迴圈**：
-   - 同一個 commit 的 CI 失敗只餵回一次（比對 `last_handled_head_sha`）；同一則留言只餵回一次（比對 `last_handled_feedback_event_id`）
-   - 自動修復最多 3 次（`ci_fix_attempts`）；留言的自動處理最多 5 次（`feedback_attempts`）；PR 上的留言不會讓這兩個次數歸零
+   - 同一個 commit 的 CI 失敗只餵回一次（比對 `last_handled_head_sha`）；同一個 commit 的衝突只處理一次（比對 `last_handled_conflict_head_sha`）；同一則留言只餵回一次（比對 `last_handled_feedback_event_id`）
+   - 自動修復與解衝突合計最多 3 次（`ci_fix_attempts`）；留言的自動處理最多 5 次（`feedback_attempts`）；PR 上的留言不會讓這兩個次數歸零
    - 單一任務累計 `cost_usd` 或累計 token 數達到全域上限就停止
    - 單一 run 的輪數與花費上限由 adapter 在執行中擋下；執行時間上限由 Runner 自己計時
    - Stop、中斷、出錯之後不自動開新的 run，等人介入
    - 這些規則只決定能不能再自動修復，不影響成果能不能合併；細節以規格為準
 5. **GitHub 一律用輪詢**（預設 30 秒），MVP 不做 webhook。
 6. **對外部指令的呼叫**（`git`、`gh`、agent）集中在各自的模組，方便測試時替換。
-7. **push 與開 PR 由 supervisor 執行**，不交給 agent；agent 正常結束的每一次 run 都做收尾，其他結束方式不自動發布、保留 worktree 內的變更。
+7. **push 與開 PR 由 supervisor 執行**，不交給 agent；agent 正常結束的每一次 run 都做收尾，其他結束方式不自動發布、保留 worktree 內的變更。 解衝突時合併也由 supervisor 開始與 commit，agent 只改檔案；衝突標記還在就不 commit、不 push。
 8. **Agent 的動作受權限政策限制**（sandbox 等級、是否允許連網、工具與指令的限制）。Adapter 攔得到的違規動作一律拒絕並寫入 `permission_denied` 事件。這是基本防護不是安全邊界，階段 1 到 4 只用在信任的 repo。
 9. **每個任務同時最多一個未結束的 run**，由資料庫約束保證；建立 run 與更新防迴圈欄位在同一個交易內完成。
 10. **一個 run 由同一個可取消的工作從建立負責到結案**（準備、agent 執行、收尾）；建立 run、Stop、封存共用每個任務一把鎖。

@@ -78,15 +78,17 @@ SQLite，四張表。
 | `head_sha` | Poller 最近一次查到的 PR 最新 commit |
 | `ci_state` | `head_sha` 上的 CI 結果，見下方說明 |
 | `review_state` | `none` / `approved` / `changes_requested` |
+| `merge_state` | PR 能不能合併進基底分支：`unknown` / `clean` / `conflicting` |
 | `last_handled_head_sha` | 已經餵回過 CI 失敗的 commit，避免重複餵回 |
 | `ci_fix_attempts` | 自動修復次數 |
 | `last_handled_feedback_event_id` | 已經餵回 agent 的最後一則留言（`review_comment` 事件的編號）；沒處理過是 `NULL` |
 | `feedback_attempts` | 自動處理留言的次數 |
+| `last_handled_conflict_head_sha` | 已經請 agent 解過衝突的 commit，避免重複處理 |
 | `archived_at`, `created_at`, `updated_at` | 時間戳 |
 
-`pr_state`、`head_sha`、`ci_state`、`review_state` 是 Poller 對 GitHub 狀態的快取，不是看板欄位。
+`pr_state`、`head_sha`、`ci_state`、`review_state`、`merge_state` 是 Poller 對 GitHub 狀態的快取，不是看板欄位。
 
-後來才加的欄位（例如上面最後兩個）在 daemon 啟動時自動補到舊的資料庫上，不需要手動處理。
+後來才加的欄位在 daemon 啟動時自動補到舊的資料庫上，不需要手動處理。反過來，資料庫被比較新的版本開過之後，舊版讀到不認得的欄位會略過，不會因此讀不了。
 
 `ci_state` 的意思：
 
@@ -119,9 +121,9 @@ SQLite，四張表。
 | 欄位 | 說明 |
 | --- | --- |
 | `id`, `task_id` | 主鍵與所屬任務 |
-| `trigger` | `initial` / `ci_failure` / `user_message` / `review_feedback` |
+| `trigger` | `initial` / `ci_failure` / `user_message` / `review_feedback` / `merge_conflict` |
 | `input_text` | 這次送給 agent 的內容。`ci_failure` run 建立時先寫一段簡短說明，準備階段抓到 CI log 後更新成完整內容 |
-| `source_head_sha` | `ci_failure` run 針對的 commit；其他 trigger 為 `NULL` |
+| `source_head_sha` | `ci_failure` 與 `merge_conflict` run 針對的 commit；其他 trigger 為 `NULL` |
 | `started_at`, `ended_at` | 執行區間 |
 | `exit_status` | `success` / `error` / `stopped` / `limit_reached` / `interrupted` |
 | `tokens_in`, `tokens_out` | 用量；run 被中斷而拿不到時為 `NULL` |
@@ -157,7 +159,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 | `tool_call`、`command` | 一次工具呼叫寫成兩筆事件，`phase` 分別是 `started` 與 `finished`，用 `tool_use_id` 對應。因為事件只能新增，結果不能回填到第一筆 |
 | `permission_denied` | 被拒絕的工具、完整輸入、拒絕的原因 |
 | `state_change` | run 結案時寫一筆，`change` 為 `run_ended`，帶 `exit_status`、`detail` 與 `usage_raw` |
-| `ci_status` | Poller 查到的四個狀態欄位與 PR 編號。只在其中任何一個有變化時才寫，不是每次輪詢都寫 |
+| `ci_status` | Poller 查到的五個狀態欄位與 PR 編號。只在其中任何一個有變化時才寫，不是每次輪詢都寫 |
 | `review_comment` | PR 上的一則留言：GitHub 的編號（`github_id`）、種類（`comment` / `review` / `inline_comment`）、作者、內文、檔案與行號、連結。`ignored` 不是空的表示這則留言不餵回 agent，內容是原因 |
 
 ## Run 的生命週期
@@ -167,7 +169,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 | 階段 | 做什麼 |
 | --- | --- |
 | 建立 | 在資料庫交易內寫入 run。開任務時，任務與它的 `initial` run 在同一個交易內建立，所以不會有「沒有任何 run 的任務」 |
-| 準備 | 確保任務有自己的 worktree 與 branch（已經有了就略過，所以只有第一個 run 會真的建立）。`ci_failure` 另外要抓失敗的 CI log |
+| 準備 | 確保任務有自己的 worktree 與 branch（已經有了就略過，所以只有第一個 run 會真的建立）。`ci_failure` 另外要抓失敗的 CI log；`merge_conflict` 另外要開始合併 |
 | agent 執行 | 透過 adapter 跑一輪，事件寫進 `events` |
 | 收尾 | commit、push、開 PR，見下一節 |
 
@@ -186,7 +188,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 | --- | --- |
 | 位置 | 資料目錄下的 `worktrees/<專案名>/task-<任務編號>`，預設是 `~/.agent-supervisor/worktrees/…` |
 | branch 名稱 | `asv/task-<任務編號>-<標題的英數字>`，最長 60 個字元；標題沒有英數字時只用編號 |
-| 基底 | 先 `git fetch`，再從遠端的預設分支（`origin/<default_branch>`）切出來。不受本機預設分支是否更新影響，也不動使用者自己的工作目錄 |
+| 基底 | 先 `git fetch`，再從遠端的預設分支（`origin/<default_branch>`）切出來。不受本機預設分支是否更新影響，也不動使用者自己的工作目錄。同一時間只進行一個 `git fetch`：同一個 repo 的 worktree 共用同一份 git 資料，同時 fetch 會互搶鎖 |
 | 專案登記 | 記下 repo 路徑、GitHub 的 `owner/name`、預設分支、是否要求 review。GitHub repo 與預設分支可以從 `origin` 自動讀出 |
 
 任務的工作目錄如果不是這個工具建立的 worktree（沒有自己的 branch），準備階段會拒絕執行，封存時也不會去動那個目錄。
@@ -197,8 +199,8 @@ Agent 正常結束這一輪之後，Runner 依序做下面的事。不論是哪�
 
 收尾是 run 的一部分：全部做完才寫入 `ended_at`，所以收尾期間卡片仍在 Working。
 
-1. worktree 有未 commit 的變更 → 由 supervisor 補一個 commit，訊息是 `chore(agent): save uncommitted changes from run <run 編號>`。
-2. branch 相對於遠端有新的 commit → push，寫入 `pushed` 事件，並立刻把 `head_sha` 更新為剛 push 的 commit、`ci_state` 設為 `pending`、`review_state` 設為 `none`。這樣不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
+1. worktree 有未 commit 的變更，或停在合併到一半的狀態 → 由 supervisor 補一個 commit，訊息是 `chore(agent): save uncommitted changes from run <run 編號>`。合併到一半時先檢查衝突是否真的解掉，見「Merge conflict」。
+2. branch 相對於遠端有新的 commit → push，寫入 `pushed` 事件，並立刻把 `head_sha` 更新為剛 push 的 commit、`ci_state` 設為 `pending`、`review_state` 設為 `none`、`merge_state` 設為 `unknown`。這樣不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
 3. 還沒有 PR 且 branch 相對於基底分支有 commit → 開 PR，回填 `pr_number` 並把 `pr_state` 設為 `open`，寫入 `pr_opened` 事件。PR 的標題是任務標題，內容是任務描述加上一行註明來源的文字。
 4. branch 相對於基底分支沒有任何 commit → 不開 PR，卡片進 Needs you（標籤 `No changes`）。
 
@@ -220,14 +222,16 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 
 | 欄位 | 條件 |
 | --- | --- |
-| Working | 有 run 正在執行；或符合「留言回饋條件」或「自動修復條件」、正在等 Dispatcher 接手 |
-| Needs you | 最後一次 run 的 `exit_status` 不是 `success`；或最後一次 run 是 `success` 但任務沒有 PR（agent 沒有產生任何變更）；或還有沒處理的 review 意見卻不符合留言回饋條件；或 CI 失敗但不符合自動修復條件（含已達修復上限、累計花費超過上限） |
-| Ready to merge | PR 開著、CI 通過，且（專案不要求 review，或 review 已核准） |
-| In review | 其餘 PR 開著的情況：CI 進行中、PR 上沒有任何 CI 檢查，或 CI 通過但還在等審查 |
+| Working | 有 run 正在執行；或符合「留言回饋條件」「解衝突條件」「自動修復條件」其中之一、正在等 Dispatcher 接手 |
+| Needs you | 最後一次 run 的 `exit_status` 不是 `success`；或最後一次 run 是 `success` 但任務沒有 PR（agent 沒有產生任何變更）；或還有沒處理的 review 意見卻不符合留言回饋條件；或 PR 有衝突卻不符合解衝突條件；或 CI 失敗但不符合自動修復條件（含已達修復上限、累計花費超過上限） |
+| Ready to merge | PR 開著、CI 通過、確定沒有衝突（`merge_state` 是 `clean`），且（專案不要求 review，或 review 已核准） |
+| In review | 其餘 PR 開著的情況：CI 進行中、PR 上沒有任何 CI 檢查、CI 通過但還不知道有沒有衝突（標籤 `Checking mergeability`），或 CI 通過但還在等審查 |
+
+三種自動處理同時成立時的順序是留言、衝突、CI 失敗，Dispatcher 與看板的標籤用同一個順序。
 
 ## 自動修復條件與防迴圈
 
-**自動修復條件**是一個純函式，`status.py` 與 Dispatcher 共用同一份，全部成立才算符合：
+**自動修復條件**是一個純函式，`status.py` 與 Dispatcher 共用同一份，九條全部成立才算符合：
 
 1. `head_sha` 上的所有 CI 檢查都已結束，且至少一個失敗
 2. `head_sha` 不等於 `last_handled_head_sha`
@@ -237,8 +241,11 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 6. PR 開著，任務未封存
 7. 最後一次 run 的 `exit_status` 是 `success`
 8. 沒有還沒處理的 review 意見（定義見「Review 留言回饋」）
+9. PR 沒有衝突（`merge_state` 不是 `conflicting`）
 
 第 7 條的用意：使用者按了 Stop、run 被中斷、出錯或撞到上限之後，不會再自動開新的 run，要等人送訊息且那一次 run 正常結束，才恢復自動修復。
+
+第 9 條的用意：有衝突的 PR 上 CI 不會跑，要先解掉衝突才知道 CI 的結果。
 
 第 8 條的用意：有留言還沒處理時先處理留言。處理留言通常會產生新的 commit，舊 commit 的 CI 失敗就不用修了；沒有產生新的 commit 時，同一個 commit 的失敗接著照常修復。
 
@@ -263,8 +270,8 @@ Dispatcher 發現任務符合條件時：
 
 **防無限迴圈**
 
-1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。同一則留言也只餵回一次：比對 `last_handled_feedback_event_id`。
-2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止。留言的自動處理最多 5 次：`feedback_attempts` 到 5 就停止。
+1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。同一個 commit 的衝突只處理一次：比對 `last_handled_conflict_head_sha`。同一則留言也只餵回一次：比對 `last_handled_feedback_event_id`。
+2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止，解衝突也算在這 3 次裡。留言的自動處理最多 5 次：`feedback_attempts` 到 5 就停止。
 3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`，其中 `tokens_in` 包含快取的輸入 token。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
 4. 單一 run 的上限：Runner 把「剩餘預算」與「最多輪數」交給 adapter，在執行中就擋下，不等 run 結束。Adapter 做不到時由 `capabilities` 表明。
 5. 單一 run 的執行時間上限：由 Runner 自己計時，不依賴 agent。超過就中止這個 run，`exit_status` 記為 `limit_reached`。這是所有 adapter 都有的最後一道防線。
@@ -341,6 +348,52 @@ Dispatcher 發現任務符合條件時，在同一個資料庫交易內做完：
 
 - 留言不算「人已經介入」，不會讓 `ci_fix_attempts` 或 `feedback_attempts` 歸零；只有從看板或 CLI 送訊息才會。
 - `feedback_attempts` 的上限 5 次是不靠預算的硬上限。到了上限還有新留言時，卡片進 Needs you（標籤 `Changes requested`），等人送訊息。
+
+## Merge conflict
+
+PR 和基底分支有衝突時，自動請同一個 agent session 解掉。流程和 CI 自動修復相同，差別在準備階段做的事。
+
+**GitHub 怎麼回報**（任務 8 實測）：`gh pr view --json mergeable` 的值是 `MERGEABLE`、`CONFLICTING` 或 `UNKNOWN`。
+
+- 基底分支有新的 commit 之後，GitHub 要重新算：實測先繼續回報舊的 `MERGEABLE` 約 3 秒，接著 `UNKNOWN` 約 3 秒，然後才是 `CONFLICTING`。剛 push 完也一樣會經過 `UNKNOWN`。
+- 有衝突時，舊 commit 上的 CI 結果仍然是通過。所以不看 `mergeable` 的話，卡片會停在 Ready to merge，按下合併才發現不行。
+- 有衝突的 PR 上，新 push 的 commit 不會跑 `pull_request` 觸發的 CI（GitHub 產生不了合併後的結果）。
+
+`merge_state` 的對應：`MERGEABLE` 是 `clean`，`CONFLICTING` 是 `conflicting`，其餘（含沒看過的新值）是 `unknown`。同一個 commit 上已經知道答案時，後來查到的 `unknown` 不會把它蓋掉，否則這個值會來回跳動、每跳一次就寫一筆事件。`unknown` 既不當成有衝突，也不當成沒有衝突：不會派工，卡片也不會進 Ready to merge。
+
+**解衝突條件**是一個純函式，`status.py` 與 Dispatcher 共用，全部成立才算符合：
+
+1. `merge_state` 是 `conflicting`
+2. `head_sha` 不等於 `last_handled_conflict_head_sha`
+3. `ci_fix_attempts` 小於 3（和 CI 自動修復共用同一個次數）
+4. 任務的剩餘預算大於零
+5. 沒有 run 正在執行
+6. PR 開著，任務未封存
+7. 最後一次 run 的 `exit_status` 是 `success`
+8. 沒有還沒處理的 review 意見
+
+Dispatcher 發現任務符合條件時，在同一個交易內重新檢查條件、建立 trigger 為 `merge_conflict` 的 run、把 `last_handled_conflict_head_sha` 設為目前的 `head_sha`、`ci_fix_attempts` 加一。「已處理」的欄位和 CI 失敗用的是分開的：同一個 commit 可能既有衝突又有 CI 失敗，兩者不能互相蓋掉。
+
+**用 merge，不用 rebase**，而且合併由 supervisor 開始、由 supervisor commit：
+
+1. 準備階段：`git fetch` 之後在 worktree 執行 `git merge --no-commit --no-ff origin/<基底分支>`。有衝突時 git 以非零結束，工作目錄停在合併到一半的狀態，衝突的檔案裡留著標記。
+2. 把衝突的檔案清單寫成這個 run 要送給 agent 的內容，要求它編輯檔案解掉衝突、移除所有標記，不要自己執行 `git merge`、`git commit`、`git push`。
+3. Agent 只需要改檔案。
+4. 收尾時由 supervisor commit（這個 commit 就是合併的 commit，訊息是 `chore(agent): merge <基底分支> and resolve conflicts (run <run 編號>)`）並 push。因為是 merge，push 是一般的快轉，不需要 force push。
+
+這樣做是因為 Codex 在 worktree 裡不能執行 git 的寫入指令（`codex-notes.md`），但改檔案沒有問題；rebase 還需要 force push，會改寫已經 push 出去的 commit。
+
+- 以本機的 git 為準，不以 GitHub 的回報為準。本機合併沒有衝突（或本來就不需要合併）時，這個 run 以 `error` 結束、還原到合併之前，卡片進 Needs you。
+- worktree 有未 commit 的變更，或已經停在合併到一半的狀態時，準備階段拒絕開始合併，run 以 `error` 結束。
+- Agent 沒有產生新的 commit、衝突還在時，同一個 commit 不會再處理第二次，卡片進 Needs you（標籤 `Merge conflict`）。
+
+**不能把沒解完的衝突發布出去**
+
+- 收尾時只要 worktree 停在合併到一半的狀態，不論這個 run 是什麼原因開始的，都先檢查 git 認定有衝突的檔案裡還有沒有衝突標記（以 `<<<<<<< ` 或 `>>>>>>> ` 開頭的行）。還有的話 run 以 `error` 結束，不 commit、不 push。
+- 不論原因都要檢查，是因為解衝突的 run 可能被 Stop 或逾時，留下合併到一半的工作目錄；下一個 run（例如使用者送訊息讓它繼續）收尾時不能把標記推出去。
+- 只檢查 git 認定有衝突的檔案，內容剛好長得像標記的其他檔案不會被誤判。Agent 自己執行了 `git add` 的檔案不在檢查範圍內。
+- 合併到一半時，即使工作目錄看起來沒有任何變更也要 commit。實測 agent 把衝突全部解成「保留自己這邊」時，內容和合併前一模一樣，git 看不到變更，但沒有這個 commit，合併就不算完成、衝突也還在。
+- 封存時如果還停在合併到一半的狀態，先放棄這次合併再清掉 worktree。任務自己的 commit 都還在，只丟掉解到一半的合併。
 
 ## 權限政策（階段 1 版本）
 
@@ -485,10 +538,10 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 | 工作 | 負責 |
 | --- | --- |
 | Runner | 啟動或續接 agent session，把事件寫進 `events`，結束時回填用量並做收尾 |
-| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），把 `pr_state`、`head_sha`、`ci_state`、`review_state` 當成一組一起更新；未封存的任務另外把 PR 上新的留言記成事件 |
-| Dispatcher | 發現符合留言回饋條件的任務就建立 `review_feedback` run；發現符合自動修復條件的任務就建立 `ci_failure` run，抓 log。都交給 Runner |
+| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），把 `pr_state`、`head_sha`、`ci_state`、`review_state`、`merge_state` 當成一組一起更新；未封存的任務另外把 PR 上新的留言記成事件 |
+| Dispatcher | 依序檢查三種條件，符合的就建立對應的 run 交給 Runner：留言回饋（`review_feedback`）、解衝突（`merge_conflict`）、自動修復（`ci_failure`） |
 
-Poller 用一次 `gh pr view` 查回四個欄位。Review 狀態照 GitHub 回報的寫入：收尾時 push 之後會先設成 `none`，但 GitHub 預設不會因為新的 commit 撤銷核准，所以下一次輪詢可能又變回 `approved`。單一任務查詢失敗不影響其他任務，下一輪再查。
+Poller 用一次 `gh pr view` 查回五個欄位。Review 狀態照 GitHub 回報的寫入：收尾時 push 之後會先設成 `none`，但 GitHub 預設不會因為新的 commit 撤銷核准，所以下一次輪詢可能又變回 `approved`。單一任務查詢失敗不影響其他任務，下一輪再查。
 
 **所有模組共用一條資料庫連線，寫入由一把鎖排隊。** Dispatcher 的交易包含好幾步，沒有鎖的話 Runner 同時間的寫入會把它切成兩半。
 
