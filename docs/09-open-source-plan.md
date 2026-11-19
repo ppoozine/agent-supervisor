@@ -16,7 +16,7 @@
 | 2 | 定位：給誰用、和現有工具差在哪 | 已決定（決策第 142 筆） |
 | 3 | 支援哪些 agent；設定頁與偵測 | 部分決定：第一版是 Claude Code 與 Codex；設定頁的細節未談 |
 | 4 | 文件與介面的語言；支援的平台 | 已決定（決策第 143、144 筆） |
-| 5 | 開源的時機與第一版的範圍 | 討論中 |
+| 5 | 開源的時機與第一版的範圍 | 已決定（決策第 145、146 筆）；名稱待選 |
 | 6 | 重排 roadmap，寫下一個階段的任務單 | 未開始 |
 
 ---
@@ -254,4 +254,50 @@
 - 五個用了平台相關功能的模組（`recovery.py`、`daemon.py`、`cli.py`、`notifier.py`、`adapters/codex.py`）要在 Linux 上確認。
 - 通知在 Linux 上要另外的做法，或先不發。
 - Windows 要重寫訊號、程序群組、檔案鎖；文件裡寫明不支援、可以用 WSL。
+
+---
+
+## 主題 5 · 開源的時機與第一版的範圍
+
+### 第一版的範圍（決策第 145 筆）
+
+| # | 項目 | 內容 |
+| --- | --- | --- |
+| 1 | 這個 repo 的 CI | GitHub Actions 跑 pytest、ruff、前端測試與 build，macOS 與 Linux 都跑 |
+| 2 | 英文化 | 註解與 docstring、介面文字；`CLAUDE.md` 的慣例跟著改 |
+| 3 | Linux 支援 | 五個平台相關的模組在 Linux 上確認並修正 |
+| 4 | 安裝 | 名稱定案、前端檔案打包進套件、一行指令裝得起來、啟動時檢查 `gh` 與各 agent |
+| 5 | Agent 設定頁 | 偵測安裝與登入狀態、API key 的引導、條文的說明 |
+| 6 | 對外的文件 | README、使用說明、信任模型與已知限制、貢獻指南 |
+| 7 | 修掉「會卡住」的五項 | PR 重新開啟、無法結案的任務、中斷後的殘留、改寫歷史、超過上限後不能送訊息 |
+| 8 | Adapter 開發指南與範例 | 介面說明、一個最小的範例 adapter、HTTP API 的說明 |
+
+**不進第一版**：直接打 endpoint 的 agent（原本的階段 6）。它要自己寫 agent 迴圈、工具與 context 管理，是最大、風險最高的一項，會把公開的時間拖很久。第 8 項的範例先用一個很小的假 agent 示範介面，真正的 endpoint agent 當成公開後的第一個大功能。
+
+### 時機與版本號（決策第 146 筆）
+
+- 做完上面八項才把 repo 設成公開，同時發版。別人第一眼看到的要是裝得起來、文件齊全的東西。
+- 公開的那一版是 `0.3.0`，不是 `1.0`：`0.x` 表示介面還可能變動。HTTP API 與 adapter 介面在有外部使用者之前不承諾穩定。
+
+### 名稱（待選）
+
+2026-11-20 查 PyPI：
+
+| 名稱 | 現況 |
+| --- | --- |
+| `agent-supervisor`（套件名） | 已經被別人註冊：0.3.0，「Policy-driven process isolation and supervision for agent runtimes」，領域很接近 |
+| `asv`（指令名） | Airspeed Velocity，知名的 Python 效能測試工具，指令也叫 `asv` |
+
+所以套件名與指令名都要另外取，而且要在公開前定案。對方的套件很可能也用 `agent_supervisor` 當 import 名稱，兩個裝在同一個環境會互相蓋掉，所以 import 名稱最好一起改。
+
+候選（都查過 PyPI 與 Homebrew 沒有同名的；PyPI 會把去掉連字號後相同的名稱視為重複，所以 `agent-warden`、`agent-foreman`、`agent-board`、`agent-loop` 雖然查不到，實際上註冊不了）：
+
+| 候選 | 指令 | 意思 | 取捨 |
+| --- | --- | --- | --- |
+| `agentherd` | `agentherd` | 趕一群 agent | 一看就懂在做什麼，好記。指令有點長；不用 `herd` 當指令是因為 Laravel Herd 用了 |
+| `prloop` | `prloop` | PR 的回饋迴圈 | 最短，點出核心機制。但看不出「多個 agent」與「看板」 |
+| `worktender` | `worktender` | 照顧 worktree 的人 | 獨特、不會撞名。第一次看不容易懂 |
+| `agentsup` | `agentsup` | agent-supervisor 的縮寫 | 和現在的名稱最接近，改動感最小。唸起來不順，也仍然容易和 PyPI 上那個搞混 |
+
+還沒有查的：GitHub 上有沒有同名的知名專案、npm、網域、商標。
 
