@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { archiveTask, errorMessage, getTask, listEventsAfter, sendMessage, stopTask } from '../api'
 import { formatCount, formatUsage, mergeEvents, pullRequestUrl } from '../format'
 import type { Card, EventRow, Project, TaskDetail } from '../types'
+import { Dialog } from './Dialog'
 import { EventsTab, LogTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
 import { agentName } from './TaskCard'
@@ -31,6 +32,7 @@ export function TaskPage(props: TaskPageProps) {
   const [messageText, setMessageText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
+  const [isConfirmingArchive, setIsConfirmingArchive] = useState(false)
   // 已經完整補抓到哪一筆。只有補抓成功才往前推；推送來的事件不算，
   // 否則補抓失敗時，中間那一段就再也不會補回來。
   const backfilledUpTo = useRef(0)
@@ -102,6 +104,16 @@ export function TaskPage(props: TaskPageProps) {
   }
   const prUrl = pullRequestUrl(project, current)
   const isArchived = current.archived_at !== null
+  const hasOpenPullRequest = current.pr_number !== null && current.pr_state === 'open'
+  const archive = async (): Promise<void> => {
+    await perform('archive', () => archiveTask(taskId))
+    setIsConfirmingArchive(false)
+  }
+  // 封存不會關掉 PR，也沒有取消封存，所以 PR 還開著時先問一次。
+  const requestArchive = (): void => {
+    if (hasOpenPullRequest) setIsConfirmingArchive(true)
+    else void archive()
+  }
 
   return (
     <div className="task-page">
@@ -139,13 +151,29 @@ export function TaskPage(props: TaskPageProps) {
             {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
           </button>
           <button
-            onClick={() => void perform('archive', () => archiveTask(taskId))}
+            onClick={requestArchive}
             disabled={isArchived || busyAction !== null}
           >
             {busyAction === 'archive' ? 'Archiving…' : isArchived ? 'Archived' : 'Archive'}
           </button>
         </div>
       </div>
+      {isConfirmingArchive && (
+        <Dialog
+          title="Archive this task?"
+          submitLabel="Archive"
+          isBusy={busyAction === 'archive'}
+          error={null}
+          onSubmit={() => void archive()}
+          onClose={() => setIsConfirmingArchive(false)}
+        >
+          <p>
+            PR #{current.pr_number} is still open. After archiving, CI failures are no longer
+            fixed automatically and you cannot send messages. Archiving cannot be undone.
+          </p>
+          <p>Merge or close the PR on GitHub.</p>
+        </Dialog>
+      )}
       {error && (
         <div className="alert" role="alert">
           {error}
