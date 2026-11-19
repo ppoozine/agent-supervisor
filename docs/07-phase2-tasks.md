@@ -47,18 +47,18 @@
 ```
 
 **我要驗證的事**
-- [ ] `uv run pytest` 與 `uv run ruff check .` 都通過
-- [ ] 啟動 daemon 後用 `curl` 加入 sandbox 專案、開一個任務，GitHub 上出現 PR
-- [ ] `curl -N` 接上 `/stream`，開任務後即時看到 agent 的輸出與狀態變化
-- [ ] 不介入，CI 失敗後 daemon 自動修到綠燈，`GET /tasks` 的欄位跟著變成 Ready to merge
-- [ ] 同時開兩個任務，兩個 run 真的同時在跑、互不影響（階段 1 做不到的事）
-- [ ] `POST /tasks/{id}/stop` 只停掉那一個任務，另一個繼續跑
-- [ ] 任務有 run 在執行時送訊息，API 回報錯誤，沒有兩個 run 同時執行
-- [ ] 封存任務後 worktree 被清掉；對已封存的任務送訊息被拒絕
-- [ ] daemon 已經在跑的時候再啟動一個，第二個直接結束
-- [ ] run 執行中把 daemon 強制關掉再啟動，遺留的 agent 程序已經不在、該 run 變成 `interrupted`
-- [ ] `GET /tasks/{id}/events` 可以分頁；`GET /usage` 的數字和各 run 加總一致
-- [ ] Codex 任務的花費顯示為未知，不是 0
+- [x] `uv run pytest` 與 `uv run ruff check .` 都通過
+- [x] 啟動 daemon 後用 `curl` 加入 sandbox 專案、開一個任務，GitHub 上出現 PR
+- [x] `curl -N` 接上 `/stream`，開任務後即時看到 agent 的輸出與狀態變化
+- [x] 不介入，CI 失敗後 daemon 自動修到綠燈，`GET /tasks` 的欄位跟著變成 Ready to merge
+- [x] 同時開兩個任務，兩個 run 真的同時在跑、互不影響（階段 1 做不到的事）
+- [x] `POST /tasks/{id}/stop` 只停掉那一個任務，另一個繼續跑
+- [x] 任務有 run 在執行時送訊息，API 回報錯誤，沒有兩個 run 同時執行
+- [x] 封存任務後 worktree 被清掉；對已封存的任務送訊息被拒絕
+- [x] daemon 已經在跑的時候再啟動一個，第二個直接結束
+- [x] run 執行中把 daemon 強制關掉再啟動，遺留的 agent 程序已經不在、該 run 變成 `interrupted`
+- [x] `GET /tasks/{id}/events` 可以分頁；`GET /usage` 的數字和各 run 加總一致
+- [x] Codex 任務的花費顯示為未知，不是 0
 
 ---
 
