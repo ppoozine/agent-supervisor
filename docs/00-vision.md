@@ -88,7 +88,7 @@
 - 卡片拖曳：欄位是推導出來的。
 - 雲端代管：是跑在自己電腦上的工具。
 - 支援所有 agent 與所有 Git 平台：先 Claude Code、Codex + GitHub。
-- MVP 不自己做 coding agent：先用現成的，自製的 API agent 排在階段 6，當作第三個 adapter。
+- MVP 不自己做 coding agent：先用現成的，直接打 endpoint 的 agent 排在階段 5，當作第三個 adapter。
 - 多人使用與登入：目前不做，要不要做留到最後的產品化階段再決定。
 
 ## 一張卡片的生命週期

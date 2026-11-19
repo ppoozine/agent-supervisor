@@ -154,6 +154,8 @@
 | 146 | 做完第一版的八項才把 repo 設成公開，那一版叫 `0.3.0`；HTTP API 與 adapter 介面暫不承諾穩定 | 現在就公開、邊做邊開發；叫 `1.0` | 現在 README 只有兩行、註解是中文、名稱還會改，早來的人會留下不好的印象，而第一印象只有一次。`0.x` 符合介面還會變的實際狀況 |
 | 147 | 專案與 repo 維持叫 `agent-supervisor`，PyPI 上的套件叫 `ai-agent-supervisor`；import 名稱維持 `agent_supervisor`；指令從 `asv` 改掉，暫定 `agsv` | 整個專案改名（查了約一百二十個候選，例如 `site-supervisor`、`pr-supervisor`、`agentherd`）；連 import 名稱一起改 | `agent-supervisor` 在 PyPI 上已經被別人註冊，但 supervisor 仍然是最貼切的字，只在套件名前加 `ai-` 就能註冊，repo 與所有文件都不用改。import 名稱會和那個套件相同，但這個工具裝在自己的環境裡，實際撞到的機會很低，而改它要動到每一個檔案。指令不一樣：不管怎麼裝都在同一個 `PATH` 上，`asv` 會和 Airspeed Velocity 互相蓋掉，所以要換 |
 | 148 | 不發布到 PyPI，從 GitHub 安裝（`uv tool install git+…` 或 GitHub Release 上附的套件檔）；前端由 CI build 好打包進去。推翻第 147 筆裡「PyPI 上的套件叫 `ai-agent-supervisor`」的部分，其餘不變 | 用 `ai-agent-supervisor` 發布到 PyPI | 不上 PyPI 就不需要另取套件名，專案、repo、import 名稱都不用動，也少一條要維護的發布流程。定位是讓人讀得懂、拿去改，這種使用者本來就會 clone 或 fork。之後要上 PyPI 隨時可以加 |
+| 149 | 重排階段 4 之後的 roadmap：4 開源準備、5 直接打 endpoint 的 agent、6 補功能的廣度、7 自動派工、8 治理、9 桌面版 | 維持原本的順序（4 自動派工、5 治理、6 自製 agent、7 產品化） | 方向改成開源（第 142 筆）。讓別人裝得起來、看得懂、接得上要先做；endpoint agent 是 adapter 最完整的示範，所以提前並縮小；自動派工需要先有同時執行數的上限，而且是最難的一段，等有了使用者再做。治理不是主打，往後。推翻第 116 筆「暫不調整階段順序」 |
+| 150 | 階段 4 的任務一次做一個，合併之後才開始下一個 | 像階段 3 那樣連著做、PR 疊在一起（第 120 筆） | 這個階段有幾個任務的變更很大，英文化會動到幾乎每一個檔案，疊在一起的話前面的改動會讓後面全部要重做 |
 
 ## 尚未決定
 
