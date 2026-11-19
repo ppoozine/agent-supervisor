@@ -638,3 +638,73 @@ async def test_web_files_are_served_next_to_the_api(api: Api, tmp_path: Path) ->
         assert error_of(await client.get("/api/nowhere")) == (404, "not_found")
         assert error_of(await client.delete("/api/tasks")) == (405, "method_not_allowed")
         assert (await client.head("/api/agents")).status_code == 405
+
+
+class Entered:
+    """記下哪些卡片被回報為「剛進 Needs you」。"""
+
+    def __init__(self, api: Api) -> None:
+        self.cards: list[tuple[int, str]] = []
+        api.feed = ChangeFeed(api.supervisor, on_needs_you=self.record)
+
+    def record(self, card: dict[str, Any]) -> None:
+        self.cards.append((card["id"], card["label"]))
+
+
+async def test_card_entering_needs_you_is_reported_once(api: Api) -> None:
+    entered = Entered(api)
+    created = await api.task([session_started(), write_file("a.txt"), result()])
+    await api.finished(created["id"])
+    await api.feed.start()
+
+    await db.update_task(api.conn, created["id"], ci_state=CiState.FAILED, merge_state="clean")
+    await db.update_task(api.conn, created["id"], review_state="changes_requested")
+    await api.feed.publish_changes()
+    # 還在 Needs you 裡，只是資料又變了一次：不重複回報。
+    await db.update_task(api.conn, created["id"], ci_state=CiState.PASSED)
+    await api.feed.publish_changes()
+
+    assert entered.cards == [(created["id"], "Changes requested")]
+
+
+async def test_card_already_in_needs_you_at_startup_is_not_reported(api: Api) -> None:
+    entered = Entered(api)
+    created = await api.task([session_started(), result()])
+    await api.finished(created["id"])
+    assert (await api.client.get(f"/api/tasks/{created['id']}")).json()["column"] == "Needs you"
+
+    await api.feed.start()
+    await db.update_task(api.conn, created["id"], ci_state=CiState.PENDING)
+    await api.feed.publish_changes()
+
+    assert entered.cards == []
+
+
+async def test_card_that_leaves_and_comes_back_is_reported_again(api: Api) -> None:
+    entered = Entered(api)
+    created = await api.task([session_started(), write_file("a.txt"), result()])
+    await api.finished(created["id"])
+    await api.feed.start()
+
+    for review_state in ("changes_requested", "none", "changes_requested"):
+        await db.update_task(api.conn, created["id"], review_state=review_state)
+        await api.feed.publish_changes()
+
+    assert [label for _, label in entered.cards] == ["Changes requested", "Changes requested"]
+
+
+async def test_failing_listener_does_not_stop_the_feed(api: Api) -> None:
+    def explode(card: dict[str, Any]) -> None:
+        raise RuntimeError("boom")
+
+    api.feed = ChangeFeed(api.supervisor, on_needs_you=explode)
+    created = await api.task([session_started(), write_file("a.txt"), result()])
+    await api.finished(created["id"])
+    await api.feed.start()
+    subscription = api.feed.subscribe()
+
+    await db.update_task(api.conn, created["id"], review_state="changes_requested")
+    await api.feed.publish_changes()
+
+    (card,) = await collect(subscription)
+    assert card.data["column"] == "Needs you"

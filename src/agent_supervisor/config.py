@@ -37,6 +37,7 @@ class Config:
     poll_interval_seconds: float = 30.0
     api_port: int = 8765
     ci_log_max_chars: int = 20_000
+    notify_needs_you: bool = True
     permission: PermissionPolicy = field(
         default_factory=lambda: PermissionPolicy(tool_rules=DEFAULT_TOOL_RULES)
     )
