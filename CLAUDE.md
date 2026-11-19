@@ -17,6 +17,7 @@
 | `docs/06-diagrams.md` | 架構圖與流程圖 |
 | `docs/07-phase2-tasks.md` | 階段 2 的任務單與驗證清單 |
 | `docs/08-phase3-tasks.md` | 階段 3 的任務單與驗證清單 |
+| `docs/09-open-source-plan.md` | `0.2` 之後的開源規劃（討論中的草稿） |
 | `docs/codex-notes.md` | Codex 介面的調查與實測結果（任務 0 的產出） |
 | `docs/claude-sdk-notes.md` | Claude Agent SDK 的調查與實測結果 |
 
