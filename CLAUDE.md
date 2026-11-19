@@ -46,7 +46,9 @@ src/agent_supervisor/
   enums.py           # 共用的列舉值：run 的觸發原因、結案結果、事件型別
   runner.py          # run 的生命週期：建立、準備、agent 執行、收尾、結案
   recovery.py        # 單一 daemon 的鎖、啟動時處理未結束的 run
-  cli.py             # 階段 1 的驗證用指令 asv
+  cli.py             # 指令 asv：serve 啟動 daemon，其餘是階段 1 留下的前景模式
+  supervisor.py      # 組裝 Runner / Poller / Dispatcher，以及「輪詢一輪再派工」
+  daemon.py          # 常駐的 daemon：啟動順序、訊號、背景輪詢、關閉
   stages.py          # run 的準備（建 worktree）與收尾（commit、push、開 PR）、封存
   process.py         # 執行外部指令的共用底層，逾時或取消時終止子程序
   worktree.py        # git worktree 與 branch 管理（所有 git 指令）
@@ -57,7 +59,12 @@ src/agent_supervisor/
   status.py          # 自動修復條件、看板欄位與狀態標籤（純函式）
   db.py              # schema 與查詢
   config.py
-  api/               # FastAPI 路由與 SSE
+  api/
+    app.py           # 十個 REST 端點與 GET /stream
+    feed.py          # 偵測資料庫的變化並推送給 SSE 連線
+    views.py         # 把資料轉成回應內容（純函式）
+    errors.py        # 錯誤回應的形狀與對應
+    guard.py         # 只接受對本機、從本機網頁發出的請求
 tests/
 docs/
 ```
@@ -105,6 +112,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 uv sync
 uv run pytest
 uv run asv --help
+uv run asv serve          # 啟動 daemon，API 在 http://127.0.0.1:8765
 uv run ruff check .
 uv run ruff format .
 ```

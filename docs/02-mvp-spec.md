@@ -1,6 +1,6 @@
 # 02 · MVP 規格
 
-最後更新：2026-11-18
+最後更新：2026-11-19
 
 ## 目標與範圍
 
@@ -298,6 +298,10 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 
 同一時間只允許一個 daemon 在執行。第二個 daemon 啟動時發現已經有一個在跑，就直接結束，避免把別人正在跑的 run 當成遺留的。
 
+Daemon 的啟動順序：先裝好訊號處理，拿到單一實例的鎖，做完下面的復原，才開始接受連線。關閉時（Ctrl-C 或 SIGTERM）先停止接受連線、結束開著的 SSE 連線，再把還在執行的 run 中止並標成 `interrupted`。收到 `asv stop` 送來的 SIGUSR1 時中止所有 run，daemon 繼續執行。
+
+階段 1 的前景指令（`start`、`message`、`watch`、`archive`）保留，和 daemon 共用同一把鎖，所以 daemon 在跑的時候它們會被拒絕；`list`、`show`、`project add` 只讀寫資料庫，隨時可用。
+
 Daemon 啟動時，在開始接受任何新工作之前，先找出所有 `ended_at` 為空的 run：
 
 - 先確認上一次啟動時留下的程序（agent 與它的子程序、收尾時的 `git` / `gh`）都已經停掉，還在跑的就終止它們
@@ -339,7 +343,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 
 | 端點 | 用途 |
 | --- | --- |
-| `POST /projects` | 加入本機 repo |
+| `POST /projects` | 加入本機 repo；路徑要是 repo 工作目錄的最上層，已經加入過就回報錯誤 |
 | `GET /projects` | 專案列表 |
 | `POST /tasks` | 開任務：建立任務與 `initial` run，接著建 worktree、啟動 agent |
 | `GET /tasks?project_id=` | 看板資料，含推導出的欄位 |
@@ -351,9 +355,52 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | `GET /usage?project_id=` | token 與花費彙總 |
 | `GET /stream` | SSE：狀態變更與 agent log |
 
+API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。
+
+**回應的內容**
+
+- 看板的一張卡片（`GET /tasks` 的每一筆、`GET /tasks/{id}` 的基本欄位）帶著推導出的 `column` 與 `label`，以及畫卡片需要的欄位：agent 種類、標題、branch、PR 編號與狀態、CI 與 review 狀態、修復次數、更新時間、用量。
+- `cost_usd` 為 `null` 表示這種 agent 不回報花費（由 adapter 的 `capabilities.reports_cost` 判斷），花費是未知而不是零；這時改看 `tokens`。`usage_is_complete` 為否表示有 run 的用量拿不到（例如被中止），數字偏低。
+- `POST /tasks` 在任務與 `initial` run 建立後就回應，worktree 與 agent 在背景進行。worktree 建立失敗是那個 run 以 `error` 結束，不是 HTTP 錯誤。
+- `POST /tasks/{id}/stop` 只中止指定任務的 run，等它完全停下才回應。
+- `GET /tasks/{id}/events` 用 `after`（事件編號）與 `limit` 分頁，可用 `type` 篩選；回應的 `next_after` 不是 `null` 時還有下一頁。
+
+**錯誤回應**
+
+一律是 `{"error": {"code": "...", "message": "..."}}`。`code` 給程式判斷，`message` 可以直接顯示給使用者。
+
+| 情況 | HTTP 狀態 | `code` |
+| --- | --- | --- |
+| `Host` 不是本機，或 `Origin` 不是本機上的網頁 | 403 | `forbidden` |
+| 任務或專案不存在，或沒有這個路徑 | 404 | `not_found` |
+| 這個路徑不接受這種方法 | 405 | `method_not_allowed` |
+| 專案已經加入過 | 409 | `project_exists` |
+| 任務已有 run 在執行（送訊息、封存） | 409 | `run_already_active` |
+| 任務已封存，或 PR 已合併或關閉 | 409 | `task_not_runnable` |
+| 花費或 token 已達上限 | 409 | `budget_exhausted` |
+| 沒有 run 可以中止 | 409 | `no_active_run` |
+| 欄位不合法、agent 種類不存在、路徑不是 git repo 工作目錄的最上層、body 不是以 JSON 的型別送出 | 422 | `invalid_request` |
+| 沒預期到的錯誤（例如封存時 git 失敗） | 500 | `internal_error` |
+
+**SSE**
+
+`GET /stream` 送兩種訊息：
+
+| 訊息 | 內容 | 斷線重連時 |
+| --- | --- | --- |
+| `event` | `events` 表的一列。SSE 的 `id` 就是事件編號 | 瀏覽器會帶 `Last-Event-ID`，daemon 從那個編號之後補送 |
+| `task` | 某個任務的卡片最新內容，和 `GET /tasks` 的一筆相同 | 不補送；重連的一方自己重新抓一次 `GET /tasks` |
+
+- 分成兩種的原因：不是每個會讓卡片移動的寫入都有事件列（例如建立 run），所以看板不能只靠 `events` 推導。
+- 卡片的變化這樣偵測：資料庫每次 commit 之後，用一次查詢算出每個任務的指紋，有變的才重新推導卡片並推送。所有寫入都經過同一種交易，所以不會漏。
+- 只推送已經 commit 的資料。
+- 每條連線有一個有上限的佇列；對方讀得太慢、佇列滿了就結束這條連線，讓它重連後用編號補上，不拖住其他人。
+- 沒有訊息時每 15 秒送一行註解，避免連線被中途的設備關掉。
+- 前端要**先連上 `/stream`，再抓 `GET /tasks` 與事件分頁**，事件用編號去掉重複的。順序反過來的話，抓完資料到連上之間發生的變化會漏掉。
+
 ## 背景工作與 Agent adapter
 
-三個 asyncio 背景工作跑在同一個 process。
+三個 asyncio 背景工作和 API 跑在同一個 process。Daemon 另外有一個工作負責把資料庫的變化推送給 SSE 連線（見「API」的 SSE 一段）。
 
 | 工作 | 負責 |
 | --- | --- |
