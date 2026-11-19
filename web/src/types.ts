@@ -28,6 +28,7 @@ export interface Card {
   pr_state: string | null
   ci_state: string
   review_state: string
+  merge_state: string
   ci_fix_attempts: number
   max_ci_fix_attempts: number
   /** `null` 表示這種 agent 不回報花費：花費未知，不是零。 */

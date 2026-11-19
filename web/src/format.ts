@@ -36,6 +36,8 @@ const LABEL_TONES: Record<string, Tone> = {
   Working: 'blue',
   'Fixing CI': 'blue',
   'Addressing review': 'blue',
+  'Resolving conflict': 'blue',
+  'Merge conflict': 'orange',
   'CI failed': 'red',
   'Agent error': 'red',
   'Changes requested': 'orange',
@@ -47,6 +49,7 @@ const LABEL_TONES: Record<string, Tone> = {
   'Review pending': 'yellow',
   'CI running': 'yellow',
   'No checks': 'yellow',
+  'Checking mergeability': 'yellow',
   Ready: 'green',
   Merged: 'green',
 }
@@ -121,7 +124,11 @@ export function toLogLine(event: EventRow): LogLine | null {
     case 'pr_opened':
       return line('system', `opened PR #${text(payload.number)}`)
     case 'ci_status':
-      return line('system', `CI ${text(payload.ci_state)} · review ${text(payload.review_state)}`)
+      return line(
+        'system',
+        `CI ${text(payload.ci_state)} · review ${text(payload.review_state)}` +
+          (payload.merge_state === 'conflicting' ? ' · merge conflict' : ''),
+      )
     case 'review_comment': {
       const where = payload.path ? ` on ${text(payload.path)}${payload.line ? `:${text(payload.line)}` : ''}` : ''
       const skipped = payload.ignored ? ` (not sent to the agent: ${text(payload.ignored)})` : ''
