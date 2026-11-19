@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import * as api from '../api'
@@ -263,4 +263,37 @@ test('a form cannot be closed while its request is in flight', async () => {
   await waitFor(() => expect(button('Cancel').disabled).toBe(true))
   fireEvent(screen.getByRole('dialog', { hidden: true }), new Event('cancel', { cancelable: true }))
   expect(closed).not.toHaveBeenCalled()
+})
+
+test('archiving a task with an open pull request asks first', async () => {
+  const archived = makeDetail({ archived_at: 't', column: 'Archive', label: 'Archived' })
+  vi.mocked(api.archiveTask).mockResolvedValue(archived)
+  renderTaskPage(makeCard({ pr_number: 12, pr_state: 'open' }))
+  await screen.findByText('working on it')
+
+  fireEvent.click(button('Archive'))
+  expect(screen.getByText(/PR #12 is still open/)).toBeTruthy()
+  fireEvent.click(button('Cancel'))
+
+  expect(screen.queryByText(/PR #12 is still open/)).toBeNull()
+  expect(api.archiveTask).not.toHaveBeenCalled()
+
+  fireEvent.click(button('Archive'))
+  fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Archive' }))
+
+  await waitFor(() => expect(onTaskChanged).toHaveBeenCalledWith(archived))
+  expect(api.archiveTask).toHaveBeenCalledWith(7)
+  expect(screen.queryByRole('dialog')).toBeNull()
+})
+
+test('archiving a task without an open pull request does not ask', async () => {
+  const archived = makeDetail({ archived_at: 't', column: 'Archive', label: 'Closed' })
+  vi.mocked(api.archiveTask).mockResolvedValue(archived)
+  renderTaskPage(makeCard({ pr_number: 12, pr_state: 'closed' }))
+  await screen.findByText('working on it')
+
+  fireEvent.click(button('Archive'))
+
+  await waitFor(() => expect(api.archiveTask).toHaveBeenCalledWith(7))
+  expect(screen.queryByRole('dialog')).toBeNull()
 })
