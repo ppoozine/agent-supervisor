@@ -305,7 +305,7 @@ PR 上出現新的留言時，自動餵回同一個 agent session 處理。流�
 
 - 用 REST API 查完整內容。`gh pr view --json comments,reviews` 看不出作者是不是機器人（`cli-triage[bot]` 會顯示成 `cli-triage`，也沒有型別欄位），而且完全沒有逐行留言。
 - 三種留言都有 `node_id`，和 `gh pr view` 回的 `id` 是同一個值，用它當作留言的編號。
-- 每一則逐行留言都屬於某一個 review；單獨留一則逐行留言時，GitHub 會自動建立一個內文是空的 `COMMENTED` review 來裝它。
+- 每一則逐行留言都屬於某一個 review；單獨留一則逐行留言，或在既有的討論串裡回覆時，GitHub 都會自動建立一個內文是空的 `COMMENTED` review 來裝它。所以只看 review 的編號就知道有沒有新的逐行留言。
 - **還沒送出的 review 查得到**（狀態是 `PENDING`），因為查詢用的就是使用者本人的帳號。這種 review 與它底下的逐行留言一律略過，等送出後才算。
 - 多查三次 API 的成本只在有新留言時才付：Poller 原本那一次 `gh pr view` 順便帶回一般留言與已送出 review 的編號，全部都記錄過就不再多查。
 
@@ -355,9 +355,11 @@ PR 和基底分支有衝突時，自動請同一個 agent session 解掉。流�
 
 **GitHub 怎麼回報**（任務 8 實測）：`gh pr view --json mergeable` 的值是 `MERGEABLE`、`CONFLICTING` 或 `UNKNOWN`。
 
-- 基底分支有新的 commit 之後，GitHub 要重新算：實測先繼續回報舊的 `MERGEABLE` 約 3 秒，接著 `UNKNOWN` 約 3 秒，然後才是 `CONFLICTING`。剛 push 完也一樣會經過 `UNKNOWN`。
+- 基底分支有新的 commit 之後，GitHub 要重新算：實測先繼續回報舊的 `MERGEABLE` 約 3 秒，接著 `UNKNOWN` 約 3 秒，然後才是 `CONFLICTING`。
+- 對 PR 的 branch push 之後也一樣：實測 push 後第 3 秒是 `UNKNOWN`，第 6 秒有了答案。
+- GitHub 是有人問才算：一陣子沒被查詢的 PR，第一次查可能回 `UNKNOWN`，再查一次才有答案。
 - 有衝突時，舊 commit 上的 CI 結果仍然是通過。所以不看 `mergeable` 的話，卡片會停在 Ready to merge，按下合併才發現不行。
-- 有衝突的 PR 上，新 push 的 commit 不會跑 `pull_request` 觸發的 CI（GitHub 產生不了合併後的結果）。
+- 有衝突的 PR 上，新 push 的 commit 不會跑 `pull_request` 觸發的 CI（GitHub 產生不了合併後的結果）。實測 push 後一分鐘，新 commit 上仍然沒有任何檢查，`ci_state` 是 `none`。
 
 `merge_state` 的對應：`MERGEABLE` 是 `clean`，`CONFLICTING` 是 `conflicting`，其餘（含沒看過的新值）是 `unknown`。同一個 commit 上已經知道答案時，後來查到的 `unknown` 不會把它蓋掉，否則這個值會來回跳動、每跳一次就寫一筆事件。`unknown` 既不當成有衝突，也不當成沒有衝突：不會派工，卡片也不會進 Ready to merge。
 
