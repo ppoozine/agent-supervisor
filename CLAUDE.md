@@ -75,6 +75,7 @@ web/                 # 前端：React + Vite
     api.ts           # 所有對 daemon 的呼叫與錯誤形狀
     stream.ts        # SSE 連線與自動重連
     format.ts        # 把資料排成畫面上的文字（純函式）
+    diff.ts          # 把 git 的 diff 拆成檔案與行（純函式）
     App.tsx          # 版面、資料的載入與推送
     components/      # 看板、卡片、表單、任務詳情頁
 ```
