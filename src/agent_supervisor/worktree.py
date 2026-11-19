@@ -4,6 +4,7 @@
 所以不受本機預設分支是否更新影響，也不會動到使用者自己的工作目錄。
 """
 
+import asyncio
 import re
 from pathlib import Path
 
@@ -79,6 +80,22 @@ async def has_unpushed_commits(worktree_path: Path, branch: str) -> bool:
 async def push(worktree_path: Path, branch: str) -> None:
     """把 branch 推到遠端。"""
     await _git(worktree_path, "push", "-u", REMOTE, branch)
+
+
+async def ensure_repository(repo_path: Path) -> None:
+    """確認路徑是一個 git repo 工作目錄的最上層，不是的話拋出 `GitError`。
+
+    子目錄、`.git` 裡面、bare repo 都不算：同一個 repo 只能用一個路徑登記。
+    """
+    if not await asyncio.to_thread(repo_path.is_dir):
+        raise GitError(f"{repo_path} is not a directory")
+    top_level = Path(await _git(repo_path, "rev-parse", "--show-toplevel"))
+    if not await asyncio.to_thread(_is_same_directory, top_level, repo_path):
+        raise GitError(f"{repo_path} is inside the repository at {top_level}; use that path")
+
+
+def _is_same_directory(first: Path, second: Path) -> bool:
+    return first.resolve() == second.resolve()
 
 
 async def detect_github_repo(repo_path: Path) -> str | None:

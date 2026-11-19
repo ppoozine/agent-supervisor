@@ -1,7 +1,8 @@
 """最小的命令列介面，供階段 1 手動驗證用。
 
-階段 2 之前沒有常駐的 daemon：`start`、`message`、`archive`、`watch` 都在前景執行，
-同一時間只能有一個這樣的程序。
+`serve` 啟動常駐的 daemon（API、輪詢與自動修復）。`start`、`message`、`archive`、`watch`
+是階段 1 留下來的前景模式，不需要 daemon。daemon 與前景指令共用同一把鎖，
+同一時間只能有一個在執行。
 
 - `watch`（或 `start` / `message` 加上 `--watch`）會持續輪詢 GitHub 並自動修復 CI，
   直到按 Ctrl-C。
@@ -25,15 +26,13 @@ from typing import Any
 
 import aiosqlite
 
-from agent_supervisor import db, status, worktree
+from agent_supervisor import daemon, db, status, worktree
 from agent_supervisor.adapters.base import AgentAdapter
 from agent_supervisor.adapters.claude_code import ClaudeCodeAdapter
 from agent_supervisor.adapters.codex import CodexAdapter
-from agent_supervisor.config import DEFAULT_CONFIG_PATH, Config, load_config
-from agent_supervisor.dispatcher import Dispatcher
+from agent_supervisor.config import DEFAULT_CONFIG_PATH, Config, absolute_path, load_config
 from agent_supervisor.enums import EventType, ExitStatus
 from agent_supervisor.github import GitHub
-from agent_supervisor.poller import Poller, PollReport
 from agent_supervisor.recovery import (
     AlreadyRunningError,
     InstanceLock,
@@ -42,7 +41,7 @@ from agent_supervisor.recovery import (
     recover_open_runs,
 )
 from agent_supervisor.runner import BudgetExhaustedError, Runner, UnknownAgentError
-from agent_supervisor.stages import RunStages
+from agent_supervisor.supervisor import Supervisor, build_supervisor
 
 DEFAULT_AGENT = "claude_code"
 WATCH_HELP = "run 開始後不退出，接著輪詢 GitHub 並自動修復 CI，直到按 Ctrl-C"
@@ -62,13 +61,20 @@ EXPECTED_ERRORS = (
 class _Session:
     """一個前景程序在執行期間用到的所有元件。"""
 
-    runner: Runner
-    conn: aiosqlite.Connection
-    poller: Poller
-    dispatcher: Dispatcher
+    supervisor: Supervisor
     quit_requested: asyncio.Event
     stop_requested: asyncio.Event
     poll_interval_seconds: float
+
+    @property
+    def runner(self) -> Runner:
+        """執行與中止 run 的元件。"""
+        return self.supervisor.runner
+
+    @property
+    def conn(self) -> aiosqlite.Connection:
+        """資料庫連線。"""
+        return self.supervisor.conn
 
 
 ForegroundAction = Callable[[_Session], Awaitable[int]]
@@ -109,6 +115,8 @@ async def run(
         config = load_config(Path(args.config))
     if args.command == "stop":
         return _stop_running_instance(config)
+    if args.command == "serve":
+        return await daemon.serve(config, adapters, processes, github)
     if args.command == "show":
         return await _show(config, args.task_id)
     if args.command == "list":
@@ -125,10 +133,6 @@ async def run(
     return await _in_foreground(config, adapters, processes, github, actions[args.command])
 
 
-def _absolute_path(value: str) -> Path:
-    return Path(value).resolve()
-
-
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="asv", description="agent-supervisor 階段 1 的驗證工具")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="設定檔路徑")
@@ -137,14 +141,14 @@ def _build_parser() -> argparse.ArgumentParser:
     project = commands.add_parser("project", help="管理已登記的 repo")
     project_commands = project.add_subparsers(dest="project_command", required=True)
     add = project_commands.add_parser("add", help="登記一個本機 repo，或更新它的設定")
-    add.add_argument("repo_path", type=_absolute_path)
+    add.add_argument("repo_path", type=absolute_path)
     add.add_argument("--github-repo", help="owner/name（預設從 origin 的網址讀出）")
     add.add_argument("--default-branch", help="worktree 的基底分支（預設讀遠端的預設分支）")
     add.add_argument("--require-review", action="store_true", help="要有 review 核准才算可合併")
 
     start = commands.add_parser("start", help="開一個任務並執行到結束")
     start.add_argument("prompt", help="給 agent 的任務描述")
-    start.add_argument("--project", type=_absolute_path, required=True, help="本機 repo 的路徑")
+    start.add_argument("--project", type=absolute_path, required=True, help="本機 repo 的路徑")
     start.add_argument("--title", help="任務標題（預設取描述的開頭）")
     start.add_argument("--agent", default=DEFAULT_AGENT, help="agent 種類：claude_code 或 codex")
     start.add_argument("--model", help="模型（預設用 agent 的預設值）")
@@ -156,6 +160,7 @@ def _build_parser() -> argparse.ArgumentParser:
     message.add_argument("--watch", action="store_true", help=WATCH_HELP)
 
     commands.add_parser("watch", help="持續輪詢 GitHub 並自動修復 CI，直到按 Ctrl-C")
+    commands.add_parser("serve", help="啟動常駐的 daemon：API、輪詢與自動修復，直到按 Ctrl-C")
     commands.add_parser("stop", help="中止所有正在執行的 run（監看中的程序會繼續監看）")
     commands.add_parser("list", help="列出所有任務與目前推導出的看板欄位")
 
@@ -209,22 +214,10 @@ async def _with_lock(
     try:
         await db.init_schema(conn)
         await _recover(conn, processes)
-        stages = RunStages(conn, config, github)
-        runner = Runner(
-            conn,
-            adapters,
-            config,
-            prepare=stages.prepare,
-            finalize=stages.finalize,
-            archive=stages.archive,
-            on_event=_print_event,
-        )
-        limits = status.Limits(config.task_cost_limit_usd, config.task_token_limit)
+        supervisor = build_supervisor(conn, config, adapters, github, on_event=_print_event)
+        runner = supervisor.runner
         session = _Session(
-            runner=runner,
-            conn=conn,
-            poller=Poller(conn, github, stop_run=runner.stop_if_running),
-            dispatcher=Dispatcher(conn, runner, limits),
+            supervisor=supervisor,
             quit_requested=quit_requested,
             stop_requested=stop_requested,
             poll_interval_seconds=config.poll_interval_seconds,
@@ -332,28 +325,8 @@ async def _watch(session: _Session) -> int:
     return EXIT_OK
 
 
-async def _poll_or_quit(session: _Session) -> PollReport | None:
-    """查詢 GitHub 一輪；途中收到 Ctrl-C 就放棄這一輪並回傳 None。
-
-    只有查詢可以這樣中途取消（`gh` 的子程序會被終止）。派工不行：
-    建立 run 與開始執行之間被取消的話，會留下一個沒有人負責的 run。
-    """
-    polling = asyncio.create_task(session.poller.poll_once())
-    quitting = asyncio.create_task(session.quit_requested.wait())
-    try:
-        await asyncio.wait({polling, quitting}, return_when=asyncio.FIRST_COMPLETED)
-        if polling.done():
-            return polling.result()
-        return None
-    finally:
-        quitting.cancel()
-        if not polling.done():
-            polling.cancel()
-            await asyncio.wait({polling})
-
-
 async def _poll_and_dispatch(session: _Session) -> None:
-    report = await _poll_or_quit(session)
+    report, runs = await session.supervisor.poll_and_dispatch(session.quit_requested)
     if report is None:
         return
     for change in report.changes:
@@ -364,8 +337,6 @@ async def _poll_and_dispatch(session: _Session) -> None:
         )
     for task_id, error in report.errors:
         print(f"task {task_id}: polling failed: {error}", file=sys.stderr)
-    # 收到 Ctrl-C 之後不再派工，否則新的 run 馬上被中止、白扣一次修復。
-    runs = await session.dispatcher.dispatch_once(should_stop=session.quit_requested.is_set)
     for run in runs:
         print(f"task {run.task_id} run {run.id} started ({run.trigger})")
 

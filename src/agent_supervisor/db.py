@@ -94,6 +94,10 @@ FINISHED_PR_STATES = (PrState.MERGED, PrState.CLOSED)
 _write_locks: weakref.WeakKeyDictionary[aiosqlite.Connection, asyncio.Lock] = (
     weakref.WeakKeyDictionary()
 )
+CommitListener = Callable[[], None]
+_commit_listeners: weakref.WeakKeyDictionary[aiosqlite.Connection, list[CommitListener]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 class NotFoundError(LookupError):
@@ -201,14 +205,34 @@ class TaskSnapshot:
 @asynccontextmanager
 async def _transaction(conn: aiosqlite.Connection) -> AsyncIterator[None]:
     """拿到連線的寫入鎖後執行一個交易：正常離開就 commit，否則 rollback。"""
-    lock = _write_locks.setdefault(conn, asyncio.Lock())
-    async with lock:
+    async with _write_locks.setdefault(conn, asyncio.Lock()):
         try:
             yield
             await conn.commit()
         except BaseException:
             await conn.rollback()
             raise
+    for listener in _commit_listeners.get(conn, ()):
+        listener()
+
+
+def on_commit(conn: aiosqlite.Connection, listener: CommitListener) -> None:
+    """登記一個函式，這條連線每次有交易 commit 之後都會呼叫它。
+
+    所有寫入都經過同一種交易，所以這是「資料有變」唯一的通知點。
+    """
+    _commit_listeners.setdefault(conn, []).append(listener)
+
+
+@asynccontextmanager
+async def consistent_read(conn: aiosqlite.Connection) -> AsyncIterator[None]:
+    """區塊內的讀取不會看到別人做到一半的交易。
+
+    所有模組共用一條連線，同一條連線讀得到還沒 commit 的寫入。要把結果交給外部
+    （API 的回應、推送給瀏覽器的事件）的讀取都要包在這裡面。不能在交易內使用。
+    """
+    async with _write_locks.setdefault(conn, asyncio.Lock()):
+        yield
 
 
 def utc_now() -> str:
@@ -252,6 +276,12 @@ async def upsert_project(
     project = await get_project_by_path(conn, repo_path)
     assert project is not None
     return project
+
+
+async def list_projects(conn: aiosqlite.Connection) -> list[Project]:
+    """列出所有已登記的專案，依編號。"""
+    cursor = await conn.execute("SELECT * FROM projects ORDER BY id")
+    return [_to_project(row) for row in await cursor.fetchall()]
 
 
 async def get_project_by_path(conn: aiosqlite.Connection, repo_path: str) -> Project | None:
@@ -369,10 +399,31 @@ async def get_snapshot(conn: aiosqlite.Connection, task_id: int) -> TaskSnapshot
     )
 
 
-async def list_snapshots(conn: aiosqlite.Connection) -> list[TaskSnapshot]:
-    """列出所有任務的快照，依任務編號。"""
-    cursor = await conn.execute("SELECT id FROM tasks ORDER BY id")
+async def list_snapshots(
+    conn: aiosqlite.Connection, project_id: int | None = None
+) -> list[TaskSnapshot]:
+    """列出任務的快照，依任務編號；可限定某一個專案。"""
+    query, params = "SELECT id FROM tasks", ()
+    if project_id is not None:
+        query, params = query + " WHERE project_id = ?", (project_id,)
+    cursor = await conn.execute(query + " ORDER BY id", params)
     return [await get_snapshot(conn, row["id"]) for row in await cursor.fetchall()]
+
+
+async def list_task_fingerprints(conn: aiosqlite.Connection) -> dict[int, tuple[Any, ...]]:
+    """每個任務一組值，卡片上任何會顯示的東西有變，這組值就會不同。
+
+    一次查詢涵蓋所有任務，用來找出哪些卡片需要重新推導。
+    """
+    cursor = await conn.execute(
+        "SELECT t.*,"
+        " (SELECT MAX(id) FROM runs WHERE task_id = t.id) AS last_run_id,"
+        " (SELECT COUNT(*) FROM runs WHERE task_id = t.id AND ended_at IS NOT NULL)"
+        " AS ended_runs,"
+        " (SELECT require_review FROM projects WHERE id = t.project_id) AS require_review"
+        " FROM tasks t"
+    )
+    return {row["id"]: tuple(row) for row in await cursor.fetchall()}
 
 
 async def list_tasks_with_open_pr(conn: aiosqlite.Connection) -> list[Task]:
@@ -549,6 +600,46 @@ async def list_events(
         params += (run_id,)
     cursor = await conn.execute(query + " ORDER BY id", params)
     return [_to_event(row) for row in await cursor.fetchall()]
+
+
+async def list_events_after(
+    conn: aiosqlite.Connection,
+    after_id: int,
+    *,
+    limit: int,
+    task_id: int | None = None,
+    event_type: str | None = None,
+) -> list[Event]:
+    """列出編號大於 `after_id` 的事件，最多 `limit` 筆；可限定任務與事件型別。
+
+    分頁與「斷線後補上漏掉的事件」共用這個查詢。
+    """
+    query, params = "SELECT * FROM events WHERE id > ?", [after_id]
+    if task_id is not None:
+        query, params = query + " AND task_id = ?", [*params, task_id]
+    if event_type is not None:
+        query, params = query + " AND type = ?", [*params, event_type]
+    cursor = await conn.execute(query + " ORDER BY id LIMIT ?", (*params, limit))
+    return [_to_event(row) for row in await cursor.fetchall()]
+
+
+async def get_last_event_id(conn: aiosqlite.Connection) -> int:
+    """目前最大的事件編號；還沒有任何事件時是 0。"""
+    row = await _fetch_one(conn, "SELECT COALESCE(MAX(id), 0) AS last_id FROM events", ())
+    assert row is not None
+    return int(row["last_id"])
+
+
+async def get_task_token_totals(conn: aiosqlite.Connection, task_id: int) -> tuple[int, int]:
+    """任務所有 run 的輸入與輸出 token 數各自的總和；未知的 run 不計。"""
+    row = await _fetch_one(
+        conn,
+        "SELECT COALESCE(SUM(tokens_in), 0) AS tokens_in,"
+        " COALESCE(SUM(tokens_out), 0) AS tokens_out FROM runs WHERE task_id = ?",
+        (task_id,),
+    )
+    assert row is not None
+    return int(row["tokens_in"]), int(row["tokens_out"])
 
 
 async def get_task_usage(conn: aiosqlite.Connection, task_id: int) -> TaskUsage:
