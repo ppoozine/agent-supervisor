@@ -13,6 +13,7 @@ export function makeCard(fields: Partial<Card> = {}): Card {
     has_open_run: true,
     pr_number: null,
     pr_state: null,
+    head_sha: null,
     ci_state: 'none',
     review_state: 'none',
     merge_state: 'clean',

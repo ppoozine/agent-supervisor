@@ -26,6 +26,7 @@ export interface Card {
   has_open_run: boolean
   pr_number: number | null
   pr_state: string | null
+  head_sha: string | null
   ci_state: string
   review_state: string
   merge_state: string
@@ -78,4 +79,10 @@ export interface EventRow {
 export interface EventPage {
   events: EventRow[]
   next_after: number | null
+}
+
+export interface TaskDiff {
+  diff: string
+  is_truncated: boolean
+  base_branch: string
 }

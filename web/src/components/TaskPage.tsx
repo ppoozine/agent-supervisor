@@ -4,6 +4,7 @@ import { archiveTask, errorMessage, getTask, listEventsAfter, sendMessage, stopT
 import { formatCount, formatUsage, mergeEvents, pullRequestUrl } from '../format'
 import type { Card, EventRow, Project, TaskDetail } from '../types'
 import { Dialog } from './Dialog'
+import { DiffTab } from './DiffTab'
 import { EventsTab, LogTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
 import { agentName } from './TaskCard'
@@ -20,10 +21,10 @@ interface TaskPageProps {
   onTaskChanged: (task: TaskDetail) => void
 }
 
-const TABS = ['Log', 'Events', 'Runs'] as const
+const TABS = ['Log', 'Diff', 'Events', 'Runs'] as const
 type Tab = (typeof TABS)[number]
 
-/** 任務詳情頁：標題列、Log / Events / Runs 三個分頁、追加指令、Stop 與 Archive。 */
+/** 任務詳情頁：標題列、Log / Diff / Events / Runs 四個分頁、追加指令、Stop 與 Archive。 */
 export function TaskPage(props: TaskPageProps) {
   const { taskId, card, project, connectionCount, subscribeToEvents, onTaskChanged } = props
   const [detail, setDetail] = useState<TaskDetail | null>(null)
@@ -195,6 +196,9 @@ export function TaskPage(props: TaskPageProps) {
       </div>
       <div className="tab-body">
         {tab === 'Log' && <LogTab events={events} prompt={detail.prompt} />}
+        {tab === 'Diff' && (
+          <DiffTab taskId={taskId} headSha={current.head_sha} connectionCount={connectionCount} />
+        )}
         {tab === 'Events' && <EventsTab events={events} />}
         {tab === 'Runs' && <RunsTab runs={detail.runs} />}
       </div>
