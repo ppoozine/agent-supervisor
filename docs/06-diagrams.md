@@ -205,6 +205,8 @@ erDiagram
         string review_state
         string last_handled_head_sha
         int ci_fix_attempts
+        int last_handled_feedback_event_id
+        int feedback_attempts
         datetime archived_at
     }
     runs {
@@ -250,8 +252,10 @@ stateDiagram-v2
     Working --> InReview: agent 做完，工具 push 並開 PR
     Working --> NeedsYou: 出錯、被中止、撞到上限、沒有任何變更
     InReview --> Working: CI 失敗，自動修復
+    InReview --> Working: PR 上有新留言，自動處理
+    Ready --> Working: PR 上有新留言，自動處理
     InReview --> Ready: CI 通過（要求 review 時還要核准）
-    InReview --> NeedsYou: CI 失敗但不能再自動修、reviewer 要求修改
+    InReview --> NeedsYou: CI 失敗但不能再自動修、有 review 意見但不能自動處理
     NeedsYou --> Working: 我送訊息讓它繼續
     Ready --> Working: 我送訊息追加修改
     Ready --> Archive: 我按合併
@@ -268,22 +272,22 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    start(["一個任務"]) --> q0{"已封存？"}
+    start(["一個任務"]) --> q0{"PR 已合併或關閉，<br/>且沒有 run 正在執行？"}
     q0 -->|"是"| archive["Archive 區"]
-    q0 -->|"否"| q1{"有 run 正在執行？"}
-    q1 -->|"是"| working["Working"]
-    q1 -->|"否"| q2{"PR 已合併或關閉？"}
-    q2 -->|"是"| archive
-    q2 -->|"否"| q3{"符合自動修復條件？"}
+    q0 -->|"否"| q1{"已封存？"}
+    q1 -->|"是"| archive
+    q1 -->|"否"| q2{"有 run 正在執行？"}
+    q2 -->|"是"| working["Working"]
+    q2 -->|"否"| q3{"符合留言回饋條件<br/>或自動修復條件？"}
     q3 -->|"是"| working
     q3 -->|"否"| q4{"最後一次 run 是 success？"}
     q4 -->|"否"| needs["Needs you"]
     q4 -->|"是"| q5{"有 PR？"}
     q5 -->|"否，agent 沒有產生變更"| needs
-    q5 -->|"是"| q6{"CI 失敗？"}
-    q6 -->|"是，且不能再自動修"| needs
-    q6 -->|"否"| q7{"reviewer 要求修改？"}
-    q7 -->|"是"| needs
+    q5 -->|"是"| q6{"還有沒處理的 review 意見？"}
+    q6 -->|"是，且不能自動處理"| needs
+    q6 -->|"否"| q7{"CI 失敗？"}
+    q7 -->|"是，且不能再自動修"| needs
     q7 -->|"否"| q8{"CI 通過？"}
     q8 -->|"否，還在跑或沒有檢查"| review["In review"]
     q8 -->|"是"| q9{"專案要求 review？"}
@@ -315,12 +319,14 @@ flowchart TD
     c6 -->|"否"| no
     c6 -->|"是"| c7{"最後一次 run 是 success？"}
     c7 -->|"否"| no
-    c7 -->|"是"| c8{"reviewer 沒有要求修改？"}
+    c7 -->|"是"| c8{"沒有還沒處理的<br/>review 意見？"}
     c8 -->|"否"| no
     c8 -->|"是"| yes["自動修復"]
 ```
 
 不自動修復不代表卡片一定進 Needs you：CI 沒失敗的任務本來就不需要修。CI 失敗卻不能自動修的任務才會進 Needs you。
+
+PR 上的留言走另一組「留言回饋條件」（六項，見 `02-mvp-spec.md` 的「Review 留言回饋」），流程和下面第 9 節的 CI 自動修復迴圈相同，只是觸發的來源是留言、送給 agent 的內容是留言而不是 CI log。兩者同時成立時先處理留言。
 
 ---
 
