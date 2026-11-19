@@ -96,13 +96,13 @@
 
 **目標**：除了 CI，其他會打斷流程的事件也自動處理。
 
-- Reviewer 留言 → 轉回負責的 agent
-- Merge conflict → 請 agent 自行 rebase 解衝突
+- PR 上的留言 → 轉回負責的 agent（觸發條件是「有新的留言」，見 `03-decisions.md` 第 119 筆）
+- Merge conflict → 請 agent 解衝突
 - 卡片進 Needs you 時發通知
 - 任務詳情頁內直接看 diff
 - 有了 diff 檢視之後，再評估要不要在詳情頁加合併按鈕（見 `03-decisions.md` 第 114 筆）
 
-**完成標準**：一個 PR 從開出到可合併，中間經過一次 CI 失敗、一次 review 要求修改，人只做了「留言」和「按合併」兩個動作。
+**完成標準**：一個 PR 從開出到可合併，中間經過一次 CI 失敗、一次留言要求修改，人只做了「留言」和「按合併」兩個動作。任務單見 `08-phase3-tasks.md`。
 
 ---
 
