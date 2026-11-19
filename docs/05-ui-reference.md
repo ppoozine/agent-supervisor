@@ -53,8 +53,8 @@
 
 | 欄位 | 卡片上可能出現的狀態標籤 |
 | --- | --- |
-| Working | Working、Fixing CI（CI 失敗，等待或正在自動修復） |
-| Needs you | CI failed（不再自動修復）、Changes requested、Agent error、Over budget、Limit reached、Stopped、Interrupted、No changes |
+| Working | Working、Fixing CI（CI 失敗，等待或正在自動修復）、Addressing review（PR 上有新留言，等待或正在處理） |
+| Needs you | CI failed（不再自動修復）、Changes requested（有 review 意見但不能自動處理）、Agent error、Over budget、Limit reached、Stopped、Interrupted、No changes |
 | In review | Review pending、CI running |
 | Ready to merge | Ready |
 | （Archive 區） | Archived、Merged、Closed |

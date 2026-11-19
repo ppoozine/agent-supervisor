@@ -80,9 +80,13 @@ SQLite，四張表。
 | `review_state` | `none` / `approved` / `changes_requested` |
 | `last_handled_head_sha` | 已經餵回過 CI 失敗的 commit，避免重複餵回 |
 | `ci_fix_attempts` | 自動修復次數 |
+| `last_handled_feedback_event_id` | 已經餵回 agent 的最後一則留言（`review_comment` 事件的編號）；沒處理過是 `NULL` |
+| `feedback_attempts` | 自動處理留言的次數 |
 | `archived_at`, `created_at`, `updated_at` | 時間戳 |
 
 `pr_state`、`head_sha`、`ci_state`、`review_state` 是 Poller 對 GitHub 狀態的快取，不是看板欄位。
+
+後來才加的欄位（例如上面最後兩個）在 daemon 啟動時自動補到舊的資料庫上，不需要手動處理。
 
 `ci_state` 的意思：
 
@@ -115,7 +119,7 @@ SQLite，四張表。
 | 欄位 | 說明 |
 | --- | --- |
 | `id`, `task_id` | 主鍵與所屬任務 |
-| `trigger` | `initial` / `ci_failure` / `user_message` |
+| `trigger` | `initial` / `ci_failure` / `user_message` / `review_feedback` |
 | `input_text` | 這次送給 agent 的內容。`ci_failure` run 建立時先寫一段簡短說明，準備階段抓到 CI log 後更新成完整內容 |
 | `source_head_sha` | `ci_failure` run 針對的 commit；其他 trigger 為 `NULL` |
 | `started_at`, `ended_at` | 執行區間 |
@@ -140,7 +144,7 @@ SQLite，四張表。
 | 欄位 | 說明 |
 | --- | --- |
 | `id`, `task_id`, `run_id`, `ts` | 主鍵、歸屬、時間；不屬於任何 run 的事件（例如 Poller 寫的 `ci_status`）`run_id` 為 `NULL` |
-| `type` | `session_started` / `agent_message` / `tool_call` / `command` / `permission_denied` / `pushed` / `pr_opened` / `ci_status` / `state_change` |
+| `type` | `session_started` / `agent_message` / `tool_call` / `command` / `permission_denied` / `pushed` / `pr_opened` / `ci_status` / `review_comment` / `state_change` |
 | `payload` | JSON，依 `type` 而異 |
 
 Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` 裡用 `kind` 標明是一般訊息、推理還是計畫。
@@ -154,6 +158,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 | `permission_denied` | 被拒絕的工具、完整輸入、拒絕的原因 |
 | `state_change` | run 結案時寫一筆，`change` 為 `run_ended`，帶 `exit_status`、`detail` 與 `usage_raw` |
 | `ci_status` | Poller 查到的四個狀態欄位與 PR 編號。只在其中任何一個有變化時才寫，不是每次輪詢都寫 |
+| `review_comment` | PR 上的一則留言：GitHub 的編號（`github_id`）、種類（`comment` / `review` / `inline_comment`）、作者、內文、檔案與行號、連結。`ignored` 不是空的表示這則留言不餵回 agent，內容是原因 |
 
 ## Run 的生命週期
 
@@ -188,7 +193,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 
 ## Run 結束後的收尾
 
-Agent 正常結束這一輪之後，Runner 依序做下面的事。`initial`、`ci_failure`、`user_message` 三種 trigger 都一樣。
+Agent 正常結束這一輪之後，Runner 依序做下面的事。不論是哪一種 trigger 都一樣。
 
 收尾是 run 的一部分：全部做完才寫入 `ended_at`，所以收尾期間卡片仍在 Working。
 
@@ -215,8 +220,8 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 
 | 欄位 | 條件 |
 | --- | --- |
-| Working | 有 run 正在執行；或符合「自動修復條件」、正在等 Dispatcher 接手 |
-| Needs you | 最後一次 run 的 `exit_status` 不是 `success`；或最後一次 run 是 `success` 但任務沒有 PR（agent 沒有產生任何變更）；或 CI 失敗但不符合自動修復條件（含已達修復上限、累計花費超過上限）；或 reviewer 要求修改 |
+| Working | 有 run 正在執行；或符合「留言回饋條件」或「自動修復條件」、正在等 Dispatcher 接手 |
+| Needs you | 最後一次 run 的 `exit_status` 不是 `success`；或最後一次 run 是 `success` 但任務沒有 PR（agent 沒有產生任何變更）；或還有沒處理的 review 意見卻不符合留言回饋條件；或 CI 失敗但不符合自動修復條件（含已達修復上限、累計花費超過上限） |
 | Ready to merge | PR 開著、CI 通過，且（專案不要求 review，或 review 已核准） |
 | In review | 其餘 PR 開著的情況：CI 進行中、PR 上沒有任何 CI 檢查，或 CI 通過但還在等審查 |
 
@@ -231,11 +236,11 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 5. 沒有 run 正在執行
 6. PR 開著，任務未封存
 7. 最後一次 run 的 `exit_status` 是 `success`
-8. `review_state` 不是 `changes_requested`
+8. 沒有還沒處理的 review 意見（定義見「Review 留言回饋」）
 
 第 7 條的用意：使用者按了 Stop、run 被中斷、出錯或撞到上限之後，不會再自動開新的 run，要等人送訊息且那一次 run 正常結束，才恢復自動修復。
 
-第 8 條的用意：reviewer 已經要求修改時，這個任務需要人來看，不再自動修 CI，卡片直接進 Needs you。Review 留言的自動處理是階段 3 的事。
+第 8 條的用意：有留言還沒處理時先處理留言。處理留言通常會產生新的 commit，舊 commit 的 CI 失敗就不用修了；沒有產生新的 commit 時，同一個 commit 的失敗接著照常修復。
 
 Dispatcher 發現任務符合條件時：
 
@@ -252,14 +257,14 @@ Dispatcher 發現任務符合條件時：
 - 抓 log 之前會再確認 PR 的最新 commit 仍是 `source_head_sha`，已經不是就以 `error` 結束。
 - log 會去掉每行的時間戳與顏色碼，每個失敗的檢查只保留尾段。所有檢查合計的長度上限是全域設定（暫定 20,000 個字元），平均分給各個檢查。實測一個吵雜的失敗步驟有 3,008 行、320 KB，真正的錯誤在最後兩行。
 
-**修復次數的歸零**：使用者送訊息時，在建立 run 的同一個交易內把 `ci_fix_attempts` 歸零。人已經介入，自動修復重新有 3 次機會；花費與 token 上限仍然有效。
+**修復次數的歸零**：使用者送訊息時，在建立 run 的同一個交易內把 `ci_fix_attempts` 與 `feedback_attempts` 歸零。人已經介入，自動修復重新有 3 次機會、留言處理重新有 5 次；花費與 token 上限仍然有效。PR 上的留言不會讓這兩個次數歸零，理由見「Review 留言回饋」。
 
 使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務的花費或 token 已達上限時，目前的實作會拒絕新的訊息（這一點尚未定案，見 `03-decisions.md`）。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
 
 **防無限迴圈**
 
-1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。
-2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止。
+1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。同一則留言也只餵回一次：比對 `last_handled_feedback_event_id`。
+2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止。留言的自動處理最多 5 次：`feedback_attempts` 到 5 就停止。
 3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`，其中 `tokens_in` 包含快取的輸入 token。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
 4. 單一 run 的上限：Runner 把「剩餘預算」與「最多輪數」交給 adapter，在執行中就擋下，不等 run 結束。Adapter 做不到時由 `capabilities` 表明。
 5. 單一 run 的執行時間上限：由 Runner 自己計時，不依賴 agent。超過就中止這個 run，`exit_status` 記為 `limit_reached`。這是所有 adapter 都有的最後一道防線。
@@ -276,6 +281,66 @@ Dispatcher 發現任務符合條件時：
 - `cost_usd` 是 agent 依價目表算出的估算值，不是帳單。使用訂閱方案時它代表相對用量。介面上一律標示為估算。
 - Adapter 無法回報花費時（例如 Codex）`cost_usd` 為 `NULL`，第 3 條的花費上限不生效，改由同一條的 token 上限擋住，另外還有第 2 條與第 5 條。
 - Run 被中斷而拿不到用量時，`cost_usd` 也是 `NULL`。累計時不把它當成零：這個任務的花費統計標示為「不完整」。
+
+## Review 留言回饋
+
+PR 上出現新的留言時，自動餵回同一個 agent session 處理。流程和 CI 自動修復相同：Poller 發現 → Dispatcher 建立 run → Runner 續接 session → 收尾時 push。
+
+**觸發條件是「有新的留言」，不是 GitHub 的 Request changes。** PR 是用使用者自己的帳號開的，GitHub 不允許作者對自己的 PR 要求修改，所以一個人使用時 `review_state` 不會是 `changes_requested`（決策第 119 筆）。
+
+**留言的三種形式**（任務 7 實測）
+
+| 形式 | 例子 | 怎麼查 |
+| --- | --- | --- |
+| 一般留言 | PR 對話頁最下面的留言 | `gh api repos/{repo}/issues/{n}/comments` |
+| Review 的總評 | 送出 review 時填的說明，帶著 `COMMENTED` / `CHANGES_REQUESTED` / `APPROVED` | `gh api repos/{repo}/pulls/{n}/reviews` |
+| 逐行留言 | 在 Files changed 的某一行上留言 | `gh api repos/{repo}/pulls/{n}/comments` |
+
+- 用 REST API 查完整內容。`gh pr view --json comments,reviews` 看不出作者是不是機器人（`cli-triage[bot]` 會顯示成 `cli-triage`，也沒有型別欄位），而且完全沒有逐行留言。
+- 三種留言都有 `node_id`，和 `gh pr view` 回的 `id` 是同一個值，用它當作留言的編號。
+- 每一則逐行留言都屬於某一個 review；單獨留一則逐行留言時，GitHub 會自動建立一個內文是空的 `COMMENTED` review 來裝它。
+- **還沒送出的 review 查得到**（狀態是 `PENDING`），因為查詢用的就是使用者本人的帳號。這種 review 與它底下的逐行留言一律略過，等送出後才算。
+- 多查三次 API 的成本只在有新留言時才付：Poller 原本那一次 `gh pr view` 順便帶回一般留言與已送出 review 的編號，全部都記錄過就不再多查。
+
+**哪些留言要餵回**
+
+Poller 把每一則留言寫成一筆 `review_comment` 事件，同一則只記一次（比對 `github_id`）。下面幾種照樣記錄，但標上略過的原因、不餵回 agent：
+
+| 略過的原因 | 情況 |
+| --- | --- |
+| `bot` | 作者是機器人（REST 的 `user.type` 為 `Bot`） |
+| `empty` | 內文是空的 `COMMENTED` review，只是用來裝逐行留言的空殼 |
+| `not_a_change_request` | 核准或已撤銷的 review。它底下的逐行留言是另外的項目，照常餵回 |
+
+- 內文是空的 `CHANGES_REQUESTED` review 仍然餵回，讓 agent 知道 reviewer 要求修改。
+- 留言被編輯不會再餵回一次。
+- 已封存的任務不抓留言。
+- 任務第一次被查到時，PR 上原本就有的留言也算，不另外判斷新舊。
+
+**留言回饋條件**是一個純函式，`status.py` 與 Dispatcher 共用，全部成立才算符合：
+
+1. 有還沒餵回的留言（`review_comment` 事件的編號大於 `last_handled_feedback_event_id`，且沒有被略過）
+2. `feedback_attempts` 小於 5
+3. 任務的剩餘預算大於零（花費與 token）
+4. 沒有 run 正在執行
+5. PR 開著，任務未封存
+6. 最後一次 run 的 `exit_status` 是 `success`
+
+Dispatcher 發現任務符合條件時，在同一個資料庫交易內做完：重新檢查條件、讀出所有還沒餵回的留言、建立 trigger 為 `review_feedback` 的 run（內容是這些留言）、把 `last_handled_feedback_event_id` 設為最後一則的事件編號、`feedback_attempts` 加一。所以同一則留言不會被餵回兩次，也不會有留言在中間被跳過。
+
+- **連續留好幾則時合成一次處理**：這一輪輪詢才看到新留言的任務，這一輪先不派工，等下一輪；下一輪又有新的就再等。這一輪查詢失敗的任務也先不派工。所以從留言到 agent 開始處理，最少隔一個輪詢週期。
+- **和 CI 失敗同時發生時先處理留言**（自動修復條件第 8 條）。
+- 送給 agent 的內容列出每一則留言的作者、檔案與行號、內文，並要求它不要自己 commit、push 或回覆。總長度上限 20,000 個字元，平均分給各則留言，超過就截斷。
+- 這個工具不回覆留言，也不把留言標成已解決。agent 的回答（例如不同意某則留言的理由）在它最後的訊息裡，從任務詳情頁看。
+
+**還沒處理的 review 意見**（自動修復條件第 8 條與 Needs you 都用這個定義）：有還沒餵回的留言；或 `review_state` 是 `changes_requested` 而這個任務從來沒有處理過留言。
+
+後半的用意：GitHub 在 reviewer 重新審查之前會一直回報「要求修改」。留言處理過之後如果還把它當成沒處理，卡片會卡在 Needs you，新 commit 的 CI 失敗也不會再自動修。所以處理過留言之後，`changes_requested` 不再擋住流程，卡片照 CI 與核准的狀態走。這一段沒有實測過：一個人使用時產生不了 `changes_requested`。
+
+**防迴圈的考量**：留言的人、PR 的作者、agent 能用的 `gh` 身分是同一個帳號，所以分不出一則留言是人留的還是 agent 自己留的。因此：
+
+- 留言不算「人已經介入」，不會讓 `ci_fix_attempts` 或 `feedback_attempts` 歸零；只有從看板或 CLI 送訊息才會。
+- `feedback_attempts` 的上限 5 次是不靠預算的硬上限。到了上限還有新留言時，卡片進 Needs you（標籤 `Changes requested`），等人送訊息。
 
 ## 權限政策（階段 1 版本）
 
@@ -420,8 +485,8 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 | 工作 | 負責 |
 | --- | --- |
 | Runner | 啟動或續接 agent session，把事件寫進 `events`，結束時回填用量並做收尾 |
-| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），把 `pr_state`、`head_sha`、`ci_state`、`review_state` 當成一組一起更新 |
-| Dispatcher | 發現符合自動修復條件的任務就建立 `ci_failure` run，抓 log，交給 Runner |
+| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），把 `pr_state`、`head_sha`、`ci_state`、`review_state` 當成一組一起更新；未封存的任務另外把 PR 上新的留言記成事件 |
+| Dispatcher | 發現符合留言回饋條件的任務就建立 `review_feedback` run；發現符合自動修復條件的任務就建立 `ci_failure` run，抓 log。都交給 Runner |
 
 Poller 用一次 `gh pr view` 查回四個欄位。Review 狀態照 GitHub 回報的寫入：收尾時 push 之後會先設成 `none`，但 GitHub 預設不會因為新的 commit 撤銷核准，所以下一次輪詢可能又變回 `approved`。單一任務查詢失敗不影響其他任務，下一輪再查。
 

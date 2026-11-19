@@ -49,7 +49,12 @@ class Supervisor:
         if report is None:
             return None, []
         # 收到結束的要求之後不再派工，否則新的 run 馬上被中止、白扣一次修復。
-        runs = await self.dispatcher.dispatch_once(should_stop=quit_requested.is_set)
+        # 這一輪才看到新留言的任務先不處理：連續留好幾則時等留完再一次處理。
+        # 查詢失敗的任務也先不處理，因為不知道有沒有新的留言。
+        hold_feedback = {*report.new_feedback, *(task_id for task_id, _ in report.errors)}
+        runs = await self.dispatcher.dispatch_once(
+            should_stop=quit_requested.is_set, hold_feedback=hold_feedback
+        )
         return report, runs
 
     async def _poll_or_quit(self, quit_requested: asyncio.Event) -> PollReport | None:

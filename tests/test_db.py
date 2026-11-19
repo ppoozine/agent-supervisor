@@ -427,3 +427,108 @@ async def test_a_concurrent_write_cannot_commit_half_of_another_transaction(
 
     assert len(await db.list_runs(conn, task.id)) == 1
     assert len(await db.list_events(conn, task.id)) == 1
+
+
+OLD_TASKS_TABLE = """
+CREATE TABLE tasks (
+    id INTEGER PRIMARY KEY, project_id INTEGER NOT NULL, title TEXT NOT NULL,
+    prompt TEXT NOT NULL, agent_type TEXT NOT NULL, model TEXT, session_id TEXT, branch TEXT,
+    worktree_path TEXT, pr_number INTEGER, pr_state TEXT, head_sha TEXT,
+    ci_state TEXT NOT NULL DEFAULT 'none', review_state TEXT NOT NULL DEFAULT 'none',
+    last_handled_head_sha TEXT, ci_fix_attempts INTEGER NOT NULL DEFAULT 0,
+    archived_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+INSERT INTO tasks (id, project_id, title, prompt, agent_type, created_at, updated_at)
+VALUES (1, 1, 'old task', 'do it', 'fake', 't', 't');
+"""
+
+
+async def test_database_from_an_older_version_gains_the_new_columns(tmp_path: Path) -> None:
+    connection = await db.connect(tmp_path / "old.db")
+    await connection.executescript(OLD_TASKS_TABLE)
+    await connection.commit()
+
+    await db.init_schema(connection)
+    await db.init_schema(connection)
+    task = await db.get_task(connection, 1)
+    await connection.close()
+
+    assert (task.title, task.last_handled_feedback_event_id, task.feedback_attempts) == (
+        "old task",
+        None,
+        0,
+    )
+
+
+def comment(github_id: str, **fields: object) -> dict[str, object]:
+    return {"github_id": github_id, "author": "alice", "body": "fix it", "ignored": None, **fields}
+
+
+async def test_a_comment_is_recorded_once_and_ignored_ones_do_not_wait(
+    conn: aiosqlite.Connection,
+) -> None:
+    task, _ = await make_task(conn)
+
+    first = await db.record_feedback(
+        conn, task.id, [comment("IC_1"), comment("IC_2", ignored="bot")]
+    )
+    second = await db.record_feedback(conn, task.id, [comment("IC_1"), comment("IC_3")])
+
+    pending = await db.list_pending_feedback(conn, task.id)
+    assert (first, second) == (1, 1)
+    assert [event.payload["github_id"] for event in pending] == ["IC_1", "IC_3"]
+    assert await db.list_feedback_ids(conn, task.id) == {"IC_1", "IC_2", "IC_3"}
+    assert (await db.get_snapshot(conn, task.id)).pending_feedback == 2
+
+
+async def test_feedback_run_takes_every_waiting_comment_exactly_once(
+    conn: aiosqlite.Connection,
+) -> None:
+    task, run = await make_task(conn)
+    await db.finish_run(conn, run.id, ExitStatus.SUCCESS)
+    await db.record_feedback(conn, task.id, [comment("IC_1"), comment("IC_2")])
+
+    def build(events: list[db.Event]) -> str:
+        return ",".join(event.payload["github_id"] for event in events)
+
+    created = await db.create_feedback_run(conn, task.id, build_prompt=build, condition=bool)
+    assert created is not None
+    await db.finish_run(conn, created.id, ExitStatus.SUCCESS)
+    again = await db.create_feedback_run(conn, task.id, build_prompt=build, condition=bool)
+
+    after = await db.get_task(conn, task.id)
+    assert (created.trigger, created.input_text) == (RunTrigger.REVIEW_FEEDBACK, "IC_1,IC_2")
+    assert again is None
+    assert after.feedback_attempts == 1
+    assert await db.list_pending_feedback(conn, task.id) == []
+
+
+async def test_feedback_run_is_not_created_when_the_condition_fails(
+    conn: aiosqlite.Connection,
+) -> None:
+    task, run = await make_task(conn)
+    await db.finish_run(conn, run.id, ExitStatus.SUCCESS)
+    await db.record_feedback(conn, task.id, [comment("IC_1")])
+
+    created = await db.create_feedback_run(
+        conn, task.id, build_prompt=lambda events: "x", condition=lambda snapshot: False
+    )
+
+    assert created is None
+    assert len(await db.list_pending_feedback(conn, task.id)) == 1
+    assert (await db.get_task(conn, task.id)).feedback_attempts == 0
+
+
+async def test_user_message_resets_the_feedback_attempts(conn: aiosqlite.Connection) -> None:
+    task, run = await make_task(conn)
+    await db.finish_run(conn, run.id, ExitStatus.SUCCESS)
+    await db.record_feedback(conn, task.id, [comment("IC_1")])
+    created = await db.create_feedback_run(
+        conn, task.id, build_prompt=lambda events: "x", condition=bool
+    )
+    assert created is not None
+    await db.finish_run(conn, created.id, ExitStatus.SUCCESS)
+
+    await db.create_run(conn, task.id, RunTrigger.USER_MESSAGE, "carry on")
+
+    assert (await db.get_task(conn, task.id)).feedback_attempts == 0

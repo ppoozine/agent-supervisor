@@ -8,9 +8,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from agent_supervisor.db import TaskSnapshot
-from agent_supervisor.enums import CiState, ExitStatus, PrState, ReviewState
+from agent_supervisor.enums import CiState, ExitStatus, PrState, ReviewState, RunTrigger
 
 MAX_CI_FIX_ATTEMPTS = 3
+MAX_FEEDBACK_ATTEMPTS = 5
 
 
 class Column(StrEnum):
@@ -46,6 +47,10 @@ _EXIT_LABELS = {
     ExitStatus.INTERRUPTED: "Interrupted",
 }
 _FINISHED_PR_LABELS = {PrState.MERGED: "Merged", PrState.CLOSED: "Closed"}
+_WORKING_LABELS = {
+    RunTrigger.CI_FAILURE: "Fixing CI",
+    RunTrigger.REVIEW_FEEDBACK: "Addressing review",
+}
 
 
 def has_remaining_budget(snapshot: TaskSnapshot, limits: Limits) -> bool:
@@ -71,7 +76,38 @@ def can_auto_fix(snapshot: TaskSnapshot, limits: Limits) -> bool:
         return False
     if last_run is None or last_run.exit_status is not ExitStatus.SUCCESS:
         return False
-    return task.review_state != ReviewState.CHANGES_REQUESTED
+    return not has_unaddressed_review(snapshot)
+
+
+def has_unaddressed_review(snapshot: TaskSnapshot) -> bool:
+    """PR 上是否還有沒處理的 review 意見。
+
+    有還沒餵回 agent 的留言就算。reviewer 要求修改但沒有留下任何可以餵回的留言時也算：
+    GitHub 在 reviewer 重新審查之前會一直回報「要求修改」，所以留言處理過之後不再算，
+    否則卡片會卡在 Needs you，CI 也不會再自動修復。
+    """
+    task = snapshot.task
+    if snapshot.pending_feedback > 0:
+        return True
+    was_never_addressed = task.last_handled_feedback_event_id is None
+    return task.review_state == ReviewState.CHANGES_REQUESTED and was_never_addressed
+
+
+def can_address_feedback(snapshot: TaskSnapshot, limits: Limits) -> bool:
+    """任務是否符合「把留言餵回 agent」的條件；全部成立才算。"""
+    task = snapshot.task
+    last_run = snapshot.last_run
+    if snapshot.pending_feedback == 0:
+        return False
+    if task.feedback_attempts >= MAX_FEEDBACK_ATTEMPTS:
+        return False
+    if not has_remaining_budget(snapshot, limits):
+        return False
+    if snapshot.has_open_run:
+        return False
+    if task.pr_state != PrState.OPEN or task.archived_at is not None:
+        return False
+    return last_run is not None and last_run.exit_status is ExitStatus.SUCCESS
 
 
 def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
@@ -86,6 +122,8 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
 
     if snapshot.has_open_run:
         return BoardStatus(Column.WORKING, _working_label(snapshot))
+    if can_address_feedback(snapshot, limits):
+        return BoardStatus(Column.WORKING, "Addressing review")
     if can_auto_fix(snapshot, limits):
         return BoardStatus(Column.WORKING, "Fixing CI")
 
@@ -93,7 +131,7 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
         return BoardStatus(Column.NEEDS_YOU, _EXIT_LABELS[last_run.exit_status])
     if task.pr_number is None:
         return BoardStatus(Column.NEEDS_YOU, "No changes")
-    if task.review_state == ReviewState.CHANGES_REQUESTED:
+    if has_unaddressed_review(snapshot):
         return BoardStatus(Column.NEEDS_YOU, "Changes requested")
     if task.ci_state == CiState.FAILED:
         label = "CI failed" if has_remaining_budget(snapshot, limits) else "Over budget"
@@ -110,5 +148,6 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
 
 def _working_label(snapshot: TaskSnapshot) -> str:
     last_run = snapshot.last_run
-    is_fixing = last_run is not None and last_run.source_head_sha is not None
-    return "Fixing CI" if is_fixing else "Working"
+    if last_run is None:
+        return "Working"
+    return _WORKING_LABELS.get(last_run.trigger, "Working")

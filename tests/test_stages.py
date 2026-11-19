@@ -17,7 +17,13 @@ from agent_supervisor.enums import (
     ReviewState,
     RunTrigger,
 )
-from agent_supervisor.github import FailedCheck, GitHubError, PullRequest, PullRequestStatus
+from agent_supervisor.github import (
+    FailedCheck,
+    FeedbackItem,
+    GitHubError,
+    PullRequest,
+    PullRequestStatus,
+)
 from agent_supervisor.stages import RunStages, StageError
 from tests.conftest import GitRepo
 
@@ -29,9 +35,12 @@ def pr_status(
     pr_state: PrState = PrState.OPEN,
     review_state: ReviewState = ReviewState.NONE,
     failed_checks: tuple[FailedCheck, ...] = (),
+    feedback_ids: tuple[str, ...] = (),
 ) -> PullRequestStatus:
     """建立一組 Poller 會查到的狀態。"""
-    return PullRequestStatus(pr_state, head_sha, ci_state, review_state, failed_checks)
+    return PullRequestStatus(
+        pr_state, head_sha, ci_state, review_state, failed_checks, feedback_ids
+    )
 
 
 class FakeGitHub:
@@ -48,6 +57,12 @@ class FakeGitHub:
         self.statuses: dict[int, PullRequestStatus] = {}
         self.job_logs: dict[int, str] = {}
         self.on_status_query: Any = None
+        self.feedback: dict[int, list[FeedbackItem]] = {}
+        self.feedback_queries: list[int] = []
+
+    async def list_feedback(self, repo: str, number: int) -> list[FeedbackItem]:
+        self.feedback_queries.append(number)
+        return self.feedback.get(number, [])
 
     async def get_pull_request_status(self, repo: str, number: int) -> PullRequestStatus:
         if number not in self.statuses:

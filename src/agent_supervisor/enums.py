@@ -9,6 +9,7 @@ class RunTrigger(StrEnum):
     INITIAL = "initial"
     CI_FAILURE = "ci_failure"
     USER_MESSAGE = "user_message"
+    REVIEW_FEEDBACK = "review_feedback"
 
 
 class ExitStatus(StrEnum):
@@ -32,6 +33,7 @@ class EventType(StrEnum):
     PUSHED = "pushed"
     PR_OPENED = "pr_opened"
     CI_STATUS = "ci_status"
+    REVIEW_COMMENT = "review_comment"
     STATE_CHANGE = "state_change"
 
 

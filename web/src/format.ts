@@ -35,6 +35,7 @@ export type Tone = 'blue' | 'orange' | 'red' | 'yellow' | 'green' | 'gray'
 const LABEL_TONES: Record<string, Tone> = {
   Working: 'blue',
   'Fixing CI': 'blue',
+  'Addressing review': 'blue',
   'CI failed': 'red',
   'Agent error': 'red',
   'Changes requested': 'orange',
@@ -121,6 +122,12 @@ export function toLogLine(event: EventRow): LogLine | null {
       return line('system', `opened PR #${text(payload.number)}`)
     case 'ci_status':
       return line('system', `CI ${text(payload.ci_state)} · review ${text(payload.review_state)}`)
+    case 'review_comment': {
+      const where = payload.path ? ` on ${text(payload.path)}${payload.line ? `:${text(payload.line)}` : ''}` : ''
+      const skipped = payload.ignored ? ` (not sent to the agent: ${text(payload.ignored)})` : ''
+      const body = text(payload.body).trim() || `(${text(payload.review_state ?? 'no text')})`
+      return line('system', `comment by ${text(payload.author)}${where}${skipped}: ${clip(body)}`)
+    }
     case 'state_change': {
       const detail = payload.detail ? ` — ${text(payload.detail)}` : ''
       const outcome = payload.exit_status ? ` (${text(payload.exit_status)})` : ''

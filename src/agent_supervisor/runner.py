@@ -13,7 +13,7 @@ from typing import Any
 
 import aiosqlite
 
-from agent_supervisor import db, status
+from agent_supervisor import db, feedback, status
 from agent_supervisor.adapters.base import AgentAdapter, AgentEvent, RunLimits, TurnResult
 from agent_supervisor.config import Config
 from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
@@ -132,6 +132,26 @@ class Runner:
                 task_id,
                 "CI failed; the failure log is fetched before the agent starts.",
                 condition=lambda snapshot: status.can_auto_fix(snapshot, limits),
+            )
+            if run is None:
+                return None
+            self._launch(await db.get_task(self._conn, task_id), run)
+        return run
+
+    async def start_feedback(self, task_id: int) -> db.Run | None:
+        """PR 上有還沒處理的留言時建立 review_feedback run 並開始執行；不符合條件就回傳 None。
+
+        留言的內容在建立 run 的同一個交易內讀出，所以不會漏掉也不會重複。
+        """
+        limits = status.Limits(self._config.task_cost_limit_usd, self._config.task_token_limit)
+        async with self._lock_for(task_id):
+            run = await db.create_feedback_run(
+                self._conn,
+                task_id,
+                build_prompt=lambda events: feedback.build_prompt(
+                    [event.payload for event in events]
+                ),
+                condition=lambda snapshot: status.can_address_feedback(snapshot, limits),
             )
             if run is None:
                 return None

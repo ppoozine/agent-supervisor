@@ -49,3 +49,21 @@ test('a command shows what was run and then its output', () => {
   expect(started).toMatchObject({ kind: 'command', text: '$ pytest' })
   expect(failed).toMatchObject({ kind: 'error', text: 'boom' })
 })
+
+test('a review comment shows who wrote it, where, and whether it was skipped', () => {
+  const inline = toLogLine(
+    makeEvent(1, 'review_comment', {
+      author: 'alice',
+      body: 'off by one',
+      path: 'calc.py',
+      line: 21,
+      ignored: null,
+    }),
+  )
+  const bot = toLogLine(
+    makeEvent(2, 'review_comment', { author: 'ci[bot]', body: 'coverage 90%', ignored: 'bot' }),
+  )
+
+  expect(inline?.text).toBe('comment by alice on calc.py:21: off by one')
+  expect(bot?.text).toBe('comment by ci[bot] (not sent to the agent: bot): coverage 90%')
+})

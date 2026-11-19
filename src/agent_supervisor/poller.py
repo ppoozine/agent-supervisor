@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import aiosqlite
 
-from agent_supervisor import db
+from agent_supervisor import db, feedback
 from agent_supervisor.enums import PrState
 from agent_supervisor.github import GitHub, GitHubError, PullRequestStatus
 from agent_supervisor.process import CommandTimeoutError
@@ -28,10 +28,11 @@ class PollChange:
 
 @dataclass(frozen=True)
 class PollReport:
-    """一次輪詢的結果：哪些任務有變化、哪些查詢失敗。"""
+    """一次輪詢的結果：哪些任務有變化、哪些查詢失敗、哪些任務這一輪有新的留言。"""
 
     changes: tuple[PollChange, ...]
     errors: tuple[tuple[int, str], ...]
+    new_feedback: tuple[int, ...] = ()
 
 
 class Poller:
@@ -46,22 +47,42 @@ class Poller:
         """查詢所有 PR 開著的任務一次。單一任務查詢失敗不影響其他任務。"""
         changes: list[PollChange] = []
         errors: list[tuple[int, str]] = []
+        new_feedback: list[int] = []
         for task in await db.list_tasks_with_open_pr(self._conn):
+            project = await db.get_project(self._conn, task.project_id)
+            if project.github_repo is None or task.pr_number is None:
+                continue
             try:
-                change = await self._poll_task(task)
+                status = await self._github.get_pull_request_status(
+                    project.github_repo, task.pr_number
+                )
+                change = await self._apply(task, status)
+                if change is not None:
+                    changes.append(change)
+                if await self._record_feedback(task, project.github_repo, status):
+                    new_feedback.append(task.id)
             except (GitHubError, CommandTimeoutError) as error:
                 errors.append((task.id, str(error)))
-                continue
-            if change is not None:
-                changes.append(change)
-        return PollReport(tuple(changes), tuple(errors))
+        return PollReport(tuple(changes), tuple(errors), tuple(new_feedback))
 
-    async def _poll_task(self, task: db.Task) -> PollChange | None:
-        project = await db.get_project(self._conn, task.project_id)
-        if project.github_repo is None or task.pr_number is None:
-            return None
+    async def _record_feedback(self, task: db.Task, repo: str, status: PullRequestStatus) -> bool:
+        """PR 上有還沒記錄的留言就抓回來寫成事件，回傳有沒有新的留言要處理。
+
+        已封存的任務只追蹤 PR 的結果，不抓留言。留言的完整內容要另外查詢，
+        所以先用狀態查詢順便帶回來的編號判斷有沒有新的，沒有就不多查。
+        """
+        assert task.pr_number is not None
+        if task.archived_at is not None or status.pr_state is not PrState.OPEN:
+            return False
+        known = await db.list_feedback_ids(self._conn, task.id)
+        if set(status.feedback_ids) <= known:
+            return False
+        items = await self._github.list_feedback(repo, task.pr_number)
+        payloads = [feedback.to_payload(item) for item in items]
+        return await db.record_feedback(self._conn, task.id, payloads) > 0
+
+    async def _apply(self, task: db.Task, status: PullRequestStatus) -> PollChange | None:
         seen_head_sha = task.head_sha
-        status = await self._github.get_pull_request_status(project.github_repo, task.pr_number)
         changed = await db.apply_github_state(
             self._conn,
             task.id,

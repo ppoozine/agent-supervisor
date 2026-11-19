@@ -10,6 +10,7 @@ import pytest
 from agent_supervisor import db
 from agent_supervisor.config import Config
 from agent_supervisor.enums import CiState, EventType, ExitStatus, PrState, ReviewState
+from agent_supervisor.github import FeedbackItem, FeedbackKind, GitHubError
 from agent_supervisor.poller import Poller
 from agent_supervisor.runner import EventWriter, Runner
 from tests.fake_adapter import FakeAdapter, result, session_started
@@ -210,3 +211,82 @@ async def test_archived_task_still_learns_how_its_pull_request_ended(scene: Scen
 
     assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.MERGED
     assert [change.task_id for change in report.changes] == [task.id]
+
+
+def general_comment(github_id: str, *, is_bot: bool = False) -> FeedbackItem:
+    return FeedbackItem(
+        github_id=github_id,
+        kind=FeedbackKind.COMMENT,
+        author="ci[bot]" if is_bot else "alice",
+        is_bot=is_bot,
+        body="please rename this",
+        created_at="2026-11-19T10:00:00Z",
+        url="u",
+    )
+
+
+async def test_new_comment_is_recorded_and_reported(scene: Scene) -> None:
+    task = await scene.task_with_pr()
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PENDING, feedback_ids=("IC_1",))
+    scene.github.feedback[7] = [general_comment("IC_1")]
+
+    report = await scene.poller.poll_once()
+
+    (pending,) = await db.list_pending_feedback(scene.conn, task.id)
+    assert report.new_feedback == (task.id,)
+    assert (pending.type, pending.run_id) == (EventType.REVIEW_COMMENT, None)
+    assert (pending.payload["author"], pending.payload["body"]) == ("alice", "please rename this")
+
+
+async def test_comments_are_fetched_only_when_there_is_one_we_have_not_seen(scene: Scene) -> None:
+    await scene.task_with_pr()
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PENDING)
+    await scene.poller.poll_once()
+    assert scene.github.feedback_queries == []
+
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PENDING, feedback_ids=("IC_1", "IC_2"))
+    scene.github.feedback[7] = [general_comment("IC_1"), general_comment("IC_2", is_bot=True)]
+    first = await scene.poller.poll_once()
+    second = await scene.poller.poll_once()
+
+    assert scene.github.feedback_queries == [7]
+    assert (len(first.new_feedback), second.new_feedback) == (1, ())
+
+
+async def test_bot_comment_alone_is_not_new_feedback(scene: Scene) -> None:
+    task = await scene.task_with_pr()
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PENDING, feedback_ids=("IC_1",))
+    scene.github.feedback[7] = [general_comment("IC_1", is_bot=True)]
+
+    report = await scene.poller.poll_once()
+
+    assert report.new_feedback == ()
+    assert await db.list_pending_feedback(scene.conn, task.id) == []
+    assert await db.list_feedback_ids(scene.conn, task.id) == {"IC_1"}
+
+
+async def test_comments_on_an_archived_task_are_not_fetched(scene: Scene) -> None:
+    task = await scene.task_with_pr()
+    await db.archive_task(scene.conn, task.id)
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PENDING, feedback_ids=("IC_1",))
+    scene.github.feedback[7] = [general_comment("IC_1")]
+
+    report = await scene.poller.poll_once()
+
+    assert (report.new_feedback, scene.github.feedback_queries) == ((), [])
+
+
+async def test_failing_comment_query_keeps_the_status_and_is_reported(scene: Scene) -> None:
+    task = await scene.task_with_pr()
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED, feedback_ids=("IC_1",))
+
+    async def fail(repo: str, number: int) -> list[FeedbackItem]:
+        raise GitHubError("gh api failed: HTTP 502")
+
+    scene.github.list_feedback = fail  # type: ignore[method-assign]
+
+    report = await scene.poller.poll_once()
+
+    assert (await db.get_task(scene.conn, task.id)).ci_state == "passed"
+    assert [task_id for task_id, _ in report.errors] == [task.id]
+    assert report.new_feedback == ()

@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from agent_supervisor.enums import CiState, PrState, ReviewState
-from agent_supervisor.github import FailedCheck, GitHub, GitHubError, parse_pull_request_status
+from agent_supervisor.github import (
+    FailedCheck,
+    FeedbackKind,
+    GitHub,
+    GitHubError,
+    parse_pull_request_status,
+)
 from agent_supervisor.process import CommandResult
 
 
@@ -283,7 +289,7 @@ async def test_status_is_fetched_with_one_gh_call() -> None:
             "--repo",
             "owner/repo",
             "--json",
-            "state,headRefOid,reviewDecision,statusCheckRollup",
+            "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews",
         ]
     ]
 
@@ -304,3 +310,105 @@ async def test_job_log_falls_back_to_the_full_log_for_a_cancelled_job() -> None:
 
     assert "canceled" in log
     assert gh.calls[1][-3:] == ["--job", "123", "--log"]
+
+
+def test_status_carries_the_ids_of_comments_and_submitted_reviews() -> None:
+    data = pr_view(PASS)
+    data["comments"] = [{"id": "IC_1"}, {"id": "IC_2"}]
+    data["reviews"] = [{"id": "PRR_1", "state": "COMMENTED"}, {"id": "PRR_2", "state": "PENDING"}]
+
+    assert parse_pull_request_status(data).feedback_ids == ("IC_1", "IC_2", "PRR_1")
+
+
+def rest_user(login: str = "alice", kind: str = "User") -> dict[str, str]:
+    return {"login": login, "type": kind}
+
+
+async def test_feedback_lists_comments_reviews_and_inline_comments_in_time_order() -> None:
+    comments = [
+        {
+            "node_id": "IC_1",
+            "user": rest_user(),
+            "body": "general",
+            "created_at": "2026-11-19T10:00:03Z",
+            "html_url": "u1",
+        },
+        {
+            "node_id": "IC_2",
+            "user": rest_user("ci[bot]", "Bot"),
+            "body": "coverage",
+            "created_at": "2026-11-19T10:00:04Z",
+            "html_url": "u2",
+        },
+    ]
+    reviews = [
+        {
+            "id": 11,
+            "node_id": "PRR_1",
+            "user": rest_user(),
+            "body": "",
+            "state": "CHANGES_REQUESTED",
+            "submitted_at": "2026-11-19T10:00:02Z",
+            "html_url": "u3",
+        },
+        {"id": 12, "node_id": "PRR_2", "user": rest_user(), "body": "draft", "state": "PENDING"},
+    ]
+    inline = [
+        {
+            "node_id": "PRRC_1",
+            "pull_request_review_id": 11,
+            "user": rest_user(),
+            "body": "off by one",
+            "path": "calc.py",
+            "line": None,
+            "original_line": 21,
+            "created_at": "2026-11-19T10:00:01Z",
+            "html_url": "u4",
+        },
+        {
+            "node_id": "PRRC_2",
+            "pull_request_review_id": 12,
+            "user": rest_user(),
+            "body": "not sent yet",
+            "path": "calc.py",
+            "line": 3,
+            "created_at": "2026-11-19T10:00:05Z",
+        },
+    ]
+    # `--slurp` 把每一頁包成外層陣列的一個元素。
+    gh = FakeGh([ok(json.dumps([comments])), ok(json.dumps([reviews])), ok(json.dumps([inline]))])
+
+    items = await GitHub(gh).list_feedback("owner/repo", 7)
+
+    assert [(item.github_id, item.kind) for item in items] == [
+        ("PRRC_1", FeedbackKind.INLINE_COMMENT),
+        ("PRR_1", FeedbackKind.REVIEW),
+        ("IC_1", FeedbackKind.COMMENT),
+        ("IC_2", FeedbackKind.COMMENT),
+    ]
+    assert (items[0].path, items[0].line, items[0].review_state) == ("calc.py", 21, None)
+    assert items[1].review_state == "CHANGES_REQUESTED"
+    assert [item.is_bot for item in items] == [False, False, False, True]
+    assert [call[1:4] for call in gh.calls] == [["api", "--paginate", "--slurp"]] * 3
+    assert [call[4] for call in gh.calls] == [
+        "repos/owner/repo/issues/7/comments?per_page=100",
+        "repos/owner/repo/pulls/7/reviews?per_page=100",
+        "repos/owner/repo/pulls/7/comments?per_page=100",
+    ]
+
+
+async def test_feedback_reads_every_page() -> None:
+    page = [{"node_id": "IC_1", "user": rest_user(), "body": "a", "created_at": "t1"}]
+    more = [{"node_id": "IC_2", "user": rest_user(), "body": "b", "created_at": "t2"}]
+    gh = FakeGh([ok(json.dumps([page, more])), ok("[[]]"), ok("[[]]")])
+
+    items = await GitHub(gh).list_feedback("owner/repo", 7)
+
+    assert [item.github_id for item in items] == ["IC_1", "IC_2"]
+
+
+async def test_unexpected_feedback_output_is_a_github_error() -> None:
+    gh = FakeGh([ok("not json")])
+
+    with pytest.raises(GitHubError):
+        await GitHub(gh).list_feedback("owner/repo", 7)
