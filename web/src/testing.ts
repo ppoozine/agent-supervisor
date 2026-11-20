@@ -1,4 +1,4 @@
-// 測試共用的假資料。
+// Fake data shared by the tests.
 import type { Card, EventRow, TaskDetail } from './types'
 
 export function makeCard(fields: Partial<Card> = {}): Card {

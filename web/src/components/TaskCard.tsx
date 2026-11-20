@@ -4,12 +4,12 @@ import { StatusLabel } from './StatusLabel'
 
 const AGENT_NAMES: Record<string, string> = { claude_code: 'Claude Code', codex: 'Codex' }
 
-/** agent 的顯示名稱；不認得的種類直接顯示它的代號。 */
+/** Display names of agents; an unknown type is shown by its id. */
 export function agentName(agentType: string): string {
   return AGENT_NAMES[agentType] ?? agentType
 }
 
-/** 看板上的一張卡片，點了開啟任務詳情頁。 */
+/** A card on the board; clicking it opens the task detail page. */
 export function TaskCard({ card }: { card: Card }) {
   return (
     <a className="card" href={`#/tasks/${card.id}`}>

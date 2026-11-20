@@ -9,7 +9,7 @@ interface AddProjectFormProps {
   onClose: () => void
 }
 
-/** 加入一個本機 repo。GitHub repo 與基底分支由 daemon 從 repo 偵測。 */
+/** Add a local repo. The daemon detects the GitHub repo and base branch from the repo. */
 export function AddProjectForm({ onAdded, onClose }: AddProjectFormProps) {
   const [repoPath, setRepoPath] = useState('')
   const [requireReview, setRequireReview] = useState(false)

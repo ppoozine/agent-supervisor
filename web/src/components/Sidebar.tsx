@@ -10,7 +10,7 @@ interface SidebarProps {
   onAddProject: () => void
 }
 
-/** 左側欄：專案列表，展開後是那個專案還在看板上的任務。 */
+/** Left sidebar: the project list; expanding a project shows its tasks still on the board. */
 export function Sidebar({ projects, cards, openTaskId, onAddProject }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   const toggle = (projectId: number): void =>

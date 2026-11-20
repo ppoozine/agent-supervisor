@@ -6,12 +6,12 @@ import type { TaskDiff } from '../types'
 
 interface DiffTabProps {
   taskId: number
-  /** 任務最新的 commit；變了就重新抓，開著的分頁才會跟上新的 push。 */
+  /** The task's latest commit; refetch when it changes so an open tab keeps up with new pushes. */
   headSha: string | null
   connectionCount: number
 }
 
-/** 任務的 branch 相對於基底分支的變更，依檔案分段。只包含已經 commit 的內容。 */
+/** Changes on the task's branch relative to the base branch, by file. Only committed content. */
 export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
   const [loaded, setLoaded] = useState<TaskDiff | null>(null)
   const [error, setError] = useState<string | null>(null)

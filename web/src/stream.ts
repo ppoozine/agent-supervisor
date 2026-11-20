@@ -1,22 +1,23 @@
-// 與 daemon 的 SSE 連線。斷線後自己重開，每次連上都通知呼叫端重新抓資料。
+// The SSE connection to the daemon. Reopens itself after a disconnect and tells the caller to
+// refetch on every connect.
 import type { Card, EventRow } from './types'
 
 export type StreamStatus = 'connecting' | 'live' | 'offline'
 
 export interface StreamHandlers {
-  /** 每次連上（含第一次與重連）都會呼叫：這時要重新抓一次資料，補上斷線期間漏掉的。 */
+  /** Called on every connect (first and reconnects): refetch to fill in what was missed while disconnected. */
   onOpen(): void
   onEvent(event: EventRow): void
   onTask(card: Card): void
   onStatus(status: StreamStatus): void
 }
 
-/** 測試時換成假的連線。 */
+/** Replaced with a fake connection in tests. */
 export type SourceFactory = (url: string) => EventSource
 
 const RETRY_MILLISECONDS = 2000
 
-/** 開始接收推送，回傳用來結束的函式。 */
+/** Start receiving pushes; returns a function that ends it. */
 export function connectStream(
   handlers: StreamHandlers,
   createSource: SourceFactory = (url) => new EventSource(url),
@@ -40,8 +41,9 @@ export function connectStream(
       handlers.onTask(JSON.parse((message as MessageEvent<string>).data) as Card)
     })
     current.onerror = () => {
-      // 瀏覽器只在連線中途斷掉時自己重連；daemon 沒開、拿到的不是 200 時會直接放棄。
-      // 所以一律自己關掉重開，兩種情況走同一條路。
+      // The browser only reconnects by itself when an open connection drops; it gives up when
+      // the daemon is not running or the response is not 200. So always close and reopen
+      // ourselves, and both cases take the same path.
       current.close()
       if (isStopped) return
       handlers.onStatus('offline')

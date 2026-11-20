@@ -242,7 +242,7 @@ test('events pushed while a catch-up fails do not hide the gap from the next cat
   const view = render(page(1))
   await waitFor(() => expect(api.listEventsAfter).toHaveBeenCalledTimes(1))
 
-  // 重連後的補抓失敗，同時推送來了第 121 筆。
+  // The catch-up after reconnecting fails, while event 121 arrives by push.
   vi.mocked(api.listEventsAfter).mockRejectedValueOnce(new Error('offline'))
   view.rerender(page(2))
   await waitFor(() => expect(api.listEventsAfter).toHaveBeenCalledTimes(2))

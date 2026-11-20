@@ -1,4 +1,5 @@
-// 所有對 daemon 的呼叫都經過這裡。錯誤一律轉成 ApiError，訊息可以直接顯示。
+// Every call to the daemon goes through here. Errors are always turned into ApiError, whose
+// message can be shown as is.
 import type { Agent, Card, EventPage, EventRow, Project, TaskDetail, TaskDiff } from './types'
 
 export class ApiError extends Error {
@@ -12,7 +13,7 @@ export class ApiError extends Error {
   }
 }
 
-/** 把任何錯誤變成可以顯示給使用者看的一句話。 */
+/** Turn any error into one sentence that can be shown to the user. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
@@ -67,7 +68,7 @@ export const getDiff = (taskId: number) => request<TaskDiff>('GET', `/tasks/${ta
 
 const EVENT_PAGE_SIZE = 500
 
-/** 抓某個任務編號大於 `after` 的所有事件；一頁裝不完就接著抓。 */
+/** Fetch all events of a task with an id greater than `after`, following pages until done. */
 export async function listEventsAfter(taskId: number, after: number): Promise<EventRow[]> {
   const events: EventRow[] = []
   let cursor: number | null = after

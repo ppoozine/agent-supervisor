@@ -12,11 +12,11 @@ function newestFirst(cards: Card[]): Card[] {
   return [...cards].sort((first, second) => second.updated_at.localeCompare(first.updated_at))
 }
 
-/** 四欄看板與下方可展開的 Archive 區。卡片放哪一欄完全照 API 的 `column`。 */
+/** The four-column board and the expandable Archive section below it. Cards go strictly in the API's `column`. */
 export function Board({ cards, projects }: { cards: Card[]; projects: Project[] }) {
   const [isArchiveOpen, setIsArchiveOpen] = useState(false)
   const [, setTick] = useState(0)
-  // 「幾分鐘前」要隨時間前進，定時重畫一次。
+  // Redraw periodically so "minutes ago" keeps moving forward.
   useEffect(() => {
     const timer = setInterval(() => setTick((tick) => tick + 1), CLOCK_TICK_MILLISECONDS)
     return () => clearInterval(timer)

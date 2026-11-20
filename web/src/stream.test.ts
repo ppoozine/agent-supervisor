@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { connectStream, type StreamHandlers } from './stream'
 import { makeCard, makeEvent } from './testing'
 
-/** 假的 EventSource：測試自己決定什麼時候連上、收到訊息、出錯。 */
+/** A fake EventSource: the test decides when it connects, receives messages and fails. */
 class FakeSource {
   onopen: (() => void) | null = null
   onerror: (() => void) | null = null
@@ -61,7 +61,7 @@ test('a failed connection is replaced, and the data is loaded again once it is b
   const { sources, calls } = setUp()
   sources[0].onopen?.()
 
-  // daemon 關掉：瀏覽器自己不會再試，要換一條新的連線。
+  // The daemon went away: the browser will not retry on its own, so a new connection is needed.
   sources[0].onerror?.()
   expect(sources[0].isClosed).toBe(true)
   expect(sources).toHaveLength(1)

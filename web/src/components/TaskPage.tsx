@@ -11,20 +11,20 @@ import { agentName } from './TaskCard'
 
 interface TaskPageProps {
   taskId: number
-  /** 看板上這個任務最新的卡片；推送有更新時會換成新的物件。 */
+  /** This task's latest card on the board; replaced with a new object when a push updates it. */
   card: Card | undefined
   project: Project | undefined
-  /** 連上 daemon 的次數。變了表示剛重連，要補抓斷線期間的資料。 */
+  /** How many times the daemon was connected. A change means a reconnect: catch up on what was missed. */
   connectionCount: number
   subscribeToEvents: (listener: (event: EventRow) => void) => () => void
-  /** 操作成功後回報任務最新的內容，讓看板上的卡片跟著更新。 */
+  /** Report the task's latest state after a successful action, so its card on the board updates. */
   onTaskChanged: (task: TaskDetail) => void
 }
 
 const TABS = ['Log', 'Diff', 'Events', 'Runs'] as const
 type Tab = (typeof TABS)[number]
 
-/** 任務詳情頁：標題列、Log / Diff / Events / Runs 四個分頁、追加指令、Stop 與 Archive。 */
+/** Task detail page: header, the Log / Diff / Events / Runs tabs, follow-up messages, Stop and Archive. */
 export function TaskPage(props: TaskPageProps) {
   const { taskId, card, project, connectionCount, subscribeToEvents, onTaskChanged } = props
   const [detail, setDetail] = useState<TaskDetail | null>(null)
@@ -34,14 +34,15 @@ export function TaskPage(props: TaskPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [isConfirmingArchive, setIsConfirmingArchive] = useState(false)
-  // 已經完整補抓到哪一筆。只有補抓成功才往前推；推送來的事件不算，
-  // 否則補抓失敗時，中間那一段就再也不會補回來。
+  // The last event up to which catching up is complete. Only a successful catch-up moves it
+  // forward; pushed events do not count, otherwise a failed catch-up would leave a gap that is
+  // never filled.
   const backfilledUpTo = useRef(0)
 
   const addEvents = (incoming: EventRow[]): void =>
     setEvents((current) => mergeEvents(current, incoming))
 
-  // 卡片有變（例如 run 結束）就重新抓詳情，Runs 分頁才會跟上。
+  // Refetch the details when the card changes (e.g. a run ends) so the Runs tab keeps up.
   useEffect(() => {
     let isCurrent = true
     getTask(taskId)
@@ -52,7 +53,7 @@ export function TaskPage(props: TaskPageProps) {
     }
   }, [taskId, card, connectionCount])
 
-  // 第一次開啟與每次重連：從已經有的最後一筆之後補抓。
+  // On first open and every reconnect: catch up from after the last event we already have.
   useEffect(() => {
     let isCurrent = true
     listEventsAfter(taskId, backfilledUpTo.current)
@@ -92,7 +93,7 @@ export function TaskPage(props: TaskPageProps) {
     if (await perform('send', () => sendMessage(taskId, messageText.trim()))) setMessageText('')
   }
 
-  // 推送來的卡片比抓回來的詳情新，狀態以它為準。
+  // The pushed card is newer than the fetched details, so its state wins.
   const current: Card | null = card ?? detail
   if (current === null || detail === null) {
     return error ? (
@@ -110,7 +111,7 @@ export function TaskPage(props: TaskPageProps) {
     await perform('archive', () => archiveTask(taskId))
     setIsConfirmingArchive(false)
   }
-  // 封存不會關掉 PR，也沒有取消封存，所以 PR 還開著時先問一次。
+  // Archiving does not close the PR and cannot be undone, so ask first while the PR is open.
   const requestArchive = (): void => {
     if (hasOpenPullRequest) setIsConfirmingArchive(true)
     else void archive()

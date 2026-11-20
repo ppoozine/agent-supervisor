@@ -12,7 +12,7 @@ interface NewTaskDialogProps {
   onClose: () => void
 }
 
-/** 開任務的表單：選專案、選 agent、標題與任務描述。 */
+/** The form for opening a task: project, agent, title and task description. */
 export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskDialogProps) {
   const [projectId, setProjectId] = useState(projects[0]?.id ?? 0)
   const [agentType, setAgentType] = useState(agents[0]?.agent_type ?? '')
