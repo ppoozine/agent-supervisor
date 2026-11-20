@@ -1,4 +1,4 @@
-"""共用的測試 fixture。"""
+"""Shared test fixtures."""
 
 import subprocess
 from dataclasses import dataclass
@@ -9,20 +9,20 @@ import pytest
 
 @dataclass(frozen=True)
 class GitRepo:
-    """一個暫存的 git repo，以及當作 `origin` 的本機 bare repo。"""
+    """A temporary git repo, plus a local bare repo acting as `origin`."""
 
     path: Path
     origin: Path
 
     def git(self, *args: str, cwd: Path | None = None) -> str:
-        """在 repo（或指定目錄）執行 git，回傳去掉前後空白的輸出。"""
+        """Run git in the repo (or a given directory) and return the stripped output."""
         completed = subprocess.run(
             ["git", *args], cwd=cwd or self.path, capture_output=True, text=True, check=True
         )
         return completed.stdout.strip()
 
     def push_to_main(self, name: str, content: str) -> None:
-        """在主要的工作目錄改一個檔案、commit 並 push 到 origin 的 main。"""
+        """Change a file in the main working directory, commit, and push to origin's main."""
         (self.path / name).write_text(content)
         self.git("add", name)
         self.git("commit", "-q", "-m", f"change {name} on main")
@@ -31,7 +31,7 @@ class GitRepo:
 
 @pytest.fixture
 def git_repo(tmp_path: Path) -> GitRepo:
-    """建立一個有一筆 commit、已 push 到本機 origin 的 repo。"""
+    """Create a repo with one commit, already pushed to the local origin."""
     origin = tmp_path / "origin.git"
     path = tmp_path / "repo"
     subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(origin)], check=True)

@@ -1,4 +1,4 @@
-"""stages.py 的測試：run 的準備與收尾、封存。git 是真的，GitHub 是替身。"""
+"""Tests for stages.py: run preparation, wrap-up, and archiving. git is real; GitHub is a fake."""
 
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -39,17 +39,19 @@ def pr_status(
     feedback_ids: tuple[str, ...] = (),
     merge_state: MergeState = MergeState.CLEAN,
 ) -> PullRequestStatus:
-    """建立一組 Poller 會查到的狀態。預設沒有衝突。"""
+    """Build a status as the Poller would find it. No conflicts by default."""
     return PullRequestStatus(
         pr_state, head_sha, ci_state, review_state, failed_checks, feedback_ids, merge_state
     )
 
 
 class FakeGitHub:
-    """假的 GitHub：記住開過的 PR，可以設定下一次開 PR 失敗。
+    """Fake GitHub: remembers opened PRs; the next PR creation can be set to fail.
 
-    `statuses` 是各 PR 目前的狀態（以 PR 編號為鍵），`job_logs` 是各 job 的 log。
-    `on_status_query` 會在查詢狀態「回傳之前」被呼叫，用來模擬查詢期間發生的事。
+    `statuses` holds each PR's current status (keyed by PR number); `job_logs` holds each
+    job's log.
+    `on_status_query` is called *before* a status query returns, to simulate things happening
+    during the query.
     """
 
     def __init__(self) -> None:
@@ -97,7 +99,7 @@ class FakeGitHub:
 
 
 class Recorder:
-    """收集收尾時寫出的事件。"""
+    """Collect the events written during wrap-up."""
 
     def __init__(self) -> None:
         self.events: list[tuple[EventType, dict[str, Any]]] = []
@@ -110,7 +112,7 @@ class Recorder:
 
 
 class Scene:
-    """一個已登記專案、已建立任務的測試情境。"""
+    """A test scenario with a registered project and a created task."""
 
     def __init__(self, conn: aiosqlite.Connection, repo: GitRepo, config: Config) -> None:
         self.conn = conn
@@ -340,7 +342,8 @@ async def test_archive_of_a_task_that_never_got_a_worktree_is_a_no_op(scene: Sce
 
 
 async def test_prepare_refuses_a_task_whose_directory_is_not_a_task_worktree(scene: Scene) -> None:
-    # 任務 1 時期建立的任務：工作目錄直接指向使用者的 repo，沒有自己的 branch。
+    # A task created in the task 1 era: its working directory points straight at the user's
+    # repo, with no branch of its own.
     await db.update_task(scene.conn, scene.task.id, worktree_path=str(scene.repo.path))
 
     with pytest.raises(StageError, match="before worktrees"):
@@ -359,7 +362,7 @@ async def test_archive_leaves_a_directory_that_is_not_a_task_worktree_alone(scen
 
 
 async def ci_failure_run(scene: Scene, head_sha: str) -> db.Run:
-    """把情境推進到「PR 開著、CI 在 head_sha 上失敗」，並建立對應的 ci_failure run。"""
+    """Advance to "PR open, CI failed on head_sha" and create the matching ci_failure run."""
     await scene.prepare()
     await db.finish_run(scene.conn, scene.run.id, ExitStatus.SUCCESS)
     await db.update_task(scene.conn, scene.task.id, pr_number=7, pr_state="open", head_sha=head_sha)
@@ -424,7 +427,7 @@ async def test_prepare_for_a_ci_failure_fails_when_the_pull_request_moved_on(
 async def test_prepare_for_a_ci_failure_fails_clearly_when_ci_is_no_longer_failing(
     scene: Scene,
 ) -> None:
-    """有人在 GitHub 上重跑了失敗的 job：同一個 commit 上已經沒有失敗的檢查。"""
+    """Someone reran the failed job on GitHub: the same commit no longer has failing checks."""
     run = await ci_failure_run(scene, "abc123")
     scene.github.statuses[7] = pr_status("abc123", CiState.PENDING)
 
@@ -433,7 +436,7 @@ async def test_prepare_for_a_ci_failure_fails_clearly_when_ci_is_no_longer_faili
 
 
 async def conflict_run(scene: Scene, trigger: RunTrigger = RunTrigger.MERGE_CONFLICT) -> Path:
-    """任務的 branch 與 main 改了同一行，並且已經有一個要處理它的 run。"""
+    """The task's branch and main changed the same line, and a run to handle it already exists."""
     path = await scene.prepare()
     (path / "README.md").write_text("from the task\n")
     await scene.finalize()
@@ -483,7 +486,7 @@ async def test_finalize_refuses_to_publish_leftover_conflict_markers(scene: Scen
 
 
 async def test_later_run_of_any_kind_cannot_publish_a_half_finished_merge(scene: Scene) -> None:
-    """解衝突的 run 被中止後，下一個 run（例如使用者的訊息）也不能把標記推出去。"""
+    """After a conflict run is stopped, the next run (e.g. a user message) can't push markers."""
     await conflict_run(scene)
     await scene.prepare()
     await db.finish_run(scene.conn, scene.run.id, ExitStatus.STOPPED)
@@ -528,7 +531,10 @@ async def test_archive_drops_a_half_finished_merge_instead_of_saving_the_markers
 
 
 async def test_merge_resolved_by_keeping_the_task_side_is_still_committed(scene: Scene) -> None:
-    """全部選「保留自己這邊」時內容和合併前一樣，git 看不到變更，但合併仍然要完成。"""
+    """Keeping "ours" everywhere matches the pre-merge content.
+
+    Git then sees no change, but the merge must still be completed.
+    """
     path = await conflict_run(scene)
     await scene.prepare()
     (path / "README.md").write_text("from the task\n")

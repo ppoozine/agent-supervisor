@@ -1,4 +1,4 @@
-"""ClaudeCodeAdapter 的測試。用假的 SDK client 餵預錄訊息，不啟動 agent。"""
+"""ClaudeCodeAdapter tests. A fake SDK client feeds prerecorded messages; no agent is started."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -36,7 +36,7 @@ POLICY = PermissionPolicy(
 
 
 class Ask:
-    """劇本步驟：模擬 SDK 就一次工具呼叫詢問核准回呼。"""
+    """Script step: simulate the SDK asking the approval callback about one tool call."""
 
     def __init__(
         self, tool_name: str, tool_input: dict[str, Any], *, via: str = "callback"
@@ -48,7 +48,7 @@ class Ask:
 
 
 class FakeClient:
-    """假的 SDK client：依劇本送出訊息，並記錄被怎麼使用。"""
+    """Fake SDK client: sends messages from a script and records how it was used."""
 
     def __init__(self, options: ClaudeAgentOptions, script: list[Any]) -> None:
         self.options = options
@@ -94,7 +94,7 @@ class FakeClient:
 
 
 class Harness:
-    """建立 adapter 並保留它建立的假 client，方便檢查。"""
+    """Build the adapter and keep the fake client it creates, for inspection."""
 
     def __init__(self, script: list[Any]) -> None:
         self.script = script

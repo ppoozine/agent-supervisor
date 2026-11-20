@@ -1,4 +1,4 @@
-"""process.py 的測試：執行外部指令、逾時與取消時的清理。"""
+"""Tests for process.py: running external commands, and cleanup on timeout and cancellation."""
 
 import asyncio
 import subprocess
@@ -48,7 +48,7 @@ async def test_cancelled_command_is_killed() -> None:
         run_command([sys.executable, "-c", f"import time; time.sleep(30)  # {marker}"])
     )
     async with asyncio.timeout(5):
-        while _count(marker) == 0:  # noqa: ASYNC110  # 等外部程序出現，沒有事件可等
+        while _count(marker) == 0:  # noqa: ASYNC110  # wait for the external process; there is no event to await
             await asyncio.sleep(0.02)
 
     running.cancel()

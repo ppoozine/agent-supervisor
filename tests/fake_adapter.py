@@ -1,4 +1,4 @@
-"""測試用的假 adapter：依劇本送出預錄的事件，不啟動任何 agent。"""
+"""Fake adapter for tests: emits prerecorded events from a script; never starts an agent."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -26,14 +26,14 @@ FULL_CAPABILITIES = AdapterCapabilities(
 
 
 def session_started(session_id: str = "session-1") -> AgentEvent:
-    """建立一筆 session_started 事件。"""
+    """Build a session_started event."""
     return AgentEvent(
         EventType.SESSION_STARTED, {"session_id": session_id, "process_marker": session_id}
     )
 
 
 def message(text: str) -> AgentEvent:
-    """建立一筆 agent 訊息事件。"""
+    """Build an agent message event."""
     return AgentEvent(EventType.AGENT_MESSAGE, {"kind": "message", "text": text})
 
 
@@ -46,7 +46,7 @@ def result(
     cost_usd: float | None = 0.5,
     usage_raw: dict[str, Any] | None = None,
 ) -> TurnResult:
-    """建立一筆結果。"""
+    """Build a result."""
     return TurnResult(
         session_id=session_id,
         exit_status=exit_status,
@@ -59,7 +59,7 @@ def result(
 
 @dataclass
 class Call:
-    """一次 run_turn 呼叫收到的參數。"""
+    """Arguments received by one run_turn call."""
 
     prompt: str
     cwd: Path
@@ -72,11 +72,12 @@ class Call:
 
 @dataclass
 class FakeAdapter:
-    """每次 run_turn 依序取用一份劇本。
+    """Each run_turn call takes the next script in order.
 
-    劇本是一個清單，元素可以是事件、結果、例外（會被拋出）、
-    `asyncio.Event`（串流會停在那裡直到它被設定），
-    或一個函式（會收到這次呼叫的參數，用來模擬 agent 在工作目錄裡改檔）。
+    A script is a list whose elements can be events, results, exceptions (which are raised),
+    `asyncio.Event`s (the stream pauses there until the event is set),
+    or functions (called with this call's arguments, to simulate the agent editing files
+    in the working directory).
     """
 
     scripts: list[list[Any]]
@@ -95,7 +96,7 @@ class FakeAdapter:
         policy: PermissionPolicy,
         previous_usage: dict[str, Any] | None,
     ) -> AsyncIterator[AgentEvent | TurnResult]:
-        """依劇本送出事件。"""
+        """Emit events according to the script."""
         self.calls.append(Call(prompt, cwd, session_id, model, limits, policy, previous_usage))
         script = self.scripts.pop(0)
         try:

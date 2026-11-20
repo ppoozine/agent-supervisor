@@ -1,4 +1,4 @@
-"""daemon 的測試：真的啟動 HTTP 伺服器（只綁本機），agent 與 GitHub 是替身。"""
+"""Daemon tests: a real HTTP server (localhost only) is started; the agent and GitHub are fakes."""
 
 import asyncio
 import os
@@ -30,7 +30,7 @@ def free_port() -> int:
 
 
 class Daemon:
-    """一個在測試裡執行的 daemon，以及連到它的 client。"""
+    """A daemon running inside the test, plus a client connected to it."""
 
     def __init__(self, tmp_path: Path, repo: GitRepo) -> None:
         self.config = Config(
@@ -80,7 +80,7 @@ class Daemon:
         return (await self.client.get(f"/api/tasks/{task_id}")).json()  # type: ignore[no-any-return]
 
     async def until(self, task_id: int, **expected: Any) -> dict[str, Any]:
-        """等到卡片的某些欄位變成指定的值。"""
+        """Wait until some of the card's fields have the given values."""
         async with asyncio.timeout(10.0):
             while True:
                 card = await self.card(task_id)
@@ -139,7 +139,7 @@ async def test_interrupt_ends_the_daemon_even_with_a_stream_open(asv: Daemon) ->
                 lines.append(line)
                 if line.startswith("event: event"):
                     break
-            # 連線還開著、agent 還在跑的時候收到 Ctrl-C。
+            # Ctrl-C arrives while a connection is open and the agent is still running.
             code = await asv.quit()
 
     assert code == 0
@@ -151,7 +151,7 @@ async def test_interrupt_ends_the_daemon_even_with_a_stream_open(asv: Daemon) ->
 
 
 async def test_terminate_signal_ends_the_daemon_like_an_interrupt(asv: Daemon) -> None:
-    # 服務管理工具（例如 systemd）用 SIGTERM 要求結束，結果要和 Ctrl-C 一樣。
+    # Service managers (e.g. systemd) ask to exit with SIGTERM; the outcome must match Ctrl-C.
     await asv.start()
     created = await asv.task([session_started(), asyncio.Event(), result()])
     await asv.until(created["id"], has_open_run=True)

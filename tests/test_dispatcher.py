@@ -1,7 +1,8 @@
-"""Dispatcher 的測試：自動修復的派工與防無限迴圈規則。
+"""Dispatcher tests: dispatching auto-fixes and the infinite-loop guards.
 
-Runner 與資料庫是真的，agent 是假 adapter；CI 的結果直接寫進任務的快取欄位
-（平常由 Poller 負責），push 則由假的收尾階段模擬。
+The Runner and the database are real; the agent is a fake adapter. CI results are written
+directly into the task's cached fields (normally the Poller's job), and pushes are simulated
+by a fake wrap-up stage.
 """
 
 import asyncio
@@ -24,7 +25,7 @@ FIX_LOG = "CI failed on commit {sha}: AssertionError"
 
 
 class Loop:
-    """一個任務的修復迴圈：Runner、Dispatcher 與可控制的 CI。"""
+    """One task's fix loop: Runner, Dispatcher, and a controllable CI."""
 
     def __init__(self, conn: aiosqlite.Connection, config: Config) -> None:
         self.conn = conn
@@ -48,7 +49,7 @@ class Loop:
         await db.set_run_input_text(self.conn, run.id, FIX_LOG.format(sha=run.source_head_sha))
 
     async def _finalize(self, task: db.Task, run: db.Run, record: EventWriter) -> None:
-        """模擬收尾：劇本安排了 push 就更新 head_sha，CI 回到 pending。"""
+        """Simulate wrap-up: if the script has a push, update head_sha and reset CI to pending."""
         if not self.pushes:
             return
         await db.update_task(
@@ -61,7 +62,7 @@ class Loop:
         )
 
     async def start(self, *, pushes: str | None = "sha-1", cost_usd: float = 0.5) -> None:
-        """跑完 initial run。預設會 push 一個 commit 並開出 PR。"""
+        """Run the initial run to completion. By default it pushes a commit and opens a PR."""
         if pushes is not None:
             self.pushes.append(pushes)
         self.adapter.scripts.append([session_started(), result(cost_usd=cost_usd)])
@@ -73,7 +74,7 @@ class Loop:
         await self.runner.wait(run.id)
 
     async def ci(self, state: str, **fields: object) -> None:
-        """Poller 查到了 CI 結果。預設同時查到 PR 沒有衝突。"""
+        """The Poller found a CI result. By default it also finds that the PR has no conflicts."""
         await db.update_task(
             self.conn, self.task_id, **{"ci_state": state, "merge_state": "clean", **fields}
         )
@@ -84,7 +85,7 @@ class Loop:
     async def fix(
         self, *, pushes: str | None, exit_status: ExitStatus = ExitStatus.SUCCESS
     ) -> db.Run:
-        """派工並等修復的 run 結束。`pushes` 是這次修復 push 出去的 commit。"""
+        """Dispatch and wait for the fix run to finish. `pushes` is the commit this fix pushes."""
         if pushes is not None:
             self.pushes.append(pushes)
         self.adapter.scripts.append([result(exit_status)])
@@ -154,7 +155,7 @@ async def test_nothing_is_dispatched_while_ci_is_not_failed(loop: Loop) -> None:
 async def test_rule_1_the_same_commit_is_fed_back_only_once(loop: Loop) -> None:
     await loop.start()
     await loop.ci("failed")
-    await loop.fix(pushes=None)  # 修復沒有產生新的 commit
+    await loop.fix(pushes=None)  # the fix produced no new commit
 
     assert await loop.dispatch() == []
     assert await loop.dispatch() == []
@@ -202,7 +203,7 @@ async def test_rule_3_no_auto_fix_once_the_task_cost_limit_is_reached(
 async def test_rule_3_no_auto_fix_once_the_task_token_limit_is_reached(
     conn: aiosqlite.Connection, config: Config
 ) -> None:
-    loop = Loop(conn, replace(config, task_token_limit=110))  # 一次 run 用掉 100 + 10
+    loop = Loop(conn, replace(config, task_token_limit=110))  # one run uses 100 + 10
     await loop.start()
     await loop.ci("failed")
 
@@ -232,7 +233,7 @@ async def test_rule_5_fix_run_that_exceeds_the_time_limit_is_cut_off(
     loop = Loop(conn, replace(config, run_timeout_seconds=0.05))
     await loop.start()
     await loop.ci("failed")
-    loop.adapter.scripts.append([asyncio.Event(), result()])  # agent 永遠不結束
+    loop.adapter.scripts.append([asyncio.Event(), result()])  # the agent never finishes
 
     (run,) = await loop.dispatch()
     finished = await loop.runner.wait(run.id)
@@ -249,7 +250,7 @@ async def test_no_auto_fix_after_the_user_stopped_a_run(loop: Loop) -> None:
     (run,) = await loop.dispatch()
 
     await loop.runner.stop(loop.task_id)
-    await loop.ci("failed", head_sha="someone-else-pushed")  # 即使之後出現新的失敗 commit
+    await loop.ci("failed", head_sha="someone-else-pushed")  # even if a new failing commit appears
 
     assert (await loop.runner.wait(run.id)).exit_status == ExitStatus.STOPPED
     assert await loop.dispatch() == []
@@ -289,7 +290,7 @@ async def test_failing_to_fetch_the_log_ends_the_run_and_keeps_the_attempt(loop:
     finished = await loop.runner.wait(run.id)
 
     assert finished.exit_status == ExitStatus.ERROR
-    assert len(loop.adapter.calls) == 1  # agent 沒有被啟動
+    assert len(loop.adapter.calls) == 1  # the agent was not started
     assert (await loop.task()).ci_fix_attempts == 1
     assert await loop.dispatch() == []
     assert await loop.board() == status.BoardStatus(Column.NEEDS_YOU, "Agent error")
@@ -332,7 +333,7 @@ async def test_dispatch_stops_between_tasks_when_asked_to(loop: Loop) -> None:
 
 
 async def comments(loop: Loop, *github_ids: str) -> None:
-    """Poller 在 PR 上看到了新的留言。"""
+    """The Poller saw a new comment on the PR."""
     payloads = [
         {"github_id": github_id, "author": "alice", "body": f"fix {github_id}", "ignored": None}
         for github_id in github_ids
@@ -390,7 +391,8 @@ async def test_comments_are_handled_before_a_failed_ci(loop: Loop) -> None:
 
     assert run.trigger is RunTrigger.REVIEW_FEEDBACK
     assert (after.ci_fix_attempts, after.last_handled_head_sha) == (0, None)
-    # 處理留言沒有產生新的 commit：同一個 commit 的 CI 失敗接著照常修復。
+    # Handling the comment produced no new commit: the CI failure on the same commit is then
+    # fixed as usual.
     fix = await loop.fix(pushes="sha-2")
     assert fix.trigger is RunTrigger.CI_FAILURE
 
@@ -427,7 +429,8 @@ async def test_conflict_is_handed_to_the_agent_once_per_commit(loop: Loop) -> No
 
     assert (run.trigger, run.source_head_sha) == (RunTrigger.MERGE_CONFLICT, "sha-1")
     assert (after.last_handled_conflict_head_sha, after.ci_fix_attempts) == ("sha-1", 1)
-    # agent 沒有產生新的 commit、衝突還在：不再自動處理，等人來看。
+    # The agent produced no new commit and the conflict remains: stop handling it automatically
+    # and wait for a human.
     assert await loop.dispatch() == []
     assert await loop.board() == status.BoardStatus(Column.NEEDS_YOU, "Merge conflict")
 

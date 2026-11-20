@@ -1,4 +1,4 @@
-"""recovery.py 的測試：單一 daemon 的鎖，以及啟動時處理未結束的 run。"""
+"""Tests for recovery.py: the single-daemon lock, and handling unfinished runs at startup."""
 
 import asyncio
 import subprocess
@@ -21,7 +21,7 @@ from agent_supervisor.recovery import (
 
 
 class FakeProcessTable:
-    """假的程序表：記錄被要求終止的程序，並依設定決定它們會不會消失。"""
+    """Fake process table: records termination requests; configurable whether processes go away."""
 
     def __init__(self, processes: dict[str, list[int]], *, survives_force: bool = False) -> None:
         self.processes = processes
@@ -166,8 +166,8 @@ async def test_finished_runs_are_left_alone(conn: aiosqlite.Connection) -> None:
     assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.SUCCESS
 
 
-# 以下測試操作真的作業系統程序與檔案鎖，用來確認 `pgrep`、訊號與 `flock`
-# 在 macOS 與 Linux 上的行為一致（CI 兩個平台都跑）。
+# The tests below use real OS processes and file locks to confirm that `pgrep`, signals and
+# `flock` behave the same on macOS and Linux (CI runs on both platforms).
 
 _SLEEPER = """
 import signal, sys, time
@@ -179,7 +179,7 @@ time.sleep(30)
 
 
 def start_sleeper(marker: str, *, ignore_interrupt: bool = False) -> subprocess.Popen[str]:
-    """啟動一個命令列帶著 marker 的程序，等它準備好（訊號處理已設定）才返回。"""
+    """Start a process with the marker in its argv; return once its signal handlers are set."""
     mode = "ignore" if ignore_interrupt else "default"
     process = subprocess.Popen(
         [sys.executable, "-c", _SLEEPER, mode, marker], stdout=subprocess.PIPE, text=True
@@ -253,7 +253,8 @@ async def test_recovery_stops_a_real_leftover_process(
     sleepers.append(start_sleeper(marker, ignore_interrupt=True))
     run = await open_run(conn, marker)
 
-    # 真正的遺留程序屬於已經結束的 daemon，由 init 回收；這裡由測試自己回收。
+    # A real leftover process belongs to a daemon that has exited and is reaped by init; here
+    # the test reaps it itself.
     reaping = asyncio.create_task(asyncio.to_thread(sleepers[0].wait))
     report = await recover_open_runs(conn, SystemProcessTable(), grace_seconds=0.3)
     await reaping
@@ -288,5 +289,5 @@ def test_lock_held_by_another_process_is_refused_and_names_its_owner(tmp_path: P
         holder.kill()
         holder.wait()
 
-    # 持有者結束後，作業系統會釋放它的鎖。
+    # Once the holder exits, the OS releases its lock.
     InstanceLock.acquire(lock_path).release()

@@ -1,4 +1,4 @@
-"""notifier.py 的測試。發通知的指令用替身，不真的跳通知。"""
+"""Tests for notifier.py. The notification command is a fake; no real notification pops up."""
 
 import logging
 from collections.abc import Sequence
@@ -13,7 +13,7 @@ CARD = {"id": 7, "title": 'Fix the "quoted" title', "label": "Stopped", "column"
 
 
 class FakeRunner:
-    """記錄收到的參數；可以設定成失敗。"""
+    """Record the received arguments; can be set to fail."""
 
     def __init__(self, outcome: CommandResult | Exception | None = None) -> None:
         self.calls: list[list[str]] = []
@@ -24,7 +24,7 @@ class FakeRunner:
         args: Sequence[str],
         *,
         cwd: Path | None = None,
-        timeout: float = 0,  # noqa: ASYNC109  # 和 run_command 的參數一致
+        timeout: float = 0,  # noqa: ASYNC109  # matches run_command's parameters
     ) -> CommandResult:
         self.calls.append(list(args))
         if isinstance(self.outcome, Exception):
@@ -53,7 +53,7 @@ async def test_notification_carries_the_reason_and_the_task_title() -> None:
 
     (call,) = runner.calls
     assert call[0] == "osascript"
-    # 標題與內文是獨立的參數，不會被當成腳本的一部分。
+    # The title and body are separate arguments, never treated as part of the script.
     assert call[-2:] == ["Needs you · Stopped", 'Fix the "quoted" title']
     assert not any("quoted" in part for part in call[:-2])
 
@@ -73,7 +73,7 @@ async def test_linux_notification_uses_notify_send_with_separate_arguments() -> 
 
     (call,) = runner.calls
     assert call[0] == "notify-send"
-    # `--` 之後一律當成內容：標題以 `-` 開頭也不會被當成選項。
+    # Everything after `--` is content: a title starting with `-` is not treated as an option.
     assert call[-3:] == ["--", "Needs you · Stopped", 'Fix the "quoted" title']
 
 

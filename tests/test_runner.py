@@ -1,4 +1,4 @@
-"""Runner 的測試：run 的生命週期、上限、中止、鎖。全部使用假 adapter。"""
+"""Runner tests: run lifecycle, limits, stopping, and locks. All use the fake adapter."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -412,9 +412,9 @@ async def _session_id(conn: aiosqlite.Connection, task_id: int) -> str | None:
 
 
 async def _until(read: object, expected: object) -> None:
-    """等到非同步的讀取函式回傳預期值，逾時就讓測試失敗。"""
+    """Wait until an async reader returns the expected value; fail the test on timeout."""
     async with asyncio.timeout(2.0):
-        # 被觀察的是資料庫裡的值，沒有事件可以等，只能輪詢。
+        # We are watching a value in the database; there is no event to await, so poll.
         while await read() != expected:  # type: ignore[operator]  # noqa: ASYNC110
             await asyncio.sleep(0.005)
 
@@ -544,7 +544,7 @@ async def test_stop_right_after_the_run_is_created_still_closes_it(
     runner = make_runner(conn, config, adapter)
 
     run = await start(runner, conn)
-    await runner.stop(run.task_id)  # 負責這個 run 的工作還沒開始執行
+    await runner.stop(run.task_id)  # the task that owns this run has not started yet
 
     assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.STOPPED
 
@@ -552,7 +552,7 @@ async def test_stop_right_after_the_run_is_created_still_closes_it(
 async def test_run_that_is_already_being_cancelled_is_not_cancelled_again(
     conn: aiosqlite.Connection, config: Config
 ) -> None:
-    """中止到一半、等待的人自己被取消之後再中止一次，不能打斷第一次取消的收拾。"""
+    """A second stop after the first waiter is cancelled mid-stop must not cut the cleanup short."""
     cleaning_up, may_finish = asyncio.Event(), asyncio.Event()
     cleaned_up: list[bool] = []
 

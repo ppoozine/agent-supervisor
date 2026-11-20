@@ -1,4 +1,4 @@
-"""Codex adapter 的測試。用假的 `codex` 執行檔吐出預錄的事件，不啟動真的 agent。"""
+"""Codex adapter tests. A fake `codex` executable emits prerecorded events; no real agent runs."""
 
 import asyncio
 import json
@@ -32,7 +32,7 @@ def usage_line(input_tokens: int, output_tokens: int) -> str:
 
 
 class Codex:
-    """一個接上假執行檔的 adapter，以及這次執行的劇本與紀錄。"""
+    """An adapter wired to the fake executable, plus this run's script and record."""
 
     def __init__(self, tmp_path: Path, **script: Any) -> None:
         self.tmp_path = tmp_path
@@ -167,7 +167,7 @@ async def test_resume_names_the_session_and_repeats_the_policy(tmp_path: Path) -
     assert 'sandbox_mode="workspace-write"' in arguments
     assert "sandbox_workspace_write.network_access=true" in arguments
     assert "-s" not in arguments and "-C" not in arguments
-    # 續接時 session id 沒有變，不用再公布一次。
+    # The session id does not change on resume, so it is not announced again.
     assert [event.payload["session_id"] for event in events] == ["thread-1"]
 
 
@@ -225,7 +225,7 @@ async def test_failed_turn_is_an_error_with_the_reported_message(tmp_path: Path)
 
 
 async def test_error_item_is_recorded_as_a_failed_tool_call(tmp_path: Path) -> None:
-    """實測指定不存在的模型時，Codex 會先送出一個種類是 error 的項目。"""
+    """Observed in practice: with a nonexistent model, Codex first sends an item of type error."""
     item = {"id": "item_0", "type": "error", "message": "Model metadata not found."}
     lines = [THREAD, json.dumps({"type": "item.completed", "item": item}), usage_line(1, 1)]
     codex = Codex(tmp_path, lines=lines)
@@ -268,7 +268,7 @@ async def test_lines_that_are_not_events_and_very_long_lines_are_handled(tmp_pat
 
 
 async def run_until_hanging(codex: Codex) -> list[int]:
-    """讀到假 Codex 開始執行指令為止就關閉串流，回傳子程序的編號。"""
+    """Close the stream once the fake Codex starts running a command; return the child's PID."""
     async with asyncio.timeout(10.0):
         async with aclosing(codex.stream()) as stream:
             async for item in stream:
@@ -296,7 +296,7 @@ async def test_codex_that_ignores_the_interrupt_is_killed_with_its_children(
     child_pids = await run_until_hanging(codex)
 
     async with asyncio.timeout(5.0):
-        while any(is_alive(pid) for pid in child_pids):  # noqa: ASYNC110  # 等作業系統回收程序
+        while any(is_alive(pid) for pid in child_pids):  # noqa: ASYNC110  # wait for the OS to reap the processes
             await asyncio.sleep(0.01)
 
 
