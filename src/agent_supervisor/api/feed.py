@@ -1,12 +1,15 @@
-"""把資料庫裡的變化推送給所有開著的 SSE 連線。
+"""Push database changes to every open SSE connection.
 
-訊息有兩種：
+There are two kinds of messages:
 
-- `event`：`events` 表的一列，帶著它的編號。斷線重連時可以從某個編號之後補送。
-- `task`：某個任務的卡片資料變了。不補送；重連的一方自己重新抓一次看板。
+- `event`: a row of the `events` table, carrying its id. After a reconnect, the events after a
+  given id can be replayed.
+- `task`: a task's card data changed. Not replayed; the reconnecting side refetches the board
+  itself.
 
-不是每個會讓卡片移動的寫入都有事件列（例如建立 run），所以卡片的變化另外偵測：
-資料庫每次 commit 之後比對每個任務的指紋，有變才重新推導那張卡片。
+Not every write that moves a card has an event row (creating a run, for example), so card
+changes are detected separately: after every database commit, compare each task's fingerprint
+and re-derive a card only when it changed.
 """
 
 import asyncio
@@ -25,7 +28,8 @@ PAGE_SIZE = 500
 MAX_PENDING_MESSAGES = 2000
 IDLE_CHECK_SECONDS = 1.0
 PING_EVERY_IDLE_CHECKS = 15
-# 一個 agent 動作會連續寫好幾筆；稍等一下再一起處理，不用每次 commit 都查一輪。
+# One agent action writes several rows in a row; wait briefly and handle them together
+# instead of querying after every commit.
 SETTLE_SECONDS = 0.05
 NEEDS_YOU = str(status.Column.NEEDS_YOU)
 logger = logging.getLogger("agent_supervisor.feed")
@@ -35,14 +39,14 @@ CardListener = Callable[[dict[str, Any]], None]
 
 @dataclass(frozen=True)
 class StreamMessage:
-    """推送給瀏覽器的一則訊息。只有 `event` 訊息有編號。"""
+    """One message pushed to the browser. Only `event` messages have an id."""
 
     kind: str
     data: dict[str, Any]
     event_id: int | None = None
 
     def encode(self) -> str:
-        """排成 SSE 的文字格式。"""
+        """Format as SSE text."""
         lines = [] if self.event_id is None else [f"id: {self.event_id}"]
         lines += [f"event: {self.kind}", f"data: {json.dumps(self.data, ensure_ascii=False)}"]
         return "\n".join(lines) + "\n\n"
@@ -50,7 +54,8 @@ class StreamMessage:
 
 @dataclass(eq=False)
 class Subscription:
-    """一條連線等著送出的訊息。積太多表示對方讀得太慢，標成溢出後由連線自己結束。"""
+    """Messages waiting to be sent on one connection. Too many means a slow reader: mark it
+    overflowed and let the connection end itself."""
 
     queue: asyncio.Queue[StreamMessage] = field(
         default_factory=lambda: asyncio.Queue(MAX_PENDING_MESSAGES)
@@ -59,7 +64,7 @@ class Subscription:
 
 
 class ChangeFeed:
-    """偵測資料庫的變化並分送給訂閱者。"""
+    """Detect database changes and distribute them to subscribers."""
 
     def __init__(self, supervisor: Supervisor, *, on_needs_you: CardListener | None = None) -> None:
         self._supervisor = supervisor
@@ -72,9 +77,10 @@ class ChangeFeed:
         self._columns: dict[int, str] = {}
 
     async def start(self) -> None:
-        """記下目前的狀態當作起點，之後的變化才會被推送。
+        """Record the current state as the starting point; only later changes are pushed.
 
-        每張卡片目前在哪一欄也記下來：原本就在 Needs you 的卡片不算「剛進去」。
+        Also record each card's current column: a card already in Needs you does not count as
+        "just entered".
         """
         async with db.consistent_read(self._conn):
             self._last_event_id = await db.get_last_event_id(self._conn)
@@ -84,7 +90,7 @@ class ChangeFeed:
         db.on_commit(self._conn, self._changed.set)
 
     async def run(self) -> None:
-        """持續把變化推送出去，直到被取消。"""
+        """Keep pushing changes until cancelled."""
         while True:
             await self._changed.wait()
             await asyncio.sleep(SETTLE_SECONDS)
@@ -92,11 +98,11 @@ class ChangeFeed:
             try:
                 await self.publish_changes()
             except Exception:
-                # 這個工作無聲地停掉的話，畫面就不再更新，而 API 看起來一切正常。
+                # If this job dies silently, the UI stops updating while the API looks fine.
                 logger.exception("publishing changes failed; trying again on the next change")
 
     async def publish_changes(self) -> None:
-        """把上次之後新增的事件與有變化的卡片推送出去。"""
+        """Push events added since last time and cards that changed."""
         async with db.consistent_read(self._conn):
             events = await self._new_events()
             fingerprints = await db.list_task_fingerprints(self._conn)
@@ -106,7 +112,7 @@ class ChangeFeed:
                 if self._fingerprints.get(task_id) != fingerprint
             ]
             cards = [await self.card(task_id) for task_id in changed]
-            # 全部讀成功才往前推進；中途失敗的話，下一次會從同一個地方重來。
+            # Only advance once everything was read; if it fails midway, the next try restarts here.
             self._fingerprints = fingerprints
             if events:
                 self._last_event_id = events[-1].id
@@ -117,7 +123,7 @@ class ChangeFeed:
             self._track_column(card)
 
     def _track_column(self, card: dict[str, Any]) -> None:
-        """卡片從別的欄位進到 Needs you 時通知一次；停在裡面不重複通知。"""
+        """Notify once when a card enters Needs you from another column; not while it stays."""
         previous = self._columns.get(card["id"])
         self._columns[card["id"]] = card["column"]
         if card["column"] != NEEDS_YOU or previous == NEEDS_YOU or self._on_needs_you is None:
@@ -125,7 +131,7 @@ class ChangeFeed:
         try:
             self._on_needs_you(card)
         except Exception:
-            # 通知是順便的，出錯不能讓推送停下來。
+            # Notifications are a side feature; a failure must not stop pushing.
             logger.exception("the needs-you listener failed for task %s", card["id"])
 
     async def _new_events(self) -> list[db.Event]:
@@ -139,7 +145,7 @@ class ChangeFeed:
             last_id = page[-1].id
 
     async def card(self, task_id: int) -> dict[str, Any]:
-        """推導一張卡片目前的內容。呼叫端要自己確保讀取的一致性。"""
+        """Derive a card's current content. The caller must ensure read consistency."""
         snapshot = await db.get_snapshot(self._conn, task_id)
         return views.card_view(
             snapshot,
@@ -148,7 +154,7 @@ class ChangeFeed:
         )
 
     async def replay(self, after_id: int) -> list[StreamMessage]:
-        """列出編號大於 `after_id`、而且已經推送過的事件，給斷線重連的一方補上。"""
+        """List already-pushed events with ids above `after_id`, to replay after a reconnect."""
         messages: list[StreamMessage] = []
         async with db.consistent_read(self._conn):
             last_id = after_id
@@ -164,13 +170,13 @@ class ChangeFeed:
         return messages
 
     def subscribe(self) -> Subscription:
-        """開始接收之後的訊息。"""
+        """Start receiving subsequent messages."""
         subscription = Subscription()
         self._subscriptions.add(subscription)
         return subscription
 
     def unsubscribe(self, subscription: Subscription) -> None:
-        """不再接收訊息。"""
+        """Stop receiving messages."""
         self._subscriptions.discard(subscription)
 
     def _publish(self, message: StreamMessage) -> None:
@@ -180,17 +186,19 @@ class ChangeFeed:
             try:
                 subscription.queue.put_nowait(message)
             except asyncio.QueueFull:
-                # 讀得太慢的連線不能拖住其他人：放棄它，讓對方重連後用編號補上。
+                # A slow connection must not hold up the others: drop it, and let it reconnect
+                # and catch up by id.
                 subscription.is_overflowed = True
 
 
 async def stream_text(
     feed: ChangeFeed, last_event_id: int | None, is_closing: Callable[[], bool]
 ) -> AsyncIterator[str]:
-    """一條 SSE 連線要送出的文字。
+    """The text one SSE connection sends.
 
-    先訂閱再補送：補送期間新發生的事件已經在佇列裡，之後照編號略過重複的。
-    daemon 要關閉或這條連線積了太多訊息時結束；瀏覽器會自己重連。
+    Subscribe first, then replay: events that occur during the replay are already in the
+    queue, and duplicates are skipped by id afterwards. Ends when the daemon is shutting down
+    or this connection has too many pending messages; the browser reconnects by itself.
     """
     subscription = feed.subscribe()
     try:

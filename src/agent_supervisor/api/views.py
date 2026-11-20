@@ -1,4 +1,4 @@
-"""把資料庫裡的資料轉成 API 回應的內容。全部是純函式。"""
+"""Turn database data into API response content. All pure functions."""
 
 from dataclasses import asdict
 from typing import Any
@@ -7,17 +7,18 @@ from agent_supervisor import db, status
 
 
 def project_view(project: db.Project) -> dict[str, Any]:
-    """一個專案。"""
+    """A project."""
     return asdict(project)
 
 
 def card_view(
     snapshot: db.TaskSnapshot, board: status.BoardStatus, *, reports_cost: bool
 ) -> dict[str, Any]:
-    """看板上的一張卡片。欄位與狀態標籤是推導出來的，不存資料庫。
+    """A card on the board. The column and status label are derived, not stored in the database.
 
-    `cost_usd` 為 `None` 表示這種 agent 不回報花費，花費未知；這時畫面改顯示 token 數。
-    `usage_is_complete` 為否表示有 run 的用量拿不到（例如被中止），數字偏低。
+    `cost_usd` of `None` means this agent type doesn't report cost, so cost is unknown; the UI
+    then shows the token count instead. `usage_is_complete` being false means some run's usage
+    was unavailable (e.g. it was stopped), so the numbers are understated.
     """
     task = snapshot.task
     return {
@@ -47,7 +48,7 @@ def card_view(
 
 
 def run_view(run: db.Run) -> dict[str, Any]:
-    """一次 run。"""
+    """A run."""
     return {
         "id": run.id,
         "task_id": run.task_id,
@@ -64,7 +65,7 @@ def run_view(run: db.Run) -> dict[str, Any]:
 
 
 def event_view(event: db.Event) -> dict[str, Any]:
-    """一筆稽核紀錄。"""
+    """An audit log entry."""
     return asdict(event)
 
 
@@ -72,7 +73,7 @@ MAX_DIFF_CHARS = 400_000
 
 
 def diff_view(text: str, *, base_branch: str) -> dict[str, Any]:
-    """一份 diff。太長時從最後一個完整的行截斷，並標明被截斷了。"""
+    """A diff. If too long, cut at the last complete line and mark it as truncated."""
     is_truncated = len(text) > MAX_DIFF_CHARS
     if is_truncated:
         text = text[:MAX_DIFF_CHARS]

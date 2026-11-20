@@ -1,1 +1,1 @@
-"""各種 agent 的 adapter。"""
+"""Adapters for each kind of agent."""
