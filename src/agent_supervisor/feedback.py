@@ -1,4 +1,4 @@
-"""PR 上的留言：哪些要餵回 agent，以及餵回時的內容。全部是純函式。"""
+"""PR comments: which to feed back to the agent, and what to send. All functions are pure."""
 
 from typing import Any
 
@@ -9,22 +9,23 @@ _ACTIONABLE_REVIEW_STATES = frozenset({"COMMENTED", "CHANGES_REQUESTED"})
 
 
 def ignored_reason(item: FeedbackItem) -> str | None:
-    """這則留言不餵回 agent 的原因；要餵回時回傳 None。"""
+    """Why this PR comment is not fed back to the agent; None if it should be fed back."""
     if item.is_bot:
         return "bot"
     if item.kind is not FeedbackKind.REVIEW:
         return None
     if item.review_state not in _ACTIONABLE_REVIEW_STATES:
-        # 核准或已撤銷的 review 不是要求修改；它底下的逐行留言是另外的項目，照常處理。
+        # An approved or dismissed review is not a change request; its inline comments are separate
+        # items and are handled as usual.
         return "not_a_change_request"
     if item.review_state == "COMMENTED" and not item.body.strip():
-        # 只是用來裝逐行留言的空殼，本身沒有內容。
+        # Just an empty shell holding inline comments; it has no content of its own.
         return "empty"
     return None
 
 
 def to_payload(item: FeedbackItem) -> dict[str, Any]:
-    """一則留言寫進 `review_comment` 事件的內容。"""
+    """The content written into a `review_comment` event for one PR comment."""
     return {
         "github_id": item.github_id,
         "kind": str(item.kind),
@@ -40,7 +41,10 @@ def to_payload(item: FeedbackItem) -> dict[str, Any]:
 
 
 def build_prompt(comments: list[dict[str, Any]], *, max_chars: int = MAX_PROMPT_CHARS) -> str:
-    """把還沒處理的留言組成送給 agent 的指示。每則留言分到的長度相同，太長就截斷。"""
+    """Build the instructions for the agent from the unhandled PR comments.
+
+    Each comment gets the same share of the length; longer ones are truncated.
+    """
     per_comment = max(max_chars // max(len(comments), 1), 200)
     sections = [_section(index, comment, per_comment) for index, comment in enumerate(comments, 1)]
     return (

@@ -1,6 +1,7 @@
-"""Daemon 啟動時的復原：確保只有一個 daemon，並處理上次留下的未結束 run。
+"""Recovery at daemon startup: ensure a single daemon, and handle runs left unfinished.
 
-對作業系統程序的查詢與終止集中在 `SystemProcessTable`，測試時可以整個換掉。
+Querying and terminating OS processes is concentrated in `SystemProcessTable`, so tests can swap it
+out wholesale.
 """
 
 import asyncio
@@ -21,18 +22,18 @@ POLL_SECONDS = 0.02
 
 
 class AlreadyRunningError(RuntimeError):
-    """已經有另一個 daemon 在執行。"""
+    """Another daemon is already running."""
 
 
 class InstanceLock:
-    """用檔案鎖確保同一時間只有一個 daemon。鎖檔內容是持有者的程序編號。"""
+    """Use a file lock so only one daemon runs at a time. The lock file holds the owner's PID."""
 
     def __init__(self, file: IO[str]) -> None:
         self._file = file
 
     @classmethod
     def acquire(cls, path: Path) -> Self:
-        """取得鎖；已被其他程序持有時拋出 `AlreadyRunningError`。"""
+        """Acquire the lock; raise `AlreadyRunningError` if another process holds it."""
         path.parent.mkdir(parents=True, exist_ok=True)
         file = path.open("a+")
         try:
@@ -48,42 +49,42 @@ class InstanceLock:
 
     @staticmethod
     def read_owner_pid(path: Path) -> int | None:
-        """讀出鎖檔記錄的程序編號；沒有鎖檔或內容不合法時回傳 None。"""
+        """Read the PID in the lock file; None if the file is missing or its content is invalid."""
         try:
             return int(path.read_text().strip())
         except (FileNotFoundError, ValueError):
             return None
 
     def release(self) -> None:
-        """釋放鎖。"""
+        """Release the lock."""
         fcntl.flock(self._file, fcntl.LOCK_UN)
         self._file.close()
 
 
 class ProcessTable(Protocol):
-    """查詢與終止作業系統程序的介面。"""
+    """Interface for querying and terminating OS processes."""
 
     def find(self, marker: str) -> list[int]:
-        """回傳命令列包含 marker 的程序編號。"""
+        """Return the PIDs of processes whose command line contains marker."""
         ...
 
     def terminate(self, pid: int, *, force: bool) -> None:
-        """要求程序結束；`force` 為真時強制終止。"""
+        """Ask a process to exit; terminate it forcibly when `force` is true."""
         ...
 
 
 class SystemProcessTable:
-    """用 `pgrep` 與訊號操作真正的程序。"""
+    """Operate on real processes with `pgrep` and signals."""
 
     def find(self, marker: str) -> list[int]:
-        """回傳命令列包含 marker 的程序編號，不含自己。"""
+        """Return the PIDs of processes whose command line contains marker, excluding itself."""
         completed = subprocess.run(
             ["pgrep", "-f", "--", marker], capture_output=True, text=True, check=False
         )
         return [int(pid) for pid in completed.stdout.split() if int(pid) != os.getpid()]
 
     def terminate(self, pid: int, *, force: bool) -> None:
-        """送出 SIGINT（讓 agent 連同子程序一起收尾）或 SIGKILL。"""
+        """Send SIGINT (so the agent wraps up together with its children) or SIGKILL."""
         try:
             os.kill(pid, signal.SIGKILL if force else signal.SIGINT)
         except ProcessLookupError:
@@ -92,7 +93,7 @@ class SystemProcessTable:
 
 @dataclass
 class RecoveryReport:
-    """復原的結果：哪些 run 已標成 interrupted，哪些因為程序停不掉而保留。"""
+    """Recovery result: runs marked interrupted, and runs kept because they could not stop."""
 
     interrupted_run_ids: list[int] = field(default_factory=list)
     held_run_ids: list[int] = field(default_factory=list)
@@ -101,10 +102,12 @@ class RecoveryReport:
 async def recover_open_runs(
     conn: aiosqlite.Connection, processes: ProcessTable, *, grace_seconds: float = 5.0
 ) -> RecoveryReport:
-    """處理上次啟動留下的未結束 run。
+    """Handle unfinished runs left over from the previous startup.
 
-    先停掉遺留的 agent 程序，確認停了才把 run 標成 interrupted。
-    停不掉的 run 維持未結束，該任務因此建不了新的 run。不自動重跑。
+    First stop leftover agent processes; mark a run interrupted only once they are confirmed
+    stopped.
+    Runs whose processes can't be stopped stay unfinished, so their task can't create new runs.
+    Nothing is rerun automatically.
     """
     report = RecoveryReport()
     for run in await db.list_open_runs(conn):
@@ -130,7 +133,7 @@ async def recover_open_runs(
 
 
 async def _process_marker(conn: aiosqlite.Connection, run: db.Run) -> str | None:
-    """找出這個 run 的 agent 程序可以用什麼字串辨識；agent 還沒啟動過則回傳 None。"""
+    """Find a string that identifies this run's agent process; None if the agent never started."""
     events = await db.list_events(conn, run.task_id, run.id)
     markers = [
         event.payload.get("process_marker")
@@ -141,7 +144,7 @@ async def _process_marker(conn: aiosqlite.Connection, run: db.Run) -> str | None
 
 
 async def _stop_processes(processes: ProcessTable, marker: str, grace_seconds: float) -> bool:
-    """先客氣地要求結束，逾時再強制終止。回傳是否確認全部結束。"""
+    """Ask politely to exit, then force-terminate after a timeout. Return whether all exited."""
     for force in (False, True):
         pids = processes.find(marker)
         if not pids:

@@ -1,6 +1,7 @@
-"""執行外部指令的共用底層。逾時或被取消時一定會把子程序終止。
+"""Shared base for running external commands. Always kills the child on timeout or cancel.
 
-各個外部工具的指令（`git`、`gh`）仍集中在各自的模組，這裡只負責執行。
+Commands for each external tool (`git`, `gh`) still live in their own modules; this module only runs
+them.
 """
 
 import asyncio
@@ -13,7 +14,7 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 
 @dataclass(frozen=True)
 class CommandResult:
-    """一次指令執行的結果。"""
+    """The result of one command execution."""
 
     returncode: int
     stdout: str
@@ -21,7 +22,7 @@ class CommandResult:
 
 
 class CommandTimeoutError(RuntimeError):
-    """指令執行超過時間上限，已被終止。"""
+    """The command exceeded its time limit and was terminated."""
 
 
 async def run_command(
@@ -29,9 +30,9 @@ async def run_command(
     *,
     cwd: Path | None = None,
     input_text: str | None = None,
-    timeout: float = DEFAULT_TIMEOUT_SECONDS,  # noqa: ASYNC109  # 逾時後要先終止子程序才能拋出
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,  # noqa: ASYNC109  # kill the child before raising
 ) -> CommandResult:
-    """執行一個外部指令並等它結束；不檢查結束代碼，由呼叫端決定如何處理。"""
+    """Run an external command and wait for it; the exit code is left for the caller to check."""
     process = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,

@@ -1,6 +1,6 @@
-"""全域設定：各種上限與權限政策。從 TOML 檔讀取，沒有檔案時使用預設值。
+"""Global settings: limits and the permission policy. Read from TOML; defaults if no file.
 
-數值的預設值都是暫定的，見 `docs/03-decisions.md` 的「尚未決定」。
+All numeric defaults are provisional; see the "not yet decided" section of `docs/03-decisions.md`.
 """
 
 import tomllib
@@ -14,20 +14,21 @@ DEFAULT_DATA_DIR = Path.home() / ".agent-supervisor"
 DEFAULT_CONFIG_PATH = DEFAULT_DATA_DIR / "config.toml"
 
 DEFAULT_TOOL_RULES: dict[str, Any] = {
-    # Agent 可以使用的工具；清單外的一律拒絕。
+    # Tools the agent may use; anything not on the list is always denied.
     "allowed_tools": ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash", "TodoWrite"],
-    # 以這些字串開頭的指令一律拒絕。push 與開 PR 由 supervisor 執行。
+    # Commands starting with these strings are always denied. The supervisor does the push and opens
+    # the PR.
     "denied_commands": ["git push", "gh", "sudo", "rm -rf /"],
 }
 
 
 class ConfigError(ValueError):
-    """設定檔內容不合法。"""
+    """The config file is invalid."""
 
 
 @dataclass(frozen=True)
 class Config:
-    """執行期設定。"""
+    """Runtime settings."""
 
     data_dir: Path = DEFAULT_DATA_DIR
     task_cost_limit_usd: float = 5.0
@@ -44,27 +45,27 @@ class Config:
 
     @property
     def db_path(self) -> Path:
-        """SQLite 資料庫檔案的位置。"""
+        """Location of the SQLite database file."""
         return self.data_dir / "agent-supervisor.db"
 
     @property
     def worktrees_dir(self) -> Path:
-        """各任務 worktree 的上層目錄。"""
+        """Parent directory of each task's worktree."""
         return self.data_dir / "worktrees"
 
     @property
     def lock_path(self) -> Path:
-        """確保同時只有一個 daemon 的鎖檔位置。"""
+        """Location of the lock file that ensures only one daemon runs at a time."""
         return self.data_dir / "daemon.lock"
 
 
 def absolute_path(value: str) -> Path:
-    """把使用者給的路徑變成絕對路徑（展開 `~`、解開符號連結）。CLI 與 API 共用。"""
+    """Make a user-given path absolute (expand `~`, resolve symlinks). Shared by CLI and API."""
     return Path(value).expanduser().resolve()
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
-    """讀取設定檔；檔案不存在時回傳預設值。"""
+    """Read the config file; return the defaults if it does not exist."""
     if not path.exists():
         return Config()
     with path.open("rb") as file:

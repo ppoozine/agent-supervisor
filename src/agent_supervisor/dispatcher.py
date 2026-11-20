@@ -1,9 +1,10 @@
-"""Dispatcher：發現需要 agent 處理的任務，就交給 Runner 建立對應的 run。
+"""Dispatcher: find tasks that need the agent and hand them to the Runner to create a run.
 
-三種情況，依優先順序：PR 上有還沒處理的留言（review_feedback）、
-PR 和基底分支有衝突（merge_conflict）、CI 失敗（ci_failure）。
-這裡只負責「找出候選」。條件的最終檢查、建立 run、更新防迴圈欄位
-由 Runner 在任務鎖與同一個資料庫交易內完成，所以這裡看到的舊資料不會造成重複派工。
+Three cases, in priority order: unhandled PR comments (review_feedback), conflicts between the PR
+and the base branch (merge_conflict), and CI failure (ci_failure).
+This module only "finds candidates". The final condition check, creating the run, and updating the
+loop guard columns are done by the Runner under the task lock in one DB transaction, so stale data
+seen here never causes duplicate dispatch.
 """
 
 from collections.abc import Callable, Collection
@@ -15,7 +16,7 @@ from agent_supervisor.runner import Runner
 
 
 class Dispatcher:
-    """把有新留言或 CI 失敗的任務派給 Runner 處理。"""
+    """Dispatch tasks with new PR comments or CI failures to the Runner."""
 
     def __init__(self, conn: aiosqlite.Connection, runner: Runner, limits: status.Limits) -> None:
         self._conn = conn
@@ -28,13 +29,17 @@ class Dispatcher:
         should_stop: Callable[[], bool] = lambda: False,
         hold_feedback: Collection[int] = (),
     ) -> list[db.Run]:
-        """檢查所有任務一次，回傳這次建立的 run。
+        """Check every task once and return the runs created this time.
 
-        每個任務派工前都先問 `should_stop`；回答 True 就不再派剩下的任務。
-        `hold_feedback` 裡的任務這一輪先不處理留言：留言可能還沒留完，等下一輪。
-        留言優先於衝突與 CI 失敗：處理留言會產生新的 commit，舊 commit 的失敗就不用修了。
-        衝突優先於 CI 失敗：有衝突的 PR 上 CI 不會跑，要先解掉才知道 CI 的結果。
-        這個順序和 `status.board_status` 判斷 Working 標籤的順序一致。
+        Ask `should_stop` before dispatching each task; once it answers True, skip the remaining
+        tasks.
+        Tasks in `hold_feedback` don't get their PR comments handled this round: more comments may
+        still be coming, so wait for the next round.
+        PR comments take priority over conflicts and CI failures: handling them produces a new
+        commit, so the old commit's failures no longer need fixing.
+        Conflicts take priority over CI failures: CI does not run on a PR with conflicts, so they
+        must be resolved before the CI result is known.
+        This order matches the order in which `status.board_status` decides the Working label.
         """
         started: list[db.Run] = []
         for snapshot in await db.list_snapshots(self._conn):

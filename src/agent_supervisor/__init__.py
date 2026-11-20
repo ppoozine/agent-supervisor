@@ -1,1 +1,1 @@
-"""平行管理多個 AI coding agent 的本機工具。"""
+"""A local tool for managing multiple AI coding agents in parallel."""

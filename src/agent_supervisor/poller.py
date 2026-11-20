@@ -1,8 +1,8 @@
-"""Poller：定期查詢有開 PR 的任務，更新對 GitHub 狀態的快取。
+"""Poller: periodically query tasks with an open PR and update the cached GitHub state.
 
-PR 狀態、最新 commit、CI 結果、review 結果當成一組一起更新。
-查詢 GitHub 需要時間，期間 supervisor 可能剛 push 了新的 commit，
-所以寫入時會比對查詢前看到的 `head_sha`，不一樣就丟棄這次結果。
+PR state, latest commit, CI result, and review result are updated together as one set.
+Querying GitHub takes time, and the supervisor may have just pushed a new commit meanwhile, so the
+write compares against the `head_sha` seen before the query and discards the result if it differs.
 """
 
 from collections.abc import Awaitable, Callable
@@ -20,7 +20,7 @@ StopRun = Callable[[int], Awaitable[bool]]
 
 @dataclass(frozen=True)
 class PollChange:
-    """一次輪詢中，某個任務的狀態有了變化。"""
+    """A change in one task's state found during a poll."""
 
     task_id: int
     status: PullRequestStatus
@@ -28,7 +28,7 @@ class PollChange:
 
 @dataclass(frozen=True)
 class PollReport:
-    """一次輪詢的結果：哪些任務有變化、哪些查詢失敗、哪些任務這一輪有新的留言。"""
+    """One poll's result: changed tasks, failed queries, and tasks with new PR comments."""
 
     changes: tuple[PollChange, ...]
     errors: tuple[tuple[int, str], ...]
@@ -36,7 +36,7 @@ class PollReport:
 
 
 class Poller:
-    """查詢 GitHub 並更新任務的狀態快取。"""
+    """Query GitHub and update the tasks' cached state."""
 
     def __init__(self, conn: aiosqlite.Connection, github: GitHub, *, stop_run: StopRun) -> None:
         self._conn = conn
@@ -44,7 +44,7 @@ class Poller:
         self._stop_run = stop_run
 
     async def poll_once(self) -> PollReport:
-        """查詢所有 PR 開著的任務一次。單一任務查詢失敗不影響其他任務。"""
+        """Query every task with an open PR once. One failed task query doesn't affect others."""
         changes: list[PollChange] = []
         errors: list[tuple[int, str]] = []
         new_feedback: list[int] = []
@@ -66,10 +66,11 @@ class Poller:
         return PollReport(tuple(changes), tuple(errors), tuple(new_feedback))
 
     async def _record_feedback(self, task: db.Task, repo: str, status: PullRequestStatus) -> bool:
-        """PR 上有還沒記錄的留言就抓回來寫成事件，回傳有沒有新的留言要處理。
+        """Fetch unrecorded PR comments as events; return whether there are new ones to handle.
 
-        已封存的任務只追蹤 PR 的結果，不抓留言。留言的完整內容要另外查詢，
-        所以先用狀態查詢順便帶回來的編號判斷有沒有新的，沒有就不多查。
+        Archived tasks only track the PR outcome and don't fetch comments. Full comment contents
+        need a separate query, so first use the IDs that come back with the state query to tell
+        whether there are new ones, and skip the extra query if not.
         """
         assert task.pr_number is not None
         if task.archived_at is not None or status.pr_state is not PrState.OPEN:
@@ -96,6 +97,7 @@ class Poller:
         if not changed:
             return None
         if status.pr_state is not PrState.OPEN:
-            # PR 已經合併或關閉：還在跑的 run 沒有意義了，中止它，不做收尾。
+            # The PR was merged or closed: the run still in progress is pointless now, so stop it
+            # without wrap-up.
             await self._stop_run(task.id)
         return PollChange(task.id, status)

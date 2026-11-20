@@ -1,4 +1,4 @@
-"""對 GitHub 的操作。所有 `gh` 指令都集中在這個模組。"""
+"""GitHub operations. All `gh` commands live in this module."""
 
 import json
 import re
@@ -13,30 +13,34 @@ from agent_supervisor.process import CommandResult, run_command
 PR_FIELDS = "number,state,headRefOid,url"
 STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews,mergeable"
 
-# 檢查結果的對應，依據見 docs/02-mvp-spec.md 的「ci_state 的意思」。
-# 不在這兩組裡的值（還在跑、等人核准、過期、沒看過的新值）一律當成還沒結束。
+# Mapping of check results; for the rationale see the section on what ci_state means in
+# docs/02-mvp-spec.md.
+# Values in neither set (still running, awaiting approval, stale, new values never seen before) are
+# treated as not finished.
 _PASSED_RESULTS = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})
 _FAILED_RESULTS = frozenset({"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "CANCELLED", "ERROR"})
 _REVIEW_STATES = {
     "APPROVED": ReviewState.APPROVED,
     "CHANGES_REQUESTED": ReviewState.CHANGES_REQUESTED,
 }
-# GitHub 還沒算出來時回 UNKNOWN；沒看過的值也當成未知，不當成有衝突或沒有衝突。
+# GitHub returns UNKNOWN until it has computed it; unseen values are also treated as unknown, not as
+# conflicting or not conflicting.
 _MERGE_STATES = {"MERGEABLE": MergeState.CLEAN, "CONFLICTING": MergeState.CONFLICTING}
 _ACTIONS_JOB_URL = re.compile(r"/actions/runs/\d+/job/(\d+)")
-# 解析 `gh` 的輸出時，內容不是預期的 JSON 形狀會遇到的例外（JSON 格式錯誤屬於 ValueError）。
+# Exceptions raised when `gh` output parses but isn't the expected JSON shape (malformed JSON is a
+# ValueError).
 _UNEXPECTED_OUTPUT_ERRORS = (AttributeError, KeyError, TypeError, ValueError)
 
 CommandRunner = Callable[..., Awaitable[CommandResult]]
 
 
 class GitHubError(RuntimeError):
-    """gh 指令失敗，或回傳的內容不如預期。"""
+    """A gh command failed, or returned unexpected content."""
 
 
 @dataclass(frozen=True)
 class PullRequest:
-    """一個 PR 的基本狀態。`state` 是 open、merged 或 closed。"""
+    """Basic state of a PR. `state` is open, merged, or closed."""
 
     number: int
     state: str
@@ -46,7 +50,7 @@ class PullRequest:
 
 @dataclass(frozen=True)
 class FailedCheck:
-    """一個失敗的檢查。`job_id` 只有 GitHub Actions 的檢查才有，抓 log 要用它。"""
+    """A failed check. Only GitHub Actions checks have `job_id`, which is needed to fetch logs."""
 
     name: str
     job_id: int | None
@@ -54,7 +58,7 @@ class FailedCheck:
 
 @dataclass(frozen=True)
 class PullRequestStatus:
-    """Poller 一次查回來的整組狀態。"""
+    """The full set of state the Poller fetches in one query."""
 
     pr_state: PrState
     head_sha: str
@@ -62,12 +66,12 @@ class PullRequestStatus:
     review_state: ReviewState
     failed_checks: tuple[FailedCheck, ...]
     feedback_ids: tuple[str, ...] = ()
-    """PR 上一般留言與已送出的 review 的編號，用來判斷有沒有新的留言要抓。"""
+    """IDs of the PR's regular comments and submitted reviews, to detect new comments to fetch."""
     merge_state: MergeState = MergeState.UNKNOWN
 
 
 class FeedbackKind(StrEnum):
-    """PR 上留言的三種形式。"""
+    """The three forms of PR comments."""
 
     COMMENT = "comment"
     REVIEW = "review"
@@ -76,9 +80,9 @@ class FeedbackKind(StrEnum):
 
 @dataclass(frozen=True)
 class FeedbackItem:
-    """PR 上的一則留言。`github_id` 是 GitHub 的 node id，三種留言共用同一個編號空間。
+    """One PR comment. `github_id` is GitHub's node id; all three kinds share one ID space.
 
-    `path` 與 `line` 只有逐行留言才有；`review_state` 只有 review 才有。
+    `path` and `line` exist only on inline comments; `review_state` only on reviews.
     """
 
     github_id: str
@@ -94,13 +98,13 @@ class FeedbackItem:
 
 
 class GitHub:
-    """透過 `gh` 查詢與建立 PR、查詢 CI 與 review 狀態、抓 CI log。"""
+    """Query and create PRs, query CI and review state, and fetch CI logs through `gh`."""
 
     def __init__(self, run: CommandRunner = run_command) -> None:
         self._run = run
 
     async def find_pull_request(self, repo: str, branch: str) -> PullRequest | None:
-        """找出某個 branch 的 PR：有開著的就回傳它，否則回傳最新的一個。"""
+        """Find a branch's PR: the open one if there is one, otherwise the most recent one."""
         output = await self._gh(
             ["pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", PR_FIELDS]
         )
@@ -116,7 +120,7 @@ class GitHub:
     async def create_pull_request(
         self, repo: str, *, head: str, base: str, title: str, body: str
     ) -> PullRequest:
-        """開一個 PR 並回傳它。"""
+        """Open a PR and return it."""
         arguments = ["pr", "create", "--repo", repo, "--head", head, "--base", base]
         arguments += ["--title", title, "--body-file", "-"]
         await self._gh(arguments, input_text=body)
@@ -126,7 +130,7 @@ class GitHub:
         return created
 
     async def get_pull_request_status(self, repo: str, number: int) -> PullRequestStatus:
-        """一次查回 PR 狀態、最新 commit、CI 結果與 review 結果。"""
+        """Fetch the PR state, latest commit, CI result, and review result in one go."""
         output = await self._gh(
             ["pr", "view", str(number), "--repo", repo, "--json", STATUS_FIELDS]
         )
@@ -136,10 +140,11 @@ class GitHub:
             raise GitHubError(f"gh pr view returned unexpected output: {error!r}") from error
 
     async def list_feedback(self, repo: str, number: int) -> list[FeedbackItem]:
-        """列出 PR 上所有的留言，依時間排序：一般留言、已送出的 review、逐行留言。
+        """List all comments on the PR in time order: regular comments, submitted reviews, inline.
 
-        用 REST API 而不是 `gh pr view`：後者看不出作者是不是機器人，也沒有逐行留言。
-        還沒送出的 review（只有本人看得到）與它底下的逐行留言不算。
+        Uses the REST API rather than `gh pr view`: the latter cannot tell whether the author is a
+        bot, and has no inline comments.
+        Unsubmitted reviews (visible only to their author) and their inline comments don't count.
         """
         comments = await self._list(f"repos/{repo}/issues/{number}/comments")
         reviews = await self._list(f"repos/{repo}/pulls/{number}/reviews")
@@ -162,7 +167,7 @@ class GitHub:
         return sorted(items, key=lambda item: item.created_at)
 
     async def _list(self, path: str) -> list[dict[str, Any]]:
-        """讀完一個分頁的 REST 列表。`--slurp` 把每一頁包成外層陣列的一個元素。"""
+        """Read a paginated REST list in full. `--slurp` wraps each page in an outer array."""
         output = await self._gh(["api", "--paginate", "--slurp", f"{path}?per_page=100"])
         try:
             return [item for page in json.loads(output) for item in page]
@@ -170,9 +175,9 @@ class GitHub:
             raise GitHubError(f"gh api {path} returned unexpected output: {error!r}") from error
 
     async def fetch_job_log(self, repo: str, job_id: int) -> str:
-        """抓一個 GitHub Actions job 的 log：優先只要失敗的步驟，沒有就抓整份。
+        """Fetch a GitHub Actions job's log: only the failed steps if possible, else the whole log.
 
-        被取消或逾時的 job 沒有「失敗的步驟」，所以要退回整份 log。
+        Cancelled or timed-out jobs have no "failed steps", so fall back to the whole log.
         """
         base = ["run", "view", "--repo", repo, "--job", str(job_id)]
         failed_steps = await self._gh([*base, "--log-failed"])
@@ -184,7 +189,7 @@ class GitHub:
         try:
             result = await self._run(["gh", *args], cwd=None, input_text=input_text)
         except OSError as error:
-            # 例如 `gh` 沒有安裝或不在 PATH 裡。
+            # E.g. `gh` is not installed or not on PATH.
             raise GitHubError(f"gh could not be started: {error}") from error
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
@@ -193,7 +198,7 @@ class GitHub:
 
 
 def parse_pull_request_status(data: dict[str, Any]) -> PullRequestStatus:
-    """把 `gh pr view --json` 的結果換算成我們的狀態值。"""
+    """Convert the result of `gh pr view --json` into our state values."""
     checks = data.get("statusCheckRollup") or []
     results = [_check_result(check) for check in checks]
     failed = tuple(
@@ -238,7 +243,7 @@ def _to_feedback(item: dict[str, Any], kind: FeedbackKind) -> FeedbackItem:
 
 
 def _check_result(check: dict[str, Any]) -> CiState:
-    """單一檢查的結果。GitHub Actions 的檢查與外部服務回報的狀態形狀不同。"""
+    """The result of one check. GitHub Actions checks and external statuses differ in shape."""
     if check.get("__typename") == "StatusContext":
         value = check.get("state")
     elif check.get("status") == "COMPLETED":
@@ -253,7 +258,7 @@ def _check_result(check: dict[str, Any]) -> CiState:
 
 
 def _combine(results: Sequence[CiState]) -> CiState:
-    """有檢查還沒結束就是 pending，即使已經有別的檢查失敗：等全部結束才一次處理。"""
+    """Any unfinished check means pending, even if another failed: handle them all at once."""
     if not results:
         return CiState.NONE
     if CiState.PENDING in results:

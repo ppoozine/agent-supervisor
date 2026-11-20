@@ -1,6 +1,7 @@
-"""卡片進 Needs you 時發系統通知。macOS 用 `osascript`，Linux 用 `notify-send`。
+"""Notify the system when a card enters Needs you. `osascript` on macOS, `notify-send` on Linux.
 
-通知是「順便」的：發不出去只記一行 log，不影響其他功能，也不讓呼叫端等。
+Notifications are a "nice to have": a failure to send only logs one line, does not affect anything
+else, and never makes the caller wait.
 """
 
 import asyncio
@@ -13,7 +14,8 @@ from typing import Any
 from agent_supervisor.process import CommandResult, CommandTimeoutError, run_command
 
 TIMEOUT_SECONDS = 10.0
-# 標題與內文用參數傳進去，不拼進腳本裡：任務標題是使用者輸入的，可能有引號。
+# The title and body are passed as arguments, not spliced into the script: task titles are user
+# input and may contain quotes.
 _SCRIPT = (
     "on run argv",
     "display notification (item 2 of argv) with title (item 1 of argv)",
@@ -34,18 +36,20 @@ def _osascript_command(title: str, message: str) -> list[str]:
 
 
 def _notify_send_command(title: str, message: str) -> list[str]:
-    # `--` 之後的參數不會被當成選項，標題是使用者輸入的，可能以 `-` 開頭。
+    # Arguments after `--` are never treated as options; the title is user input and may start with
+    # `-`.
     return ["notify-send", "--app-name=agent-supervisor", "--", title, message]
 
 
 def _command_builder(platform: str, which: CommandFinder) -> CommandBuilder | None:
-    """依平台挑發通知的指令；不支援或指令不存在時回傳 None。"""
+    """Pick the notification command for the platform; None if unsupported or not installed."""
     if platform == "darwin":
         return _osascript_command
     if not platform.startswith("linux"):
         logger.info("notifications are not supported on %s; none will be sent", platform)
         return None
-    # notify-send 只有桌面環境才有，伺服器與 WSL 通常沒有，所以先確認再啟用。
+    # notify-send only exists in desktop environments; servers and WSL usually lack it, so check
+    # before enabling.
     if which("notify-send") is None:
         logger.info("notify-send was not found; no notifications will be sent")
         return None
@@ -53,7 +57,7 @@ def _command_builder(platform: str, which: CommandFinder) -> CommandBuilder | No
 
 
 class Notifier:
-    """發系統通知。關掉、平台不支援或找不到指令時什麼都不做。"""
+    """Send a system notification. Do nothing if disabled, unsupported, or not installed."""
 
     def __init__(
         self,
@@ -68,7 +72,7 @@ class Notifier:
         self._sending: set[asyncio.Task[None]] = set()
 
     def card_needs_you(self, card: dict[str, Any]) -> None:
-        """一張卡片剛進 Needs you。在背景發通知，不等它完成。"""
+        """A card just entered Needs you. Notify in the background without waiting for it."""
         if self._build_command is None:
             return
         logger.info("task %s needs you (%s); sending a notification", card["id"], card["label"])
@@ -77,7 +81,7 @@ class Notifier:
         sending.add_done_callback(self._sending.discard)
 
     async def send(self, title: str, message: str) -> None:
-        """發一則通知。失敗只記錄，不拋出例外。"""
+        """Send one notification. Failures are only logged, never raised."""
         if self._build_command is None:
             return
         try:
@@ -89,6 +93,6 @@ class Notifier:
             logger.warning("notification could not be sent: %s", result.stderr.strip())
 
     async def wait(self) -> None:
-        """等還在發的通知發完。"""
+        """Wait for notifications still being sent to finish."""
         if self._sending:
             await asyncio.wait(self._sending)
