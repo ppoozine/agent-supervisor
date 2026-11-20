@@ -15,7 +15,9 @@ from agent_supervisor.enums import EventType, ExitStatus
 from agent_supervisor.recovery import (
     AlreadyRunningError,
     InstanceLock,
+    ProcessStillRunningError,
     SystemProcessTable,
+    finish_leftover_run,
     recover_open_runs,
 )
 
@@ -164,6 +166,48 @@ async def test_finished_runs_are_left_alone(conn: aiosqlite.Connection) -> None:
 
     assert report.interrupted_run_ids == []
     assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.SUCCESS
+
+
+async def test_held_run_can_be_finished_once_its_process_is_gone(
+    conn: aiosqlite.Connection,
+) -> None:
+    run = await open_run(conn, "marker-1")
+    processes = FakeProcessTable({"marker-1": [43]}, survives_force=True)
+    report = await recover_open_runs(conn, processes, grace_seconds=0.05)
+    assert report.held_run_ids == [run.id]
+    processes.processes["marker-1"].clear()  # the user stopped the process by hand
+
+    await finish_leftover_run(conn, run, processes, grace_seconds=0.05)
+
+    stored = await db.get_run(conn, run.id)
+    assert stored.exit_status == ExitStatus.INTERRUPTED
+    last_event = (await db.list_events(conn, run.task_id))[-1]
+    assert last_event.payload["change"] == "run_ended"
+    assert "by the user" in last_event.payload["detail"]
+
+
+async def test_finishing_a_held_run_tries_to_stop_its_process_again(
+    conn: aiosqlite.Connection,
+) -> None:
+    run = await open_run(conn, "marker-1")
+    processes = FakeProcessTable({"marker-1": [43]})
+
+    await finish_leftover_run(conn, run, processes, grace_seconds=0.05)
+
+    assert processes.terminated == [(43, False), (43, True)]
+    assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.INTERRUPTED
+
+
+async def test_held_run_stays_open_while_its_process_cannot_be_stopped(
+    conn: aiosqlite.Connection,
+) -> None:
+    run = await open_run(conn, "marker-1")
+    processes = FakeProcessTable({"marker-1": [43]}, survives_force=True)
+
+    with pytest.raises(ProcessStillRunningError, match="43"):
+        await finish_leftover_run(conn, run, processes, grace_seconds=0.05)
+
+    assert (await db.get_run(conn, run.id)).ended_at is None
 
 
 # The tests below use real OS processes and file locks to confirm that `pgrep`, signals and

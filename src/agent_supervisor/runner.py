@@ -22,6 +22,7 @@ from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
 EventWriter = Callable[[EventType, dict[str, Any]], Awaitable[None]]
 RunStage = Callable[[db.Task, db.Run, EventWriter], Awaitable[None]]
 ArchiveStage = Callable[[db.Task], Awaitable[None]]
+LeftoverFinisher = Callable[[db.Run], Awaitable[None]]
 EventCallback = Callable[[EventType, dict[str, Any]], None]
 
 
@@ -81,6 +82,7 @@ class Runner:
         finalize: RunStage = _no_stage,
         archive: ArchiveStage = _no_archive,
         on_event: EventCallback | None = None,
+        finish_leftover: LeftoverFinisher | None = None,
     ) -> None:
         self._conn = conn
         self._adapters = adapters
@@ -89,6 +91,7 @@ class Runner:
         self._finalize = finalize
         self._archive = archive
         self._on_event = on_event
+        self._finish_leftover = finish_leftover
         self._jobs: dict[int, _Job] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._creation_lock = asyncio.Lock()
@@ -182,20 +185,28 @@ class Runner:
         return run
 
     async def stop(self, task_id: int) -> None:
-        """Stop the task's running run; return only after it has fully stopped and finished."""
+        """Stop the task's running run; return only after it has fully stopped and finished.
+
+        A run left unfinished at startup has no job here, because its agent process could not be
+        confirmed stopped. Stopping it hands it to `finish_leftover`, which tries again: this is
+        the only way to finish such a run from within the tool.
+        """
         async with self._lock_for(task_id):
-            job = self._jobs.get(task_id)
-            if job is None or job.work is None or job.work.done():
+            if await self._stop_job(task_id):
+                return
+            run = await db.get_open_run(self._conn, task_id)
+            if run is None or self._finish_leftover is None:
                 raise NoActiveRunError(f"task {task_id} has no active run")
-            await self._cancel(job, ExitStatus.STOPPED)
+            await self._finish_leftover(run)
 
     async def stop_if_running(self, task_id: int) -> bool:
-        """Stop the task's run if one is running; return whether a run was actually stopped."""
-        try:
-            await self.stop(task_id)
-        except NoActiveRunError:
-            return False
-        return True
+        """Stop the task's run if one is running; return whether a run was actually stopped.
+
+        Leftover runs are not touched: callers are automatic (e.g. the PR closed), and must not
+        wait on, or fail because of, a process that may not stop.
+        """
+        async with self._lock_for(task_id):
+            return await self._stop_job(task_id)
 
     async def stop_all(self) -> None:
         """Stop all running runs."""
@@ -225,6 +236,14 @@ class Runner:
         for job in list(self._jobs.values()):
             if job.work is not None and not job.work.done():
                 await self._cancel(job, ExitStatus.INTERRUPTED)
+
+    async def _stop_job(self, task_id: int) -> bool:
+        """Stop the run this Runner is executing for the task; return whether there was one."""
+        job = self._jobs.get(task_id)
+        if job is None or job.work is None or job.work.done():
+            return False
+        await self._cancel(job, ExitStatus.STOPPED)
+        return True
 
     def _lock_for(self, task_id: int) -> asyncio.Lock:
         return self._locks.setdefault(task_id, asyncio.Lock())

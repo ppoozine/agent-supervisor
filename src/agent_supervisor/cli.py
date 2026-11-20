@@ -235,7 +235,9 @@ async def _with_lock(
     try:
         await db.init_schema(conn)
         await _recover(conn, processes)
-        supervisor = build_supervisor(conn, config, adapters, github, on_event=_print_event)
+        supervisor = build_supervisor(
+            conn, config, adapters, github, on_event=_print_event, processes=processes
+        )
         runner = supervisor.runner
         session = _Session(
             supervisor=supervisor,
