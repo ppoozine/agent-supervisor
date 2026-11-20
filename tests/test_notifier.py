@@ -1,5 +1,6 @@
 """notifier.py 的測試。發通知的指令用替身，不真的跳通知。"""
 
+import logging
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -31,8 +32,16 @@ class FakeRunner:
         return self.outcome
 
 
-async def notify(runner: FakeRunner, **options: object) -> None:
-    notifier = Notifier(platform="darwin", run=runner, **options)  # type: ignore[arg-type]
+def found(command: str) -> str | None:
+    return f"/usr/bin/{command}"
+
+
+def missing(command: str) -> str | None:
+    return None
+
+
+async def notify(runner: FakeRunner, platform: str = "darwin", **options: object) -> None:
+    notifier = Notifier(platform=platform, run=runner, which=found, **options)  # type: ignore[arg-type]
     notifier.card_needs_you(CARD)
     await notifier.wait()
 
@@ -57,9 +66,34 @@ async def test_nothing_is_sent_when_notifications_are_turned_off() -> None:
     assert runner.calls == []
 
 
+async def test_linux_notification_uses_notify_send_with_separate_arguments() -> None:
+    runner = FakeRunner()
+
+    await notify(runner, platform="linux")
+
+    (call,) = runner.calls
+    assert call[0] == "notify-send"
+    # `--` 之後一律當成內容：標題以 `-` 開頭也不會被當成選項。
+    assert call[-3:] == ["--", "Needs you · Stopped", 'Fix the "quoted" title']
+
+
+async def test_nothing_is_sent_on_linux_without_notify_send(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_supervisor.notifier")
+    runner = FakeRunner()
+    notifier = Notifier(platform="linux", run=runner, which=missing)
+
+    notifier.card_needs_you(CARD)
+    await notifier.wait()
+
+    assert runner.calls == []
+    assert "notify-send" in caplog.text
+
+
 async def test_nothing_is_sent_on_a_platform_without_support() -> None:
     runner = FakeRunner()
-    notifier = Notifier(platform="linux", run=runner)
+    notifier = Notifier(platform="win32", run=runner, which=found)
 
     notifier.card_needs_you(CARD)
     await notifier.wait()
@@ -75,9 +109,10 @@ async def test_nothing_is_sent_on_a_platform_without_support() -> None:
         pytest.param(CommandTimeoutError("osascript did not finish"), id="command-hangs"),
     ],
 )
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
 async def test_failing_notification_is_logged_and_does_not_raise(
-    outcome: CommandResult | Exception, caplog: pytest.LogCaptureFixture
+    outcome: CommandResult | Exception, platform: str, caplog: pytest.LogCaptureFixture
 ) -> None:
-    await notify(FakeRunner(outcome))
+    await notify(FakeRunner(outcome), platform=platform)
 
     assert "notification could not be sent" in caplog.text

@@ -88,9 +88,9 @@ class Daemon:
                     return card
                 await asyncio.sleep(0.02)
 
-    async def quit(self) -> int:
+    async def quit(self, signal_number: signal.Signals = signal.SIGINT) -> int:
         assert self.serving is not None
-        os.kill(os.getpid(), signal.SIGINT)
+        os.kill(os.getpid(), signal_number)
         async with asyncio.timeout(10.0):
             return await self.serving
 
@@ -144,6 +144,21 @@ async def test_interrupt_ends_the_daemon_even_with_a_stream_open(asv: Daemon) ->
 
     assert code == 0
     assert lines[0] == ": connected"
+    conn = await db.connect(asv.config.db_path)
+    runs = await db.list_runs(conn, created["id"])
+    await conn.close()
+    assert [run.exit_status for run in runs] == [ExitStatus.INTERRUPTED]
+
+
+async def test_terminate_signal_ends_the_daemon_like_an_interrupt(asv: Daemon) -> None:
+    # 服務管理工具（例如 systemd）用 SIGTERM 要求結束，結果要和 Ctrl-C 一樣。
+    await asv.start()
+    created = await asv.task([session_started(), asyncio.Event(), result()])
+    await asv.until(created["id"], has_open_run=True)
+
+    code = await asv.quit(signal.SIGTERM)
+
+    assert code == 0
     conn = await db.connect(asv.config.db_path)
     runs = await db.list_runs(conn, created["id"])
     await conn.close()

@@ -17,8 +17,6 @@ jobs:
   backend:
     name: backend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # Linux 還沒支援，先允許失敗、只看結果；任務 12 修好後拿掉（決策第 151 筆）。
-    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -37,7 +35,6 @@ jobs:
   frontend:
     name: frontend (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
