@@ -21,7 +21,7 @@ export function TaskCard({ card }: { card: Card }) {
       {card.branch && <div className="branch">{card.branch}</div>}
       <div className="card-foot">
         <StatusLabel label={card.label} column={card.column} />
-        <span className="muted" title={card.cost_usd === null ? '這種 agent 不回報花費' : '估算值'}>
+        <span className="muted" title={card.cost_usd === null ? 'This agent does not report cost' : 'Estimated'}>
           {formatUsage(card)} · {timeAgo(card.updated_at)}
         </span>
       </div>

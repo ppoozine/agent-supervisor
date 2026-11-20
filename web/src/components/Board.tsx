@@ -27,7 +27,7 @@ export function Board({ cards, projects }: { cards: Card[]; projects: Project[] 
   const archived = inColumn(ARCHIVE)
 
   if (projects.length === 0) {
-    return <p className="empty">還沒有專案。先從左邊的「+ Add project」加入一個本機 repo。</p>
+    return <p className="empty">No projects yet. Use "+ Add project" on the left to add a local repo.</p>
   }
   return (
     <div className="board-area">

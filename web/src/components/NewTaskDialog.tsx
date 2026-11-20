@@ -64,7 +64,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
             {agents.map((agent) => (
               <option key={agent.agent_type} value={agent.agent_type}>
                 {agentName(agent.agent_type)}
-                {agent.reports_cost ? '' : '（只回報 token）'}
+                {agent.reports_cost ? '' : ' (reports tokens only)'}
               </option>
             ))}
           </select>
@@ -75,7 +75,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
         <input
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="留空就用描述的開頭"
+          placeholder="Leave empty to use the start of the description"
         />
       </label>
       <label>
@@ -84,7 +84,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           rows={7}
-          placeholder="要 agent 做什麼"
+          placeholder="What should the agent do?"
           required
           autoFocus
         />

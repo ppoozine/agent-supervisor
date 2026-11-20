@@ -343,13 +343,13 @@ test('a task without commits says there are no changes instead of failing', asyn
   vi.mocked(api.getDiff).mockResolvedValue(diffOf(''))
   render(<DiffTab taskId={7} headSha={null} connectionCount={1} />)
 
-  expect(await screen.findByText(/沒有變更/)).toBeTruthy()
+  expect(await screen.findByText(/No changes/)).toBeTruthy()
 })
 
 test('a truncated diff says so', async () => {
   vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE, true))
   render(<DiffTab taskId={7} headSha="sha-1" connectionCount={1} />)
 
-  expect(await screen.findByText(/後面的部分沒有顯示/)).toBeTruthy()
+  expect(await screen.findByText(/the rest is not shown/)).toBeTruthy()
 })
 

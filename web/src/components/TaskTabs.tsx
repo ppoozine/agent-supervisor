@@ -39,7 +39,7 @@ export function LogTab({ events, prompt }: { events: EventRow[]; prompt: string 
           <pre>{line.text}</pre>
         </div>
       ))}
-      {lines.length === 0 && <p className="empty">還沒有輸出。</p>}
+      {lines.length === 0 && <p className="empty">No output yet.</p>}
     </div>
   )
 }

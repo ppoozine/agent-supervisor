@@ -27,7 +27,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
-    throw new ApiError(0, 'unreachable', '連不上 daemon，請確認 asv serve 正在執行')
+    throw new ApiError(0, 'unreachable', 'Cannot reach the daemon. Make sure asv serve is running.')
   }
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {
@@ -35,7 +35,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new ApiError(
       response.status,
       problem?.code ?? 'http_error',
-      problem?.message ?? `請求失敗（HTTP ${response.status}）`,
+      problem?.message ?? `Request failed (HTTP ${response.status})`,
     )
   }
   return data as T

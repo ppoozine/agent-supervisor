@@ -41,13 +41,13 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
   }
   if (loaded === null) return <p className="empty">Loading…</p>
   if (files.length === 0) {
-    return <p className="empty">沒有變更：這個任務還沒有相對於 {loaded.base_branch} 的 commit。</p>
+    return <p className="empty">No changes: this task has no commits against {loaded.base_branch} yet.</p>
   }
   return (
     <div className="diff">
       <p className="diff-summary">
         {files.length} {files.length === 1 ? 'file' : 'files'} changed against {loaded.base_branch}
-        {loaded.is_truncated && ' · diff 太長，後面的部分沒有顯示'}
+        {loaded.is_truncated && ' · diff too long, the rest is not shown'}
       </p>
       {files.map((file) => (
         <section className="diff-file" key={file.path} aria-label={file.path}>

@@ -137,7 +137,7 @@ export function TaskPage(props: TaskPageProps) {
                   PR #{current.pr_number} {current.pr_state}
                 </span>
               ))}
-            <span className="muted" title="花費是估算值；這種 agent 不回報花費時只有 token 數">
+            <span className="muted" title="Cost is an estimate; agents that do not report cost show tokens only">
               {formatUsage(current)}
               {current.cost_usd !== null && ` · ${formatCount(current.tokens)} tok`}
               {` (in ${formatCount(detail.tokens_in)} / out ${formatCount(detail.tokens_out)})`}
@@ -148,7 +148,7 @@ export function TaskPage(props: TaskPageProps) {
           <button
             onClick={() => void perform('stop', () => stopTask(taskId))}
             disabled={!current.has_open_run || busyAction !== null}
-            title={current.has_open_run ? undefined : '沒有 run 在執行'}
+            title={current.has_open_run ? undefined : 'No run is active'}
           >
             {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
           </button>
@@ -213,7 +213,7 @@ export function TaskPage(props: TaskPageProps) {
         <textarea
           value={messageText}
           onChange={(event) => setMessageText(event.target.value)}
-          placeholder="對同一個 session 追加指令…"
+          placeholder="Send a follow-up to the same session…"
           rows={2}
           aria-label="Message"
         />

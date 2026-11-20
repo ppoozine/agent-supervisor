@@ -129,7 +129,7 @@ export function App() {
             className="primary"
             onClick={() => setIsCreatingTask(true)}
             disabled={projects.length === 0}
-            title={projects.length === 0 ? '先加入一個專案' : undefined}
+            title={projects.length === 0 ? 'Add a project first' : undefined}
           >
             + New task
           </button>
