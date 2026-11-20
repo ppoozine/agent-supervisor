@@ -1,4 +1,4 @@
-"""github.py 的測試。`gh` 的呼叫用替身，不打 GitHub。"""
+"""Tests for github.py. `gh` calls go to a fake; GitHub is never contacted."""
 
 import json
 from collections.abc import Sequence
@@ -18,7 +18,7 @@ from agent_supervisor.process import CommandResult
 
 
 class FakeGh:
-    """記錄收到的參數，依序回傳預先準備的結果。"""
+    """Record the received arguments and return the prepared results in order."""
 
     def __init__(self, results: list[CommandResult]) -> None:
         self.results = results
@@ -375,7 +375,7 @@ async def test_feedback_lists_comments_reviews_and_inline_comments_in_time_order
             "created_at": "2026-11-19T10:00:05Z",
         },
     ]
-    # `--slurp` 把每一頁包成外層陣列的一個元素。
+    # `--slurp` wraps each page as one element of an outer array.
     gh = FakeGh([ok(json.dumps([comments])), ok(json.dumps([reviews])), ok(json.dumps([inline]))])
 
     items = await GitHub(gh).list_feedback("owner/repo", 7)

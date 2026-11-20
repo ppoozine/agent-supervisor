@@ -1,7 +1,8 @@
-"""由任務的狀態推導看板欄位、狀態標籤與自動修復條件。全部是純函式。
+"""Derive board columns, status labels, and auto-fix conditions from task state. All pure.
 
-看板欄位不存資料庫：每次都從 run、PR、CI、review 的狀態算出來。
-「自動修復條件」由這裡與 Dispatcher 共用同一份，避免兩邊判斷不一致。
+Board columns are not stored in the database: they are computed each time from the run, PR, CI, and
+review state.
+The "auto-fix conditions" live here and are shared with the Dispatcher, so the two never disagree.
 """
 
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ MAX_FEEDBACK_ATTEMPTS = 5
 
 
 class Column(StrEnum):
-    """看板的四個欄位，加上離開看板後的 Archive 區。"""
+    """The four board columns, plus the Archive area for tasks that have left the board."""
 
     WORKING = "Working"
     NEEDS_YOU = "Needs you"
@@ -33,7 +34,7 @@ class Column(StrEnum):
 
 @dataclass(frozen=True)
 class Limits:
-    """單一任務的累計上限。"""
+    """Per-task cumulative limits."""
 
     cost_usd: float
     tokens: int
@@ -41,7 +42,7 @@ class Limits:
 
 @dataclass(frozen=True)
 class BoardStatus:
-    """一張卡片所在的欄位，以及說明原因的狀態標籤。"""
+    """The column a card is in, and the status label explaining why."""
 
     column: Column
     label: str
@@ -62,12 +63,12 @@ _WORKING_LABELS = {
 
 
 def has_remaining_budget(snapshot: TaskSnapshot, limits: Limits) -> bool:
-    """任務的累計花費與累計 token 數是否都還沒到上限。"""
+    """Whether the task's cumulative cost and token count are both still below the limits."""
     return snapshot.usage.cost_usd < limits.cost_usd and snapshot.usage.tokens < limits.tokens
 
 
 def can_auto_fix(snapshot: TaskSnapshot, limits: Limits) -> bool:
-    """任務是否符合自動修復條件；九條全部成立才算。"""
+    """Whether the task meets the auto-fix conditions; all nine must hold."""
     task = snapshot.task
     last_run = snapshot.last_run
     if task.ci_state != CiState.FAILED:
@@ -90,7 +91,7 @@ def can_auto_fix(snapshot: TaskSnapshot, limits: Limits) -> bool:
 
 
 def can_resolve_conflict(snapshot: TaskSnapshot, limits: Limits) -> bool:
-    """任務是否符合「請 agent 解衝突」的條件；全部成立才算。"""
+    """Whether the task meets the "ask the agent to resolve conflicts" conditions; all must hold."""
     task = snapshot.task
     last_run = snapshot.last_run
     if task.merge_state != MergeState.CONFLICTING:
@@ -111,11 +112,13 @@ def can_resolve_conflict(snapshot: TaskSnapshot, limits: Limits) -> bool:
 
 
 def has_unaddressed_review(snapshot: TaskSnapshot) -> bool:
-    """PR 上是否還有沒處理的 review 意見。
+    """Whether the PR still has unhandled review feedback.
 
-    有還沒餵回 agent 的留言就算。reviewer 要求修改但沒有留下任何可以餵回的留言時也算：
-    GitHub 在 reviewer 重新審查之前會一直回報「要求修改」，所以留言處理過之後不再算，
-    否則卡片會卡在 Needs you，CI 也不會再自動修復。
+    It does if there are PR comments not yet fed back to the agent. It also does when a reviewer
+    requested changes without leaving any PR comment that can be fed back:
+    GitHub keeps reporting "changes requested" until the reviewer reviews again, so once the PR
+    comments have been handled it no longer counts;
+    otherwise the card would get stuck in Needs you and CI would no longer be auto-fixed.
     """
     task = snapshot.task
     if snapshot.pending_feedback > 0:
@@ -125,7 +128,7 @@ def has_unaddressed_review(snapshot: TaskSnapshot) -> bool:
 
 
 def can_address_feedback(snapshot: TaskSnapshot, limits: Limits) -> bool:
-    """任務是否符合「把留言餵回 agent」的條件；全部成立才算。"""
+    """Whether the task meets the "feed PR comments back to the agent" conditions; all must hold."""
     task = snapshot.task
     last_run = snapshot.last_run
     if snapshot.pending_feedback == 0:
@@ -142,10 +145,11 @@ def can_address_feedback(snapshot: TaskSnapshot, limits: Limits) -> bool:
 
 
 def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
-    """推導卡片所在的欄位與狀態標籤。由上往下判斷，先符合者優先。"""
+    """Derive the card's column and status label. Checked top to bottom; the first match wins."""
     task = snapshot.task
     last_run = snapshot.last_run
-    # PR 的結果比「封存過」有用，所以已封存的任務也優先顯示它。
+    # The PR outcome is more useful than "was archived", so it is shown first even for archived
+    # tasks.
     if task.pr_state in _FINISHED_PR_LABELS and not snapshot.has_open_run:
         return BoardStatus(Column.ARCHIVE, _FINISHED_PR_LABELS[PrState(task.pr_state)])
     if task.archived_at is not None:
@@ -174,7 +178,8 @@ def board_status(snapshot: TaskSnapshot, limits: Limits) -> BoardStatus:
 
     if task.ci_state == CiState.PASSED:
         if task.merge_state != MergeState.CLEAN:
-            # GitHub 還沒算出能不能合併：不知道就不能說可以合併。
+            # GitHub hasn't computed mergeability yet: if we don't know, we can't say it's
+            # mergeable.
             return BoardStatus(Column.IN_REVIEW, "Checking mergeability")
         if not snapshot.require_review or task.review_state == ReviewState.APPROVED:
             return BoardStatus(Column.READY_TO_MERGE, "Ready")

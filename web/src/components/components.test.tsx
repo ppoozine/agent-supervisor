@@ -242,7 +242,7 @@ test('events pushed while a catch-up fails do not hide the gap from the next cat
   const view = render(page(1))
   await waitFor(() => expect(api.listEventsAfter).toHaveBeenCalledTimes(1))
 
-  // 重連後的補抓失敗，同時推送來了第 121 筆。
+  // The catch-up after reconnecting fails, while event 121 arrives by push.
   vi.mocked(api.listEventsAfter).mockRejectedValueOnce(new Error('offline'))
   view.rerender(page(2))
   await waitFor(() => expect(api.listEventsAfter).toHaveBeenCalledTimes(2))
@@ -343,13 +343,13 @@ test('a task without commits says there are no changes instead of failing', asyn
   vi.mocked(api.getDiff).mockResolvedValue(diffOf(''))
   render(<DiffTab taskId={7} headSha={null} connectionCount={1} />)
 
-  expect(await screen.findByText(/沒有變更/)).toBeTruthy()
+  expect(await screen.findByText(/No changes/)).toBeTruthy()
 })
 
 test('a truncated diff says so', async () => {
   vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE, true))
   render(<DiffTab taskId={7} headSha="sha-1" connectionCount={1} />)
 
-  expect(await screen.findByText(/後面的部分沒有顯示/)).toBeTruthy()
+  expect(await screen.findByText(/the rest is not shown/)).toBeTruthy()
 })
 

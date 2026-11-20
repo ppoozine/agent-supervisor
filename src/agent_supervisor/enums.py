@@ -1,10 +1,10 @@
-"""跨模組共用的列舉值，對應資料表中的字串欄位。"""
+"""Enum values shared across modules, matching string columns in the database."""
 
 from enum import StrEnum
 
 
 class RunTrigger(StrEnum):
-    """一次 run 的觸發原因。"""
+    """Why a run was triggered."""
 
     INITIAL = "initial"
     CI_FAILURE = "ci_failure"
@@ -14,7 +14,7 @@ class RunTrigger(StrEnum):
 
 
 class ExitStatus(StrEnum):
-    """一次 run 的結案結果。"""
+    """How a run finished."""
 
     SUCCESS = "success"
     ERROR = "error"
@@ -24,7 +24,7 @@ class ExitStatus(StrEnum):
 
 
 class EventType(StrEnum):
-    """`events.type` 的合法值。"""
+    """Valid values of `events.type`."""
 
     SESSION_STARTED = "session_started"
     AGENT_MESSAGE = "agent_message"
@@ -39,7 +39,7 @@ class EventType(StrEnum):
 
 
 class PrState(StrEnum):
-    """`tasks.pr_state` 的合法值。"""
+    """Valid values of `tasks.pr_state`."""
 
     OPEN = "open"
     MERGED = "merged"
@@ -47,7 +47,7 @@ class PrState(StrEnum):
 
 
 class CiState(StrEnum):
-    """`tasks.ci_state` 的合法值：`head_sha` 上所有 CI 檢查合起來的結果。"""
+    """Valid values of `tasks.ci_state`: the combined result of all CI checks on `head_sha`."""
 
     NONE = "none"
     PENDING = "pending"
@@ -56,7 +56,7 @@ class CiState(StrEnum):
 
 
 class ReviewState(StrEnum):
-    """`tasks.review_state` 的合法值。"""
+    """Valid values of `tasks.review_state`."""
 
     NONE = "none"
     APPROVED = "approved"
@@ -64,7 +64,7 @@ class ReviewState(StrEnum):
 
 
 class MergeState(StrEnum):
-    """`tasks.merge_state` 的合法值：PR 能不能合併進基底分支。"""
+    """Valid values of `tasks.merge_state`: whether the PR can merge into the base branch."""
 
     UNKNOWN = "unknown"
     CLEAN = "clean"

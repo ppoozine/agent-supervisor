@@ -1,11 +1,11 @@
-"""SQLite schema 與查詢。不使用 ORM。
+"""SQLite schema and queries. No ORM.
 
-不變量由資料庫本身保證：
-- 每個任務同時最多一個未結束的 run（部分唯一索引）
-- `events` 只能新增，不能修改或刪除（trigger）
+Invariants are enforced by the database itself:
+- At most one unfinished run per task at a time (partial unique index)
+- `events` can only be inserted, never updated or deleted (triggers)
 
-所有模組共用一條連線，所以每一筆寫入都要先拿到該連線的寫入鎖：
-否則一方的 commit 會把另一方做到一半的交易切開。
+All modules share one connection, so every write must first take that connection's write lock:
+otherwise one side's commit would cut through another side's half-done transaction.
 """
 
 import asyncio
@@ -95,8 +95,8 @@ BEGIN SELECT RAISE(ABORT, 'events is append-only'); END;
 
 FINISHED_PR_STATES = (PrState.MERGED, PrState.CLOSED)
 
-# 後來才加的欄位：（資料表, 欄位, 定義）。舊的資料庫在啟動時補上。
-# 新增欄位時這裡與上面的 SCHEMA 都要寫。
+# Columns added later: (table, column, definition). Added to older databases at startup.
+# When adding a column, write it both here and in SCHEMA above.
 ADDED_COLUMNS = (
     ("tasks", "last_handled_feedback_event_id", "INTEGER"),
     ("tasks", "feedback_attempts", "INTEGER NOT NULL DEFAULT 0"),
@@ -114,20 +114,20 @@ _commit_listeners: weakref.WeakKeyDictionary[aiosqlite.Connection, list[CommitLi
 
 
 class NotFoundError(LookupError):
-    """查詢的資料列不存在。"""
+    """The queried row does not exist."""
 
 
 class RunAlreadyActiveError(RuntimeError):
-    """任務已經有一個未結束的 run。"""
+    """The task already has an unfinished run."""
 
 
 class TaskNotRunnableError(RuntimeError):
-    """任務已封存，或 PR 已合併或關閉，不能再建立 run。"""
+    """The task is archived, or its PR is merged or closed, so no run can be created."""
 
 
 @dataclass(frozen=True)
 class Project:
-    """一個已登記的本機 repo。"""
+    """A registered local repo."""
 
     id: int
     name: str
@@ -139,7 +139,7 @@ class Project:
 
 @dataclass(frozen=True)
 class Task:
-    """一個任務，以及 Poller 對 GitHub 狀態的快取。"""
+    """A task, plus the Poller's cache of its GitHub state."""
 
     id: int
     project_id: int
@@ -168,7 +168,7 @@ class Task:
 
 @dataclass(frozen=True)
 class Run:
-    """任務的一次執行。"""
+    """One execution of a task."""
 
     id: int
     task_id: int
@@ -185,7 +185,7 @@ class Run:
 
 @dataclass(frozen=True)
 class Event:
-    """一筆稽核紀錄。"""
+    """An audit record."""
 
     id: int
     task_id: int
@@ -197,7 +197,7 @@ class Event:
 
 @dataclass(frozen=True)
 class TaskUsage:
-    """任務累計的花費與 token 數。`is_complete` 為否表示有 run 的用量未知。"""
+    """A task's total cost and tokens. `is_complete` false means some run's usage is unknown."""
 
     cost_usd: float
     tokens: int
@@ -206,24 +206,24 @@ class TaskUsage:
 
 @dataclass(frozen=True)
 class TaskSnapshot:
-    """推導看板欄位與自動修復條件所需的全部資料。"""
+    """All the data needed to derive the board column and auto-fix conditions."""
 
     task: Task
     require_review: bool
     last_run: Run | None
     usage: TaskUsage
     pending_feedback: int = 0
-    """PR 上還沒餵回 agent 的留言數。"""
+    """Number of PR comments not yet fed back to the agent."""
 
     @property
     def has_open_run(self) -> bool:
-        """任務是否有 run 正在執行。未結束的 run 一定是最後一個。"""
+        """Whether the task has a running run. An unfinished run is always the last one."""
         return self.last_run is not None and self.last_run.ended_at is None
 
 
 @asynccontextmanager
 async def _transaction(conn: aiosqlite.Connection) -> AsyncIterator[None]:
-    """拿到連線的寫入鎖後執行一個交易：正常離開就 commit，否則 rollback。"""
+    """Run a transaction under the write lock: commit on normal exit, otherwise roll back."""
     async with _write_locks.setdefault(conn, asyncio.Lock()):
         try:
             yield
@@ -236,31 +236,33 @@ async def _transaction(conn: aiosqlite.Connection) -> AsyncIterator[None]:
 
 
 def on_commit(conn: aiosqlite.Connection, listener: CommitListener) -> None:
-    """登記一個函式，這條連線每次有交易 commit 之後都會呼叫它。
+    """Register a function this connection calls after every transaction it commits.
 
-    所有寫入都經過同一種交易，所以這是「資料有變」唯一的通知點。
+    All writes go through the same kind of transaction, so this is the single notification point for
+    "data changed".
     """
     _commit_listeners.setdefault(conn, []).append(listener)
 
 
 @asynccontextmanager
 async def consistent_read(conn: aiosqlite.Connection) -> AsyncIterator[None]:
-    """區塊內的讀取不會看到別人做到一半的交易。
+    """Reads inside the block do not see other half-done transactions.
 
-    所有模組共用一條連線，同一條連線讀得到還沒 commit 的寫入。要把結果交給外部
-    （API 的回應、推送給瀏覽器的事件）的讀取都要包在這裡面。不能在交易內使用。
+    All modules share one connection, and a connection can read its own uncommitted writes. Reads
+    whose results go outside (API responses, events pushed to the browser) must all be wrapped in
+    this. Not usable inside a transaction.
     """
     async with _write_locks.setdefault(conn, asyncio.Lock()):
         yield
 
 
 def utc_now() -> str:
-    """目前的 UTC 時間，ISO 8601 字串。"""
+    """The current UTC time as an ISO 8601 string."""
     return datetime.now(UTC).isoformat(timespec="milliseconds")
 
 
 async def connect(db_path: str | Path) -> aiosqlite.Connection:
-    """開啟資料庫連線並套用必要的 pragma；資料庫所在的目錄不存在時會建立。"""
+    """Open a DB connection and apply the required pragmas; create the DB directory if missing."""
     await asyncio.to_thread(Path(db_path).parent.mkdir, parents=True, exist_ok=True)
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
@@ -270,10 +272,10 @@ async def connect(db_path: str | Path) -> aiosqlite.Connection:
 
 
 async def init_schema(conn: aiosqlite.Connection) -> None:
-    """建立資料表、索引與 trigger（已存在則略過），並替舊的資料庫補上後來才加的欄位。"""
+    """Create tables, indexes, and triggers if missing, and add later columns to older databases."""
     await conn.executescript(SCHEMA)
     for table, column, definition in ADDED_COLUMNS:
-        # 資料表與欄位名稱只會來自上面的常數，不是外部輸入。
+        # Table and column names only come from the constants above, never from external input.
         cursor = await conn.execute(f"PRAGMA table_info({table})")
         if column not in {row["name"] for row in await cursor.fetchall()}:
             await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
@@ -288,7 +290,7 @@ async def upsert_project(
     default_branch: str = "main",
     require_review: bool = False,
 ) -> Project:
-    """登記一個本機 repo；已登記過就更新它的設定。"""
+    """Register a local repo; if already registered, update its settings."""
     async with _transaction(conn):
         await conn.execute(
             "INSERT INTO projects (name, repo_path, github_repo, default_branch, require_review)"
@@ -303,19 +305,19 @@ async def upsert_project(
 
 
 async def list_projects(conn: aiosqlite.Connection) -> list[Project]:
-    """列出所有已登記的專案，依編號。"""
+    """List all registered projects by ID."""
     cursor = await conn.execute("SELECT * FROM projects ORDER BY id")
     return [_to_project(row) for row in await cursor.fetchall()]
 
 
 async def get_project_by_path(conn: aiosqlite.Connection, repo_path: str) -> Project | None:
-    """依 repo 路徑取得專案，沒有登記過則回傳 None。"""
+    """Get a project by repo path; None if it is not registered."""
     row = await _fetch_one(conn, "SELECT * FROM projects WHERE repo_path = ?", (repo_path,))
     return None if row is None else _to_project(row)
 
 
 async def get_project(conn: aiosqlite.Connection, project_id: int) -> Project:
-    """依主鍵取得專案。"""
+    """Get a project by primary key."""
     row = await _fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
     if row is None:
         raise NotFoundError(f"project {project_id} not found")
@@ -332,7 +334,7 @@ async def create_task_with_initial_run(
     model: str | None,
     worktree_path: str | None = None,
 ) -> tuple[Task, Run]:
-    """在同一個交易內建立任務與它的 initial run。"""
+    """Create a task and its initial run in one transaction."""
     now = utc_now()
     async with _transaction(conn):
         task_cursor = await conn.execute(
@@ -356,9 +358,10 @@ async def create_run(
     input_text: str,
     source_head_sha: str | None = None,
 ) -> Run:
-    """為既有任務建立一個 run；任務不可執行或已有未結束的 run 時拒絕。
+    """Create a run for an existing task; refuse if it cannot run or already has an unfinished run.
 
-    使用者送訊息代表人已經介入，所以同一個交易內把自動修復與留言處理的次數歸零。
+    A user message means a person has stepped in, so the same transaction resets the auto-fix and PR
+    comment attempt counts to zero.
     """
     try:
         async with _transaction(conn):
@@ -384,10 +387,11 @@ async def create_ci_failure_run(
     *,
     condition: Callable[[TaskSnapshot], bool],
 ) -> Run | None:
-    """條件成立時建立一個 ci_failure run，並記下已處理的 commit、把修復次數加一。
+    """If the conditions hold, create a ci_failure run, record the handled commit, add a fix.
 
-    重新檢查條件、建立 run、更新兩個防迴圈欄位都在同一個交易內；
-    條件不成立時什麼都不寫，回傳 None。
+    Rechecking the conditions, creating the run, and updating both loop guard columns all happen in
+    one transaction;
+    if the conditions don't hold, nothing is written and None is returned.
     """
     async with _transaction(conn):
         snapshot = await get_snapshot(conn, task_id)
@@ -410,10 +414,11 @@ async def create_conflict_run(
     *,
     condition: Callable[[TaskSnapshot], bool],
 ) -> Run | None:
-    """條件成立時建立一個 merge_conflict run，並記下已處理的 commit、把修復次數加一。
+    """If the conditions hold, create a merge_conflict run, record the handled commit, add a fix.
 
-    做法和 `create_ci_failure_run` 相同，但用自己的「已處理」欄位：
-    同一個 commit 可能既有衝突又有 CI 失敗，兩者不能互相蓋掉。修復次數則是共用的。
+    Same approach as `create_ci_failure_run`, but with its own "handled" column:
+    one commit may have both a conflict and a CI failure, and neither may overwrite the other. The
+    fix count is shared.
     """
     async with _transaction(conn):
         snapshot = await get_snapshot(conn, task_id)
@@ -436,11 +441,12 @@ async def create_feedback_run(
     build_prompt: Callable[[list[Event]], str],
     condition: Callable[[TaskSnapshot], bool],
 ) -> Run | None:
-    """條件成立時建立一個 review_feedback run，內容是所有還沒處理的留言。
+    """If the conditions hold, create a review_feedback run with all unhandled PR comments.
 
-    讀出留言、建立 run、把「處理到哪一則」往前推、次數加一都在同一個交易內，
-    所以同一則留言不會被餵回兩次，也不會有留言在中間被跳過。
-    條件不成立時什麼都不寫，回傳 None。
+    Reading the comments, creating the run, advancing "handled up to which comment", and
+    incrementing the count all happen in one transaction, so no comment is fed back twice and none
+    is skipped in between.
+    If the conditions don't hold, nothing is written and None is returned.
     """
     async with _transaction(conn):
         snapshot = await get_snapshot(conn, task_id)
@@ -467,7 +473,7 @@ _PENDING_FEEDBACK = (
 
 
 async def list_pending_feedback(conn: aiosqlite.Connection, task_id: int) -> list[Event]:
-    """任務還沒餵回 agent 的留言，依記錄的順序。被略過的留言（例如機器人的）不算。"""
+    """PR comments not yet fed back, in recorded order; skipped ones (e.g. from bots) excluded."""
     cursor = await conn.execute(
         "SELECT e.*" + _PENDING_FEEDBACK + " ORDER BY e.id", (task_id, EventType.REVIEW_COMMENT)
     )
@@ -475,7 +481,7 @@ async def list_pending_feedback(conn: aiosqlite.Connection, task_id: int) -> lis
 
 
 async def list_feedback_ids(conn: aiosqlite.Connection, task_id: int) -> set[str]:
-    """任務已經記錄過的留言在 GitHub 上的編號，包含被略過的。"""
+    """GitHub IDs of the PR comments the task has already recorded, including skipped ones."""
     cursor = await conn.execute(
         "SELECT json_extract(payload, '$.github_id') AS github_id FROM events"
         " WHERE task_id = ? AND type = ?",
@@ -487,7 +493,7 @@ async def list_feedback_ids(conn: aiosqlite.Connection, task_id: int) -> set[str
 async def record_feedback(
     conn: aiosqlite.Connection, task_id: int, payloads: list[dict[str, Any]]
 ) -> int:
-    """把留言寫成 `review_comment` 事件，已經記過的略過；回傳新增了幾則要處理的留言。"""
+    """Write PR comments as `review_comment` events, skipping known ones; return the new count."""
     async with _transaction(conn):
         known = await list_feedback_ids(conn, task_id)
         added = 0
@@ -498,19 +504,19 @@ async def record_feedback(
             await _insert_event(conn, task_id, None, EventType.REVIEW_COMMENT, payload)
             added += payload.get("ignored") is None
         if added:
-            # 讓卡片的指紋跟著變，看板才會更新。
+            # So the card's fingerprint changes too and the board gets updated.
             await conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (utc_now(), task_id))
     return added
 
 
 async def set_run_input_text(conn: aiosqlite.Connection, run_id: int, input_text: str) -> None:
-    """在 agent 啟動前補上這次實際要送給它的內容（例如抓到的 CI log）。"""
+    """Before the agent starts, fill in what is actually sent to it (e.g. the fetched CI log)."""
     async with _transaction(conn):
         await conn.execute("UPDATE runs SET input_text = ? WHERE id = ?", (input_text, run_id))
 
 
 async def get_snapshot(conn: aiosqlite.Connection, task_id: int) -> TaskSnapshot:
-    """取得任務目前的快照：任務、專案是否要求 review、最後一個 run、累計用量。"""
+    """Get the task snapshot: task, whether the project requires review, last run, usage."""
     task = await get_task(conn, task_id)
     project = await get_project(conn, task.project_id)
     row = await _fetch_one(
@@ -532,7 +538,7 @@ async def get_snapshot(conn: aiosqlite.Connection, task_id: int) -> TaskSnapshot
 async def list_snapshots(
     conn: aiosqlite.Connection, project_id: int | None = None
 ) -> list[TaskSnapshot]:
-    """列出任務的快照，依任務編號；可限定某一個專案。"""
+    """List task snapshots by task ID; optionally limited to one project."""
     query, params = "SELECT id FROM tasks", ()
     if project_id is not None:
         query, params = query + " WHERE project_id = ?", (project_id,)
@@ -541,9 +547,9 @@ async def list_snapshots(
 
 
 async def list_task_fingerprints(conn: aiosqlite.Connection) -> dict[int, tuple[Any, ...]]:
-    """每個任務一組值，卡片上任何會顯示的東西有變，這組值就會不同。
+    """One set of values per task that changes whenever anything shown on the card changes.
 
-    一次查詢涵蓋所有任務，用來找出哪些卡片需要重新推導。
+    One query covers all tasks, and is used to find which cards need re-deriving.
     """
     cursor = await conn.execute(
         "SELECT t.*,"
@@ -557,9 +563,10 @@ async def list_task_fingerprints(conn: aiosqlite.Connection) -> dict[int, tuple[
 
 
 async def list_tasks_with_open_pr(conn: aiosqlite.Connection) -> list[Task]:
-    """列出 PR 開著的任務，也就是 Poller 要查詢的對象。
+    """List tasks with an open PR, i.e. what the Poller queries.
 
-    已封存的任務也算：封存不會關掉 PR，之後它被合併或關閉時仍然要知道。
+    Archived tasks count too: archiving does not close the PR, and we still need to know when it is
+    later merged or closed.
     """
     cursor = await conn.execute(
         "SELECT * FROM tasks WHERE pr_number IS NOT NULL AND pr_state = ? ORDER BY id",
@@ -579,15 +586,20 @@ async def apply_github_state(
     review_state: str,
     merge_state: str = MergeState.UNKNOWN,
 ) -> bool:
-    """把 Poller 查到的 GitHub 狀態當成一組寫入，回傳是否有變化。
+    """Write the GitHub state fetched by the Poller as one set; return whether anything changed.
 
-    「能不能合併」GitHub 要算一下才知道，剛 push 完或基底分支剛變動時會回報未知。
-    同一個 commit 上已經知道答案時，未知不會把它蓋掉，否則這個值會來回跳動。
+    GitHub needs time to compute mergeability and reports unknown right after a push or a base
+    branch change.
+    Once the answer is known for the same commit, unknown does not overwrite it; otherwise the value
+    would flip back and forth.
 
-    兩種情況會丟棄這次結果：查詢期間 `head_sha` 被別人改掉（例如剛 push）；
-    或 PR 還開著、GitHub 回報的卻是我們更早 push 過的 commit，表示它的資料還沒跟上最新的 push。
-    PR 已經合併或關閉時不做第二項檢查：它的最新 commit 不會再變，停在舊的 commit 是正常的。
-    有變化才寫一筆 `ci_status` 事件，沒變就什麼都不寫。
+    The result is discarded in two cases: `head_sha` was changed by someone else during the query
+    (e.g. a fresh push);
+    or the PR is still open but GitHub reports a commit we pushed earlier, meaning its data has not
+    caught up with the latest push.
+    The second check is skipped once the PR is merged or closed: its latest commit will not change
+    any more, so staying on an old commit is normal.
+    A `ci_status` event is written only when something changed; otherwise nothing is written.
     """
     new_state = {
         "pr_state": pr_state,
@@ -623,7 +635,7 @@ async def apply_github_state(
 
 
 async def get_task(conn: aiosqlite.Connection, task_id: int) -> Task:
-    """依主鍵取得任務。"""
+    """Get a task by primary key."""
     row = await _fetch_one(conn, "SELECT * FROM tasks WHERE id = ?", (task_id,))
     if row is None:
         raise NotFoundError(f"task {task_id} not found")
@@ -631,7 +643,7 @@ async def get_task(conn: aiosqlite.Connection, task_id: int) -> Task:
 
 
 async def get_run(conn: aiosqlite.Connection, run_id: int) -> Run:
-    """依主鍵取得 run。"""
+    """Get a run by primary key."""
     row = await _fetch_one(conn, "SELECT * FROM runs WHERE id = ?", (run_id,))
     if row is None:
         raise NotFoundError(f"run {run_id} not found")
@@ -639,7 +651,7 @@ async def get_run(conn: aiosqlite.Connection, run_id: int) -> Run:
 
 
 async def get_open_run(conn: aiosqlite.Connection, task_id: int) -> Run | None:
-    """取得任務目前未結束的 run，沒有則回傳 None。"""
+    """Get the task's current unfinished run; None if there is none."""
     row = await _fetch_one(
         conn, "SELECT * FROM runs WHERE task_id = ? AND ended_at IS NULL", (task_id,)
     )
@@ -647,19 +659,19 @@ async def get_open_run(conn: aiosqlite.Connection, task_id: int) -> Run | None:
 
 
 async def list_runs(conn: aiosqlite.Connection, task_id: int) -> list[Run]:
-    """列出任務的所有 run，依建立順序。"""
+    """List all of the task's runs in creation order."""
     cursor = await conn.execute("SELECT * FROM runs WHERE task_id = ? ORDER BY id", (task_id,))
     return [_to_run(row) for row in await cursor.fetchall()]
 
 
 async def list_open_runs(conn: aiosqlite.Connection) -> list[Run]:
-    """列出所有未結束的 run。"""
+    """List all unfinished runs."""
     cursor = await conn.execute("SELECT * FROM runs WHERE ended_at IS NULL ORDER BY id")
     return [_to_run(row) for row in await cursor.fetchall()]
 
 
 async def set_task_session_id(conn: aiosqlite.Connection, task_id: int, session_id: str) -> None:
-    """保存任務的 agent session id。"""
+    """Save the task's agent session id."""
     async with _transaction(conn):
         await conn.execute(
             "UPDATE tasks SET session_id = ?, updated_at = ? WHERE id = ?",
@@ -682,7 +694,7 @@ TASK_UPDATABLE_FIELDS = frozenset(
 
 
 async def update_task(conn: aiosqlite.Connection, task_id: int, **fields: Any) -> None:
-    """更新任務的 branch、worktree 或 GitHub 狀態快取欄位。"""
+    """Update the task's branch, worktree, or cached GitHub state columns."""
     unknown = set(fields) - TASK_UPDATABLE_FIELDS
     if unknown:
         raise ValueError(f"task fields cannot be updated: {', '.join(sorted(unknown))}")
@@ -691,14 +703,14 @@ async def update_task(conn: aiosqlite.Connection, task_id: int, **fields: Any) -
     assignments = ", ".join(f"{name} = ?" for name in fields)
     async with _transaction(conn):
         await conn.execute(
-            # 欄位名稱只會來自上面的白名單，不是外部輸入。
+            # Column names only come from the allowlist above, never from external input.
             f"UPDATE tasks SET {assignments}, updated_at = ? WHERE id = ?",
             (*fields.values(), utc_now(), task_id),
         )
 
 
 async def archive_task(conn: aiosqlite.Connection, task_id: int) -> None:
-    """把任務標成已封存。"""
+    """Mark the task archived."""
     now = utc_now()
     async with _transaction(conn):
         await conn.execute(
@@ -715,7 +727,7 @@ async def finish_run(
     tokens_out: int | None = None,
     cost_usd: float | None = None,
 ) -> bool:
-    """把 run 結案。已經結案的 run 不會被改寫，回傳是否真的寫入。"""
+    """Finish the run. A finished run is never rewritten; return whether a write happened."""
     async with _transaction(conn):
         cursor = await conn.execute(
             "UPDATE runs SET ended_at = ?, exit_status = ?, tokens_in = ?, tokens_out = ?,"
@@ -732,7 +744,7 @@ async def append_event(
     event_type: EventType | str,
     payload: dict[str, Any],
 ) -> int:
-    """新增一筆事件，回傳它的 id。"""
+    """Insert an event and return its id."""
     async with _transaction(conn):
         return await _insert_event(conn, task_id, run_id, event_type, payload)
 
@@ -740,7 +752,7 @@ async def append_event(
 async def list_events(
     conn: aiosqlite.Connection, task_id: int, run_id: int | None = None
 ) -> list[Event]:
-    """列出任務的事件，依寫入順序；可限定某一個 run。"""
+    """List the task's events in insertion order; optionally limited to one run."""
     query = "SELECT * FROM events WHERE task_id = ?"
     params: tuple[Any, ...] = (task_id,)
     if run_id is not None:
@@ -758,9 +770,9 @@ async def list_events_after(
     task_id: int | None = None,
     event_type: str | None = None,
 ) -> list[Event]:
-    """列出編號大於 `after_id` 的事件，最多 `limit` 筆；可限定任務與事件型別。
+    """List events with ID above `after_id`, at most `limit`; optionally by task and event type.
 
-    分頁與「斷線後補上漏掉的事件」共用這個查詢。
+    Pagination and "catch up on events missed while disconnected" share this query.
     """
     query, params = "SELECT * FROM events WHERE id > ?", [after_id]
     if task_id is not None:
@@ -772,14 +784,14 @@ async def list_events_after(
 
 
 async def get_last_event_id(conn: aiosqlite.Connection) -> int:
-    """目前最大的事件編號；還沒有任何事件時是 0。"""
+    """The largest event ID so far; 0 if there are no events yet."""
     row = await _fetch_one(conn, "SELECT COALESCE(MAX(id), 0) AS last_id FROM events", ())
     assert row is not None
     return int(row["last_id"])
 
 
 async def get_task_token_totals(conn: aiosqlite.Connection, task_id: int) -> tuple[int, int]:
-    """任務所有 run 的輸入與輸出 token 數各自的總和；未知的 run 不計。"""
+    """Total input and output tokens across the task's runs; runs with unknown usage are skipped."""
     row = await _fetch_one(
         conn,
         "SELECT COALESCE(SUM(tokens_in), 0) AS tokens_in,"
@@ -791,7 +803,7 @@ async def get_task_token_totals(conn: aiosqlite.Connection, task_id: int) -> tup
 
 
 async def get_task_usage(conn: aiosqlite.Connection, task_id: int) -> TaskUsage:
-    """加總任務所有 run 的花費與 token 數。"""
+    """Sum the cost and token counts of all the task's runs."""
     row = await _fetch_one(
         conn,
         "SELECT COALESCE(SUM(cost_usd), 0) AS cost,"
@@ -807,7 +819,7 @@ async def get_task_usage(conn: aiosqlite.Connection, task_id: int) -> TaskUsage:
 
 
 async def get_last_usage_raw(conn: aiosqlite.Connection, task_id: int) -> dict[str, Any] | None:
-    """取得任務最近一次有紀錄的原始用量，供 adapter 把累計值換算成單輪。"""
+    """Get the task's latest raw usage, so the adapter can turn cumulative values into per-turn."""
     row = await _fetch_one(
         conn,
         "SELECT json_extract(payload, '$.usage_raw') AS usage_raw FROM events"
@@ -861,7 +873,8 @@ _TASK_FIELDS = frozenset(field.name for field in fields(Task))
 
 
 def _to_task(row: aiosqlite.Row) -> Task:
-    # 資料庫被比較新的版本開過的話會多出不認得的欄位；略過它們，舊版才不會讀不了。
+    # A DB opened by a newer version has extra unknown columns; skip them so older versions can
+    # still read it.
     return Task(**{name: value for name, value in dict(row).items() if name in _TASK_FIELDS})
 
 

@@ -1,4 +1,4 @@
-"""worktree.py 的測試。使用真的 git，遠端是本機的 bare repo，不碰網路。"""
+"""Tests for worktree.py. Uses real git with a local bare repo as the remote; no network."""
 
 import asyncio
 from pathlib import Path
@@ -195,7 +195,7 @@ async def test_ensure_repository_accepts_a_repo_and_rejects_anything_else(
 
 
 async def conflicting_worktree(repo: GitRepo, tmp_path: Path) -> Path:
-    """一個 worktree，它和 origin 的 main 改了 README 的同一行。"""
+    """A worktree that changed the same README line as origin's main."""
     path = await make_worktree(repo, tmp_path)
     (path / "README.md").write_text("from the task\n")
     await worktree.commit_all(path, "task change")
@@ -275,7 +275,7 @@ async def test_aborting_a_merge_restores_the_branch(git_repo: GitRepo, tmp_path:
 async def test_tasks_started_at_the_same_time_do_not_fight_over_the_fetch(
     git_repo: GitRepo, tmp_path: Path
 ) -> None:
-    """同時 fetch 同一個遠端分支會互搶鎖；遠端有新的 commit 時才看得出來。"""
+    """Parallel fetches of a remote branch race for a lock; visible only with new remote commits."""
     other = tmp_path / "other-clone"
     git_repo.git("clone", "-q", str(git_repo.origin), str(other), cwd=tmp_path)
     git_repo.git("config", "user.email", "t@example.com", cwd=other)
@@ -296,7 +296,8 @@ async def test_diff_shows_only_what_the_branch_changed(git_repo: GitRepo, tmp_pa
     path = await make_worktree(git_repo, tmp_path)
     (path / "feature.txt").write_text("new\n")
     await worktree.commit_all(path, "task change")
-    # 基底分支後來的 commit 不是這個任務的變更，不該出現在 diff 裡。
+    # Later commits on the base branch are not this task's changes and must not appear in the
+    # diff.
     git_repo.push_to_main("README.md", "from main\n")
     await worktree.fetch(git_repo.path, "main")
 

@@ -70,7 +70,7 @@ code,
   padding: 24px;
 }
 
-/* ---- 按鈕與表單 ---- */
+/* ---- Buttons and form controls ---- */
 
 button {
   font: inherit;
@@ -171,7 +171,7 @@ label.checkbox input {
   margin: 0;
 }
 
-/* ---- 顏色 ---- */
+/* ---- Colors ---- */
 
 .tone-blue { --tone: var(--blue); }
 .tone-orange { --tone: var(--orange); }
@@ -208,7 +208,7 @@ label.checkbox input {
   font-weight: 600;
 }
 
-/* ---- 版面 ---- */
+/* ---- Layout ---- */
 
 .layout {
   display: grid;
@@ -329,7 +329,7 @@ label.checkbox input {
 .connection-offline { color: var(--orange); }
 .connection-offline::before { background: var(--orange); }
 
-/* ---- 看板 ---- */
+/* ---- Board ---- */
 
 .board-area {
   display: flex;
@@ -473,7 +473,7 @@ label.checkbox input {
   opacity: 0.8;
 }
 
-/* ---- 表單 ---- */
+/* ---- Forms ---- */
 
 .dialog {
   width: min(560px, calc(100vw - 32px));
@@ -513,7 +513,7 @@ label.checkbox input {
   gap: 8px;
 }
 
-/* ---- 任務詳情頁 ---- */
+/* ---- Task detail page ---- */
 
 .task-page {
   display: flex;
@@ -681,7 +681,7 @@ td pre {
   border-top: 1px solid var(--border);
 }
 
-/* Diff 分頁 */
+/* Diff tab */
 .diff {
   overflow: auto;
   height: 100%;

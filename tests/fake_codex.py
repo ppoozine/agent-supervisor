@@ -1,13 +1,13 @@
-"""假的 `codex` 執行檔：依劇本印出預錄的事件，不啟動任何 agent。
+"""Fake `codex` executable: prints prerecorded events from a script; never starts an agent.
 
-用法：`python fake_codex.py <劇本.json> <codex 的參數...>`。劇本的欄位：
+Usage: `python fake_codex.py <script.json> <codex arguments...>`. Script fields:
 
-- `record`：把收到的參數與 stdin 寫到這個檔案
-- `lines`：依序印到 stdout 的每一行
-- `stderr`、`exit_code`：結束前印到 stderr 的內容與結束代碼
-- `hang`：印完之後不結束，並啟動一個子程序（模擬 agent 正在執行指令）
-- `ignore_interrupt`：自己與子程序都不理會 SIGINT
-- `pids`：把自己與子程序的程序編號寫到這個檔案
+- `record`: write the received arguments and stdin to this file
+- `lines`: lines printed to stdout in order
+- `stderr`, `exit_code`: what to print to stderr before exiting, and the exit code
+- `hang`: do not exit after printing; start a child process (as if the agent ran a command)
+- `ignore_interrupt`: both this process and the child ignore SIGINT
+- `pids`: write the PIDs of this process and the child to this file
 """
 
 import json
@@ -41,7 +41,7 @@ def main() -> None:
 
 def hang(script: dict[str, object]) -> None:
     ignore = bool(script.get("ignore_interrupt"))
-    # 和真的 Codex 一樣，子程序在自己的程序群組裡。
+    # Like the real Codex, the child runs in its own process group.
     child = subprocess.Popen(
         [sys.executable, "-c", CHILD, "ignore" if ignore else "obey"], start_new_session=True
     )

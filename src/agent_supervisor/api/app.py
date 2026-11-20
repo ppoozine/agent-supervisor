@@ -1,7 +1,9 @@
-"""FastAPI 應用程式：`/api` 底下的 REST 端點與一條 SSE，以及前端的靜態檔案。
+"""FastAPI application: REST endpoints and one SSE stream under `/api`, plus the frontend's
+static files.
 
-看板欄位與狀態標籤一律由 `status.py` 推導。要交給外部的讀取都包在
-`db.consistent_read` 裡，才不會回應別人做到一半的交易。
+Board columns and status labels are always derived by `status.py`. Reads handed to the outside
+are all wrapped in `db.consistent_read`, so a response never reflects someone else's
+half-finished transaction.
 """
 
 import asyncio
@@ -32,7 +34,7 @@ MAX_PAGE_SIZE = 500
 
 
 class ProjectRequest(BaseModel):
-    """加入一個本機 repo。沒給的設定從 repo 偵測。"""
+    """Add a local repo. Settings not given are detected from the repo."""
 
     repo_path: str = Field(min_length=1)
     github_repo: str | None = None
@@ -41,7 +43,7 @@ class ProjectRequest(BaseModel):
 
 
 class TaskRequest(BaseModel):
-    """開一個任務。"""
+    """Open a task."""
 
     project_id: int
     prompt: str = Field(min_length=1)
@@ -51,7 +53,7 @@ class TaskRequest(BaseModel):
 
 
 class MessageRequest(BaseModel):
-    """對任務的同一個 session 追加指令。"""
+    """Send a follow-up instruction to the task's same session."""
 
     text: str = Field(min_length=1)
 
@@ -63,13 +65,14 @@ def create_app(
     is_closing: Callable[[], bool] = lambda: False,
     static_dir: Path | None = None,
 ) -> FastAPI:
-    """建立應用程式。
+    """Create the application.
 
-    `is_closing` 回答 daemon 是否正要關閉，SSE 連線靠它結束。`static_dir` 是前端
-    build 出來的檔案所在的目錄，有給就掛在 `/`；API 一律在 `/api` 底下。
+    `is_closing` tells whether the daemon is shutting down; SSE connections rely on it to end.
+    `static_dir` is the directory holding the built frontend files; if given it is mounted at
+    `/`. The API is always under `/api`.
     """
-    # API 是掛在 `/api` 的獨立應用程式：路徑存在但方法不對時由它自己回 405，
-    # 不會落到後面的靜態檔案變成 404。
+    # The API is a separate application mounted at `/api`: when the path exists but the method
+    # is wrong it answers 405 itself, instead of falling through to the static files as a 404.
     api = FastAPI(title="agent-supervisor")
     install_error_handlers(api)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -97,7 +100,7 @@ def create_app(
 
     @api.post("/projects", status_code=201)
     async def add_project(request: ProjectRequest) -> dict[str, Any]:
-        """加入本機 repo。已經加入過就拒絕，不動它原本的設定。"""
+        """Add a local repo. Reject it if already added, leaving its existing settings untouched."""
         repo_path = await asyncio.to_thread(absolute_path, request.repo_path)
         try:
             await worktree.ensure_repository(repo_path)
@@ -119,16 +122,21 @@ def create_app(
 
     @api.get("/projects")
     async def list_projects() -> list[dict[str, Any]]:
-        """專案列表。"""
+        """List projects."""
         async with db.consistent_read(conn):
             return [views.project_view(project) for project in await db.list_projects(conn)]
 
     @api.post("/tasks", status_code=201)
     async def create_task(request: TaskRequest) -> dict[str, Any]:
-        """開任務：建立任務與 initial run 後就回應，worktree 與 agent 在背景進行。"""
+        """Open a task.
+
+        Responds once the task and its initial run exist; the worktree and agent continue in
+        the background.
+        """
         await db.get_project(conn, request.project_id)
-        # 用 shield 包住：請求被取消時，「建立 run」與「開始執行」仍然會一起做完，
-        # 不會留下一個沒有人負責的 run。下面兩個建立 run 的端點也一樣。
+        # Wrapped in shield: if the request is cancelled, "create the run" and "start running"
+        # still complete together, so no run is left without an owner. The two run-creating
+        # endpoints below do the same.
         run = await asyncio.shield(
             runner.start_task(
                 project_id=request.project_id,
@@ -142,7 +150,7 @@ def create_app(
 
     @api.get("/tasks")
     async def list_tasks(project_id: int | None = None) -> list[dict[str, Any]]:
-        """看板資料：每個任務一張卡片，含推導出的欄位與狀態標籤。"""
+        """Board data: one card per task, with the derived column and status label."""
         async with db.consistent_read(conn):
             return [
                 views.card_view(
@@ -155,31 +163,31 @@ def create_app(
 
     @api.get("/tasks/{task_id}")
     async def get_task(task_id: int) -> dict[str, Any]:
-        """任務詳情，含這個任務所有的 run。"""
+        """Task detail, including all of the task's runs."""
         return await task_detail(task_id)
 
     @api.post("/tasks/{task_id}/messages", status_code=201)
     async def send_message(task_id: int, request: MessageRequest) -> dict[str, Any]:
-        """對同一個 session 追加指令，建立一個新的 run。"""
+        """Send a follow-up instruction to the same session, creating a new run."""
         await asyncio.shield(runner.send_message(task_id, request.text))
         return await task_detail(task_id)
 
     @api.post("/tasks/{task_id}/stop")
     async def stop_task(task_id: int) -> dict[str, Any]:
-        """中止這個任務正在跑的 run，等它完全停下才回應。"""
+        """Stop the task's active run, responding only once it has fully stopped."""
         await db.get_task(conn, task_id)
         await asyncio.shield(runner.stop(task_id))
         return await task_detail(task_id)
 
     @api.post("/tasks/{task_id}/archive")
     async def archive_task(task_id: int) -> dict[str, Any]:
-        """封存任務並清掉它的 worktree。"""
+        """Archive the task and remove its worktree."""
         await asyncio.shield(runner.archive(task_id))
         return await task_detail(task_id)
 
     @api.get("/tasks/{task_id}/diff")
     async def get_diff(task_id: int) -> dict[str, Any]:
-        """任務的 branch 相對於基底分支的 diff。還沒有 branch 時是空的。"""
+        """Diff of the task's branch against the base branch. Empty if there is no branch yet."""
         async with db.consistent_read(conn):
             task = await db.get_task(conn, task_id)
             project = await db.get_project(conn, task.project_id)
@@ -197,7 +205,7 @@ def create_app(
         limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 100,
         event_type: Annotated[str | None, Query(alias="type")] = None,
     ) -> dict[str, Any]:
-        """稽核紀錄，依寫入順序分頁。`next_after` 不是 null 時用它當下一頁的 `after`。"""
+        """Audit log, paged in write order. A non-null `next_after` is the next page's `after`."""
         async with db.consistent_read(conn):
             await db.get_task(conn, task_id)
             events = await db.list_events_after(
@@ -210,7 +218,7 @@ def create_app(
 
     @api.get("/agents")
     async def list_agents() -> list[dict[str, Any]]:
-        """這個 daemon 能用的 agent 種類，給開任務的表單選。"""
+        """Agent types this daemon can use, for the new-task form to choose from."""
         return [
             {"agent_type": agent_type, "reports_cost": supervisor.reports_cost(agent_type)}
             for agent_type in supervisor.adapters
@@ -218,7 +226,7 @@ def create_app(
 
     @api.get("/usage")
     async def get_usage(project_id: int | None = None) -> dict[str, Any]:
-        """token 與花費彙總。不回報花費的任務，花費是 null，也不計入總花費。"""
+        """Token and cost totals. Tasks not reporting cost get null and are left out of the sum."""
         rows = []
         async with db.consistent_read(conn):
             for snapshot in await db.list_snapshots(conn, project_id):
@@ -249,7 +257,7 @@ def create_app(
     async def stream(
         last_event_id: Annotated[int | None, Header(alias="Last-Event-ID")] = None,
     ) -> StreamingResponse:
-        """SSE：`event` 是新的稽核紀錄，`task` 是某張卡片的最新內容。"""
+        """SSE: `event` is a new audit log entry, `task` is the latest content of a card."""
         return StreamingResponse(
             stream_text(feed, last_event_id, is_closing),
             media_type="text/event-stream",
@@ -258,6 +266,6 @@ def create_app(
 
     app.mount("/api", api)
     if static_dir is not None:
-        # 放在最後：`/` 會接走所有其他路徑。
+        # Mount last: `/` catches every other path.
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="web")
     return app

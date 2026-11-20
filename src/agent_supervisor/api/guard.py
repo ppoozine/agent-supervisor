@@ -1,11 +1,13 @@
-"""只接受來自本機的請求。
+"""Accept only requests from the local machine.
 
-API 沒有登入。只綁 `127.0.0.1` 擋得住別台機器，擋不住使用者瀏覽器裡的其他網頁：
-沒有 body 的 POST（Stop、封存）不需要預檢就能跨來源送出，DNS rebinding 還能讓
-別的網域指到本機。所以每個請求都檢查兩個標頭：
+The API has no login. Binding only to `127.0.0.1` blocks other machines but not other web
+pages in the user's browser: a POST without a body (Stop, archive) can be sent cross-origin
+without a preflight, and DNS rebinding can point another domain at the local machine. So every
+request is checked on two headers:
 
-- `Host` 必須是本機的名稱，擋掉 DNS rebinding。
-- 有 `Origin` 的話必須是本機的網頁（連接埠不限，開發時前端在另一個連接埠）。
+- `Host` must be a local name, which blocks DNS rebinding.
+- If present, `Origin` must be a local web page (any port, since in development the frontend
+  runs on another port).
 """
 
 from urllib.parse import urlsplit
@@ -20,20 +22,20 @@ FORBIDDEN = 403
 
 
 def is_local_host(host: str | None) -> bool:
-    """`Host` 標頭（可能帶連接埠）是不是本機的名稱。"""
+    """Whether the `Host` header (possibly with a port) is a local name."""
     if not host:
         return False
     return urlsplit(f"//{host}").hostname in LOCAL_HOSTNAMES
 
 
 def is_local_origin(origin: str) -> bool:
-    """`Origin` 標頭是不是本機上的網頁。"""
+    """Whether the `Origin` header is a web page on the local machine."""
     parts = urlsplit(origin)
     return parts.scheme in {"http", "https"} and parts.hostname in LOCAL_HOSTNAMES
 
 
 class LocalRequestsOnly:
-    """ASGI middleware：拒絕不是對本機、或不是從本機網頁發出的請求。"""
+    """ASGI middleware: reject requests not addressed to, or not sent from a page on, localhost."""
 
     def __init__(self, app: ASGIApp) -> None:
         self._app = app

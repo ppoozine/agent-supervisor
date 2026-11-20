@@ -1,4 +1,4 @@
-"""cli.py 的測試。agent 與 GitHub 是替身，git 是真的。"""
+"""Tests for cli.py. The agent and GitHub are fakes; git is real."""
 
 import asyncio
 import os
@@ -25,7 +25,7 @@ def config(tmp_path: Path) -> Config:
 
 
 class Cli:
-    """包住 `cli.run`，固定使用同一組替身。"""
+    """Wrap `cli.run`, always using the same set of fakes."""
 
     def __init__(self, config: Config, repo: GitRepo) -> None:
         self.config = config
@@ -74,7 +74,7 @@ def asv(config: Config, git_repo: GitRepo) -> Cli:
 
 
 def write_file(name: str, content: str = "hello\n"):  # type: ignore[no-untyped-def]
-    """劇本步驟：模擬 agent 在工作目錄裡寫一個檔案。"""
+    """Script step: simulate the agent writing a file in the working directory."""
 
     def step(call: Call) -> None:
         (call.cwd / name).write_text(content)
@@ -317,12 +317,13 @@ async def test_config_file_given_on_the_command_line_is_used(
 
 
 async def _until_session(config: Config, session_id: str) -> None:
-    """等到某個 session id 被存進資料庫。
+    """Wait until a session id is stored in the database.
 
-    用唯讀的連線查詢，避免和正在初始化資料庫的 CLI 搶鎖。
+    Query with a read-only connection to avoid contending for the lock with the CLI while it
+    initializes the database.
     """
     async with asyncio.timeout(5.0):
-        # 被觀察的是資料庫裡的值，沒有事件可以等，只能輪詢。
+        # We are watching a value in the database; there is no event to await, so poll.
         while not await asyncio.to_thread(_has_session, config.db_path, session_id):  # noqa: ASYNC110
             await asyncio.sleep(0.01)
 
@@ -330,14 +331,14 @@ async def _until_session(config: Config, session_id: str) -> None:
 def _has_session(db_path: Path, session_id: str) -> bool:
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    except sqlite3.OperationalError:  # 資料庫檔案還不存在
+    except sqlite3.OperationalError:  # the database file does not exist yet
         return False
     try:
         return (
             conn.execute("SELECT 1 FROM tasks WHERE session_id = ?", (session_id,)).fetchone()
             is not None
         )
-    except sqlite3.OperationalError:  # 資料表還沒建立，或正在寫入
+    except sqlite3.OperationalError:  # the table is not created yet, or is being written
         return False
     finally:
         conn.close()
@@ -373,7 +374,7 @@ async def test_start_fills_in_a_missing_github_repo_for_an_already_registered_pr
 
 
 async def _until(config: Config, query: str, *params: object) -> tuple[object, ...]:
-    """等到查詢有結果並回傳第一列。用唯讀連線輪詢，避免和 CLI 搶鎖。"""
+    """Wait for the query's first row; poll read-only to avoid contending with the CLI's lock."""
     async with asyncio.timeout(10.0):
         while True:
             row = await asyncio.to_thread(_query_one, config.db_path, query, params)
@@ -385,11 +386,11 @@ async def _until(config: Config, query: str, *params: object) -> tuple[object, .
 def _query_one(db_path: Path, query: str, params: tuple[object, ...]) -> tuple[object, ...] | None:
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    except sqlite3.OperationalError:  # 資料庫檔案還不存在
+    except sqlite3.OperationalError:  # the database file does not exist yet
         return None
     try:
         return conn.execute(query, params).fetchone()  # type: ignore[no-any-return]
-    except sqlite3.OperationalError:  # 資料表還沒建立，或正在寫入
+    except sqlite3.OperationalError:  # the table is not created yet, or is being written
         return None
     finally:
         conn.close()
@@ -409,7 +410,7 @@ async def test_watch_feeds_a_ci_failure_back_and_ends_up_ready_to_merge(
         asv(adapter, "start", "--agent", "fake", "--watch", "--project", str(asv.repo.path), "go")
     )
 
-    # 第一個 commit 的 CI 失敗
+    # CI fails on the first commit
     (first_sha,) = await _until(
         asv.config, "SELECT head_sha FROM tasks WHERE pr_number IS NOT NULL"
     )
@@ -417,8 +418,8 @@ async def test_watch_feeds_a_ci_failure_back_and_ends_up_ready_to_merge(
     asv.github.statuses[41] = pr_status(
         str(first_sha), CiState.FAILED, failed_checks=(FailedCheck("pytest", 11),)
     )
-    # 自動修復 push 了第二個 commit，這次 CI 通過
-    # 這段期間替身的 GitHub 仍回報舊的 commit，Poller 不能把它寫回去。
+    # The auto-fix pushed a second commit, and this time CI passes
+    # Meanwhile the fake GitHub still reports the old commit; the Poller must not write it back.
     (second_sha,) = await _until(
         asv.config, "SELECT head_sha FROM tasks WHERE head_sha != ?", first_sha
     )
@@ -493,13 +494,13 @@ async def test_list_shows_the_derived_column_for_each_task(
 
 
 async def _deliver(signal_number: int) -> None:
-    """對自己送一個訊號，並等事件迴圈把它交給處理函式。"""
+    """Send a signal to ourselves and wait for the event loop to hand it to the handler."""
     os.kill(os.getpid(), signal_number)
     await asyncio.sleep(0.02)
 
 
 def _signal_during_recovery(monkeypatch: pytest.MonkeyPatch, signal_number: int) -> None:
-    """讓訊號在啟動時的復原階段送到，那時還沒有任何 run。"""
+    """Deliver the signal during startup recovery, when there are no runs yet."""
 
     async def recover(conn: object, processes: object) -> None:
         await _deliver(signal_number)

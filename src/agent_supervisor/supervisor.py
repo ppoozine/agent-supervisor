@@ -1,6 +1,7 @@
-"""把 Runner、Poller、Dispatcher 組裝在一起，以及「輪詢一輪再派工」這個共用的動作。
+"""Assemble the Runner, Poller, and Dispatcher, plus the shared "poll once, then dispatch".
 
-前景的 CLI 指令與常駐的 daemon 都用這裡的組裝，兩邊的行為才不會走樣。
+The foreground CLI commands and the long-running daemon both use this assembly, so their behavior
+doesn't drift apart.
 """
 
 import asyncio
@@ -21,7 +22,7 @@ from agent_supervisor.stages import RunStages
 
 @dataclass(frozen=True)
 class Supervisor:
-    """一個程序在執行期間用到的所有元件。"""
+    """All the components a process uses while it runs."""
 
     config: Config
     conn: aiosqlite.Connection
@@ -32,25 +33,29 @@ class Supervisor:
     limits: status.Limits
 
     def reports_cost(self, agent_type: str) -> bool:
-        """這種 agent 會不會回報花費；不會的話，花費是「未知」而不是零。"""
+        """Whether this kind of agent reports cost; if not, cost is "unknown" rather than zero."""
         adapter = self.adapters.get(agent_type)
         return adapter is not None and adapter.capabilities.reports_cost
 
     async def poll_and_dispatch(
         self, quit_requested: asyncio.Event
     ) -> tuple[PollReport | None, list[db.Run]]:
-        """查詢 GitHub 一輪，再把符合條件的任務派去修復。
+        """Query GitHub once, then dispatch eligible tasks for fixing.
 
-        途中收到結束的要求時：查詢直接放棄（回傳的報告是 None），派工則在任務之間停下。
-        只有查詢可以中途取消（`gh` 的子程序會被終止）。派工不行：
-        建立 run 與開始執行之間被取消的話，會留下一個沒有人負責的 run。
+        If a shutdown is requested midway: the query is abandoned outright (the returned report is
+        None), and dispatch stops between tasks.
+        Only the query can be cancelled midway (the `gh` child process is terminated). Dispatch
+        cannot:
+        being cancelled between creating a run and starting it would leave a run nobody owns.
         """
         report = await self._poll_or_quit(quit_requested)
         if report is None:
             return None, []
-        # 收到結束的要求之後不再派工，否則新的 run 馬上被中止、白扣一次修復。
-        # 這一輪才看到新留言的任務先不處理：連續留好幾則時等留完再一次處理。
-        # 查詢失敗的任務也先不處理，因為不知道有沒有新的留言。
+        # Once shutdown is requested, dispatch no more; otherwise the new run is stopped right away,
+        # wasting a fix attempt.
+        # Tasks whose new PR comments were first seen this round wait: when several comments arrive
+        # in a row, handle them all at once after they stop.
+        # Tasks whose query failed also wait, since we don't know whether they have new PR comments.
         hold_feedback = {*report.new_feedback, *(task_id for task_id, _ in report.errors)}
         runs = await self.dispatcher.dispatch_once(
             should_stop=quit_requested.is_set, hold_feedback=hold_feedback
@@ -80,7 +85,7 @@ def build_supervisor(
     *,
     on_event: EventCallback | None = None,
 ) -> Supervisor:
-    """用一條已經開好、做完重啟復原的資料庫連線組出所有元件。"""
+    """Build all components from a DB connection that is open and done with restart recovery."""
     stages = RunStages(conn, config, github)
     runner = Runner(
         conn,

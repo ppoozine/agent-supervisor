@@ -1,22 +1,22 @@
-// 把資料排成畫面上的文字。全部是純函式。
+// Format data as text for the screen. Pure functions only.
 import type { Card, EventRow, Project } from './types'
 
-/** 花費或 token 數。agent 不回報花費時顯示 token 數；花費是估算值，前面加 `~`。 */
+/** Cost or token count. Shows tokens when the agent does not report cost; cost is an estimate, prefixed with `~`. */
 export function formatUsage(card: Pick<Card, 'cost_usd' | 'tokens' | 'usage_is_complete'>): string {
   const amount =
     card.cost_usd === null ? `${formatCount(card.tokens)} tok` : `~$${card.cost_usd.toFixed(2)}`
-  // 有 run 的用量拿不到（例如被中止）時，實際的數字比這個高。
+  // When some run's usage is unavailable (e.g. it was stopped), the real number is higher.
   return card.usage_is_complete ? amount : `${amount}+`
 }
 
-/** 把大的數字縮短：1234 變成 1.2k，1234567 變成 1.2M。 */
+/** Shorten large numbers: 1234 becomes 1.2k, 1234567 becomes 1.2M. */
 export function formatCount(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`
   return String(value)
 }
 
-/** 多久以前，例如 `8m ago`。 */
+/** How long ago, e.g. `8m ago`. */
 export function timeAgo(timestamp: string, now: Date = new Date()): string {
   const seconds = Math.max(0, Math.floor((now.getTime() - new Date(timestamp).getTime()) / 1000))
   if (seconds < 60) return 'just now'
@@ -25,7 +25,7 @@ export function timeAgo(timestamp: string, now: Date = new Date()): string {
   return `${Math.floor(seconds / 86400)}d ago`
 }
 
-/** 當地時間的時分秒。 */
+/** Hours, minutes and seconds in local time. */
 export function clockTime(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString('en-GB')
 }
@@ -61,7 +61,7 @@ const COLUMN_TONES: Record<string, Tone> = {
   'Ready to merge': 'green',
 }
 
-/** 狀態標籤用什麼顏色；不認得的標籤跟著欄位的顏色。只決定顏色，標籤與欄位本身一律來自 API。 */
+/** The color of a status label; unknown labels use their column's color. Only the color is decided here: labels and columns always come from the API. */
 export function labelTone(label: string, column: string): Tone {
   return LABEL_TONES[label] ?? columnTone(column)
 }
@@ -70,13 +70,13 @@ export function columnTone(column: string): Tone {
   return COLUMN_TONES[column] ?? 'gray'
 }
 
-/** PR 在 GitHub 上的網址；不知道 repo 或還沒開 PR 時是 null。 */
+/** The PR's URL on GitHub; null when the repo is unknown or no PR is open yet. */
 export function pullRequestUrl(project: Project | undefined, card: Card): string | null {
   if (!project?.github_repo || card.pr_number === null) return null
   return `https://github.com/${project.github_repo}/pull/${card.pr_number}`
 }
 
-/** 把新收到的事件併進已有的清單：依編號排序，同一筆只留一份。 */
+/** Merge newly received events into the existing list: sorted by id, one copy per event. */
 export function mergeEvents(existing: EventRow[], incoming: EventRow[]): EventRow[] {
   if (incoming.length === 0) return existing
   const byId = new Map(existing.map((event) => [event.id, event]))
@@ -84,7 +84,7 @@ export function mergeEvents(existing: EventRow[], incoming: EventRow[]): EventRo
   return [...byId.values()].sort((first, second) => first.id - second.id)
 }
 
-/** Log 分頁的一行。 */
+/** One line of the Log tab. */
 export interface LogLine {
   id: number
   ts: string
@@ -103,7 +103,7 @@ function clip(value: string): string {
   return value.length <= MAX_OUTPUT_CHARS ? value : `${value.slice(0, MAX_OUTPUT_CHARS)}\n…`
 }
 
-/** 把一筆事件變成 Log 分頁的一行；沒有東西可顯示的回傳 null。 */
+/** Turn an event into a line of the Log tab; null when there is nothing to show. */
 export function toLogLine(event: EventRow): LogLine | null {
   const { payload } = event
   const line = (kind: LogLine['kind'], content: string): LogLine | null =>

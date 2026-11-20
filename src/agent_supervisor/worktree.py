@@ -1,7 +1,8 @@
-"""git worktree 與 branch 管理。所有 `git` 指令都集中在這個模組。
+"""git worktree and branch management. All `git` commands live in this module.
 
-每個任務一個獨立的 worktree 與 branch，從遠端的預設分支切出來，
-所以不受本機預設分支是否更新影響，也不會動到使用者自己的工作目錄。
+Each task gets its own worktree and branch, cut from the remote default branch, so it doesn't depend
+on whether the local default branch is up to date, and never touches the user's own working
+directory.
 """
 
 import asyncio
@@ -17,25 +18,25 @@ MAX_BRANCH_LENGTH = 60
 GITHUB_URL = re.compile(r"github\.com[:/](?P<owner>[^/]+)/(?P<name>[^/]+?)(?:\.git)?/?$")
 
 
-# 每個事件迴圈一把鎖。同一個 repo 的各個 worktree 共用同一份 git 資料，
-# 兩個 fetch 同時更新同一個遠端分支會互搶鎖，其中一個會失敗。
+# One lock per event loop. Worktrees of the same repo share the same git data, and two fetches
+# updating the same remote branch at once fight over its lock, so one of them fails.
 _fetch_locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
     weakref.WeakKeyDictionary()
 )
 
 
 class GitError(RuntimeError):
-    """git 指令失敗。"""
+    """A git command failed."""
 
 
 async def fetch(path: Path, branch: str) -> None:
-    """更新遠端的一個分支。同一時間只進行一個 fetch。"""
+    """Update one remote branch. Only one fetch runs at a time."""
     async with _fetch_locks.setdefault(asyncio.get_running_loop(), asyncio.Lock()):
         await _git(path, "fetch", REMOTE, branch)
 
 
 def branch_name(task_id: int, title: str) -> str:
-    """由任務編號與標題組出 branch 名稱；標題只取英數字，沒有就只用編號。"""
+    """Build a branch name from the task ID and title (alphanumerics only), or just the ID."""
     words = re.findall(r"[a-z0-9]+", title.lower())
     name = f"{BRANCH_PREFIX}{task_id}"
     for word in words:
@@ -46,7 +47,7 @@ def branch_name(task_id: int, title: str) -> str:
 
 
 async def create(repo_path: Path, worktree_path: Path, *, branch: str, base_branch: str) -> None:
-    """先更新遠端的基底分支，再從它建立新的 branch 與 worktree。"""
+    """Update the remote base branch first, then create a new branch and worktree from it."""
     await fetch(repo_path, base_branch)
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
     await _git(
@@ -55,29 +56,32 @@ async def create(repo_path: Path, worktree_path: Path, *, branch: str, base_bran
 
 
 async def remove(repo_path: Path, worktree_path: Path) -> None:
-    """移除 worktree 的目錄；branch 保留。"""
+    """Remove the worktree's directory; the branch is kept."""
     await _git(repo_path, "worktree", "remove", "--force", str(worktree_path))
 
 
 async def has_uncommitted_changes(worktree_path: Path) -> bool:
-    """工作目錄是否有還沒 commit 的變更（含未追蹤的檔案）。"""
+    """Whether the working directory has uncommitted changes (including untracked files)."""
     return bool(await _git(worktree_path, "status", "--porcelain"))
 
 
 async def commit_all(worktree_path: Path, message: str) -> str:
-    """把所有變更 commit 起來，回傳新的 commit。"""
+    """Commit all changes and return the new commit."""
     await _git(worktree_path, "add", "-A")
     await _git(worktree_path, "commit", "-m", message)
     return await head_sha(worktree_path)
 
 
 async def start_merge(worktree_path: Path, base_branch: str) -> list[str]:
-    """把遠端最新的基底分支合併進目前的 branch，不 commit；回傳有衝突的檔案。
+    """Merge the latest remote base branch into the current branch without committing.
 
-    有衝突時 git 會以非零結束，這是預期的結果：工作目錄停在合併到一半的狀態，
-    衝突的檔案裡留著標記，等人或 agent 解掉之後再 commit。
-    沒有衝突時回傳空清單（合併的結果已經放進暫存區，或本來就不需要合併）。
-    其他失敗（例如工作目錄有未 commit 的變更擋住）拋出 `GitError`，並還原到合併之前。
+    Return the conflicted files. With conflicts git exits non-zero, which is expected: the working
+    directory stays mid-merge, with markers left in the conflicted files, to be committed after a
+    person or the agent resolves them.
+    With no conflicts, return an empty list (the merge result is already staged, or no merge was
+    needed).
+    Other failures (e.g. uncommitted changes in the working directory get in the way) raise
+    `GitError` and roll back to before the merge.
     """
     await fetch(worktree_path, base_branch)
     arguments = ["git", "merge", "--no-commit", "--no-ff", f"{REMOTE}/{base_branch}"]
@@ -92,7 +96,7 @@ async def start_merge(worktree_path: Path, base_branch: str) -> list[str]:
 
 
 async def is_merge_in_progress(worktree_path: Path) -> bool:
-    """工作目錄是否停在合併到一半的狀態。"""
+    """Whether the working directory is in the middle of a merge."""
     result = await run_command(
         ["git", "rev-parse", "--verify", "--quiet", "MERGE_HEAD"], cwd=worktree_path
     )
@@ -100,15 +104,16 @@ async def is_merge_in_progress(worktree_path: Path) -> bool:
 
 
 async def unmerged_files(worktree_path: Path) -> list[str]:
-    """合併後還沒標成已解決的檔案。"""
+    """Files not yet marked resolved after the merge."""
     output = await _git(worktree_path, "diff", "--name-only", "--diff-filter=U")
     return [line for line in output.splitlines() if line]
 
 
 async def files_with_conflict_markers(worktree_path: Path) -> list[str]:
-    """還沒標成已解決、而且內容裡還留著衝突標記的檔案。
+    """Files not yet marked resolved whose content still contains conflict markers.
 
-    只看 git 認定有衝突的檔案，所以內容剛好長得像標記的其他檔案不會被誤判。
+    Only files git considers conflicted are checked, so other files whose content happens to look
+    like markers are not misjudged.
     """
     files = await unmerged_files(worktree_path)
     return [name for name in files if await asyncio.to_thread(_has_markers, worktree_path / name)]
@@ -118,21 +123,23 @@ def _has_markers(path: Path) -> bool:
     try:
         text = path.read_text(errors="replace")
     except OSError:
-        # 例如其中一邊把檔案刪掉了：沒有內容可以檢查。
+        # E.g. one side deleted the file: there is no content to check.
         return False
     return any(line.startswith(("<<<<<<< ", ">>>>>>> ")) for line in text.splitlines())
 
 
 async def abort_merge(worktree_path: Path) -> None:
-    """放棄合併到一半的狀態，回到合併之前。"""
+    """Abort the in-progress merge and return to the state before it."""
     await _git(worktree_path, "merge", "--abort")
 
 
 async def diff_against_base(repo_path: Path, base_branch: str, branch: str) -> str:
-    """branch 從基底分支分出來之後的所有變更，也就是 PR 的 Files changed 會顯示的內容。
+    """All changes on the branch since it left the base branch: what the PR's Files changed shows.
 
-    在專案的 repo 裡執行而不是在 worktree 裡：封存之後 worktree 不在了，但 branch 還在。
-    只看已經 commit 的內容。用三個點的寫法，所以基底分支後來的 commit 不會算進來。
+    Runs in the project's repo rather than the worktree: after archiving the worktree is gone, but
+    the branch remains.
+    Only committed content is included. The three-dot form is used, so later commits on the base
+    branch are not counted.
     """
     return await _git(
         repo_path, "diff", "--no-color", "--no-ext-diff", f"{REMOTE}/{base_branch}...{branch}", "--"
@@ -140,17 +147,17 @@ async def diff_against_base(repo_path: Path, base_branch: str, branch: str) -> s
 
 
 async def head_sha(worktree_path: Path) -> str:
-    """目前的 commit。"""
+    """The current commit."""
     return await _git(worktree_path, "rev-parse", "HEAD")
 
 
 async def count_commits_ahead(worktree_path: Path, base_branch: str) -> int:
-    """目前的 branch 比遠端基底分支多幾個 commit。"""
+    """How many commits the current branch is ahead of the remote base branch."""
     return int(await _git(worktree_path, "rev-list", "--count", f"{REMOTE}/{base_branch}..HEAD"))
 
 
 async def has_unpushed_commits(worktree_path: Path, branch: str) -> bool:
-    """是否有遠端還沒有的 commit。"""
+    """Whether there are commits the remote does not have yet."""
     remote_ref = f"refs/remotes/{REMOTE}/{branch}"
     known = await run_command(
         ["git", "rev-parse", "--verify", "--quiet", remote_ref], cwd=worktree_path
@@ -160,14 +167,15 @@ async def has_unpushed_commits(worktree_path: Path, branch: str) -> bool:
 
 
 async def push(worktree_path: Path, branch: str) -> None:
-    """把 branch 推到遠端。"""
+    """Push the branch to the remote."""
     await _git(worktree_path, "push", "-u", REMOTE, branch)
 
 
 async def ensure_repository(repo_path: Path) -> None:
-    """確認路徑是一個 git repo 工作目錄的最上層，不是的話拋出 `GitError`。
+    """Confirm the path is the top level of a git repo working tree; raise `GitError` if not.
 
-    子目錄、`.git` 裡面、bare repo 都不算：同一個 repo 只能用一個路徑登記。
+    Subdirectories, the inside of `.git`, and bare repos don't count: a repo can be registered under
+    only one path.
     """
     if not await asyncio.to_thread(repo_path.is_dir):
         raise GitError(f"{repo_path} is not a directory")
@@ -181,14 +189,14 @@ def _is_same_directory(first: Path, second: Path) -> bool:
 
 
 async def detect_github_repo(repo_path: Path) -> str | None:
-    """從 origin 的網址讀出 `owner/name`；不是 GitHub 的網址則回傳 None。"""
+    """Read `owner/name` from the origin URL; None if it is not a GitHub URL."""
     result = await run_command(["git", "remote", "get-url", REMOTE], cwd=repo_path)
     match = GITHUB_URL.search(result.stdout.strip()) if result.returncode == 0 else None
     return None if match is None else f"{match['owner']}/{match['name']}"
 
 
 async def detect_default_branch(repo_path: Path) -> str:
-    """讀出遠端的預設分支；讀不到時假設是 main。"""
+    """Read the remote's default branch; assume main if it cannot be read."""
     result = await run_command(
         ["git", "symbolic-ref", "--short", f"refs/remotes/{REMOTE}/HEAD"], cwd=repo_path
     )

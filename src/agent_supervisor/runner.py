@@ -1,7 +1,8 @@
-"""Runner：負責一個 run 從建立到結案的整個生命週期。
+"""Runner: owns the whole lifecycle of a run, from creation to finish.
 
-一個 run 分成四段：建立、準備、agent 執行、收尾。四段由同一個可取消的
-asyncio 工作負責，全部做完才結案。Runner 只透過 `AgentAdapter` 介面控制 agent。
+A run has four stages: create, prepare, agent execution, wrap-up. All four are handled by the same
+cancellable asyncio task, and the run is finished only after all of them are done. The Runner
+controls agents only through the `AgentAdapter` interface.
 """
 
 import asyncio
@@ -25,24 +26,24 @@ EventCallback = Callable[[EventType, dict[str, Any]], None]
 
 
 class UnknownAgentError(ValueError):
-    """指定的 agent 種類沒有對應的 adapter。"""
+    """No adapter exists for the requested agent kind."""
 
 
 class NoActiveRunError(RuntimeError):
-    """任務沒有正在執行的 run，沒有東西可以中止。"""
+    """The task has no run in progress, so there is nothing to stop."""
 
 
 class BudgetExhaustedError(RuntimeError):
-    """任務的花費或 token 已達上限，不能再建立 run。"""
+    """The task has hit its cost or token limit and cannot create another run."""
 
 
 class NoWorkingDirectoryError(RuntimeError):
-    """準備階段結束後任務仍然沒有工作目錄，agent 無處執行。"""
+    """The task still has no working directory after the prepare stage; the agent cannot run."""
 
 
 @dataclass
 class _Job:
-    """一個執行中的 run，以及它目前為止的結果。"""
+    """A run in progress and its results so far."""
 
     run: db.Run
     work: asyncio.Task[None] | None = None
@@ -60,15 +61,15 @@ class _Outcome:
 
 
 async def _no_stage(task: db.Task, run: db.Run, record: EventWriter) -> None:
-    """什麼都不做的準備或收尾階段。"""
+    """A prepare or wrap-up stage that does nothing."""
 
 
 async def _no_archive(task: db.Task) -> None:
-    """什麼都不做的封存階段。"""
+    """An archive stage that does nothing."""
 
 
 class Runner:
-    """建立、執行、中止 run，以及封存任務。"""
+    """Create, execute, and stop runs, and archive tasks."""
 
     def __init__(
         self,
@@ -95,7 +96,7 @@ class Runner:
     async def start_task(
         self, *, project_id: int, title: str, prompt: str, agent_type: str, model: str | None
     ) -> db.Run:
-        """建立任務與它的 initial run，並開始執行。"""
+        """Create a task and its initial run, and start executing it."""
         if agent_type not in self._adapters:
             raise UnknownAgentError(f"no adapter for agent type {agent_type!r}")
         async with self._creation_lock:
@@ -111,7 +112,7 @@ class Runner:
         return run
 
     async def send_message(self, task_id: int, text: str) -> db.Run:
-        """對既有任務的同一個 session 追加指令，建立一個新的 run。"""
+        """Send a follow-up instruction to the same session of an existing task as a new run."""
         async with self._lock_for(task_id):
             task = await db.get_task(self._conn, task_id)
             await self._require_remaining_budget(task_id)
@@ -120,10 +121,12 @@ class Runner:
         return run
 
     async def start_ci_fix(self, task_id: int) -> db.Run | None:
-        """任務符合自動修復條件時建立 ci_failure run 並開始執行；不符合就回傳 None。
+        """Create and start a ci_failure run if the task meets the auto-fix conditions, else None.
 
-        條件在任務鎖與資料庫交易內重新檢查，所以不會和使用者的訊息搶同一個 session。
-        失敗的 CI log 在準備階段才抓，那時 run 已經存在、可以被中止。
+        The conditions are rechecked under the task lock and inside a DB transaction, so this never
+        competes with the user's message for the same session.
+        The failed CI log is fetched in the prepare stage, when the run already exists and can be
+        stopped.
         """
         limits = status.Limits(self._config.task_cost_limit_usd, self._config.task_token_limit)
         async with self._lock_for(task_id):
@@ -139,9 +142,9 @@ class Runner:
         return run
 
     async def start_conflict_fix(self, task_id: int) -> db.Run | None:
-        """PR 和基底分支有衝突時建立 merge_conflict run 並開始執行；不符合條件就回傳 None。
+        """Create and start a merge_conflict run if the PR conflicts with its base, else None.
 
-        合併在準備階段才開始，那時 run 已經存在、可以被中止。
+        The merge starts in the prepare stage, when the run already exists and can be stopped.
         """
         limits = status.Limits(self._config.task_cost_limit_usd, self._config.task_token_limit)
         async with self._lock_for(task_id):
@@ -158,9 +161,10 @@ class Runner:
         return run
 
     async def start_feedback(self, task_id: int) -> db.Run | None:
-        """PR 上有還沒處理的留言時建立 review_feedback run 並開始執行；不符合條件就回傳 None。
+        """Create and start a review_feedback run if the PR has unhandled comments, else None.
 
-        留言的內容在建立 run 的同一個交易內讀出，所以不會漏掉也不會重複。
+        The PR comments are read in the same transaction that creates the run, so none are missed or
+        duplicated.
         """
         limits = status.Limits(self._config.task_cost_limit_usd, self._config.task_token_limit)
         async with self._lock_for(task_id):
@@ -178,7 +182,7 @@ class Runner:
         return run
 
     async def stop(self, task_id: int) -> None:
-        """中止任務正在執行的 run，等它完全停下並結案後才返回。"""
+        """Stop the task's running run; return only after it has fully stopped and finished."""
         async with self._lock_for(task_id):
             job = self._jobs.get(task_id)
             if job is None or job.work is None or job.work.done():
@@ -186,7 +190,7 @@ class Runner:
             await self._cancel(job, ExitStatus.STOPPED)
 
     async def stop_if_running(self, task_id: int) -> bool:
-        """任務有 run 在執行就中止它，回傳是否真的中止了一個 run。"""
+        """Stop the task's run if one is running; return whether a run was actually stopped."""
         try:
             await self.stop(task_id)
         except NoActiveRunError:
@@ -194,12 +198,12 @@ class Runner:
         return True
 
     async def stop_all(self) -> None:
-        """中止所有正在執行的 run。"""
+        """Stop all running runs."""
         for task_id in list(self._jobs):
             await self.stop_if_running(task_id)
 
     async def archive(self, task_id: int) -> None:
-        """封存任務。有 run 在執行時拒絕；封存階段失敗時任務維持未封存。"""
+        """Archive a task. Refused while a run is running; stays unarchived if archiving fails."""
         async with self._lock_for(task_id):
             task = await db.get_task(self._conn, task_id)
             if task.archived_at is not None:
@@ -210,14 +214,14 @@ class Runner:
             await db.archive_task(self._conn, task_id)
 
     async def wait(self, run_id: int) -> db.Run:
-        """等指定的 run 結案，回傳結案後的資料。"""
+        """Wait for the given run to finish and return its finished data."""
         for job in list(self._jobs.values()):
             if job.run.id == run_id and job.work is not None:
                 await asyncio.wait({job.work})
         return await db.get_run(self._conn, run_id)
 
     async def shutdown(self) -> None:
-        """daemon 正常關閉時，把還在執行的 run 中止並標成 interrupted。"""
+        """On normal daemon shutdown, stop the runs still running and mark them interrupted."""
         for job in list(self._jobs.values()):
             if job.work is not None and not job.work.done():
                 await self._cancel(job, ExitStatus.INTERRUPTED)
@@ -233,11 +237,15 @@ class Runner:
 
     async def _cancel(self, job: _Job, status: ExitStatus) -> None:
         assert job.work is not None
-        # 工作還沒開始執行就被取消的話，它連結案的程式都不會跑到，run 會永遠不結束。
+        # If the asyncio task is cancelled before it starts executing, it never even reaches the
+        # code that finishes the run, so the run would never finish.
         await job.has_started.wait()
-        # 已經在結案的 run 不能再取消，否則結案寫到一半會被打斷、run 永遠不結束。
-        # 已經要求過取消的也不能再取消一次：第二次會打斷 agent 正在做的收拾。
-        # 上一個呼叫端等到一半自己被取消時（例如程序正要結束），就會有第二個人來中止。
+        # A run that is already finishing must not be cancelled, or the finishing write is cut off
+        # halfway and the run never finishes.
+        # One whose cancellation was already requested must not be cancelled again either: the
+        # second cancel would interrupt the cleanup the agent is doing.
+        # A second stopper shows up when the previous caller was itself cancelled while waiting
+        # (e.g. the process is about to exit).
         if not job.is_closing and not job.is_cancel_requested:
             job.is_cancel_requested = True
             job.cancel_status = status
@@ -252,7 +260,7 @@ class Runner:
             raise BudgetExhaustedError(f"task {task_id} reached its token limit")
 
     async def _execute(self, task: db.Task, job: _Job, deadline: float) -> None:
-        """執行一個 run 的準備、agent、收尾三段，最後一定會結案。"""
+        """Execute a run's prepare, agent, and wrap-up stages; the run is always finished."""
 
         async def record(event_type: EventType, payload: dict[str, Any]) -> None:
             await self._write_event(task.id, job.run.id, event_type, payload)
@@ -267,8 +275,8 @@ class Runner:
         except TimeoutError:
             outcome = _Outcome(ExitStatus.LIMIT_REACHED, "run exceeded its time limit")
         except asyncio.CancelledError:
-            # 取消一律來自 Runner 自己（Stop 或關閉）。這裡吞掉取消，
-            # 讓這個工作能把 run 結案後正常結束。
+            # Cancellation always comes from the Runner itself (Stop or shutdown). Swallow it here
+            # so this asyncio task can finish the run and then exit normally.
             outcome = _Outcome(job.cancel_status, "run was cancelled")
         except Exception as error:
             outcome = _Outcome(ExitStatus.ERROR, f"{type(error).__name__}: {error}")
@@ -281,7 +289,8 @@ class Runner:
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is None:
             raise NoWorkingDirectoryError(f"task {task.id} has no working directory")
-        # 準備階段可能改寫了這次要送的內容（ci_failure run 的 CI log），所以重新讀取。
+        # The prepare stage may have rewritten what is sent this time (the CI log of a ci_failure
+        # run), so reread it.
         run = await db.get_run(self._conn, job.run.id)
         stream = adapter.run_turn(
             prompt=run.input_text,

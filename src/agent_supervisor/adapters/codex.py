@@ -1,6 +1,7 @@
-"""Codex adapter：用 subprocess 包 `codex exec` 的非互動模式，逐行讀 JSONL 事件。
+"""Codex adapter: wraps the non-interactive `codex exec` in a subprocess and reads JSONL events.
 
-用法與實測結果見 `docs/codex-notes.md`。所有 Codex 專屬的字串與參數都只出現在這個檔案。
+See `docs/codex-notes.md` for usage and what testing showed. All strings and parameters
+specific to Codex appear only in this file.
 """
 
 import asyncio
@@ -29,21 +30,23 @@ COMMAND_ITEM = "command_execution"
 ERROR_ITEM = "error"
 MESSAGE_KINDS = {"agent_message": "message", "reasoning": "reasoning"}
 MAX_OUTPUT_CHARS = 20_000
-# 一個事件一行；指令的輸出整份放在同一行裡，所以每行的上限要比 asyncio 預設的 64 KB 大。
+# One event per line; a command's entire output sits on a single line, so the per-line limit
+# must be larger than asyncio's default of 64 KB.
 MAX_LINE_BYTES = 32 * 1024 * 1024
 INTERRUPT_GRACE_SECONDS = 10.0
 STDERR_TAIL_CHARS = 500
 
 
 class CodexAdapter:
-    """每一輪啟動一個 `codex exec` 程序。"""
+    """Start one `codex exec` process per turn."""
 
     capabilities = AdapterCapabilities(
         can_resume_session=True,
-        # `codex exec` 沒有輪數與花費上限的選項，也只回報 token 數。
+        # `codex exec` has no options for turn or cost limits, and only reports token counts.
         can_limit_turns=False,
         can_limit_budget=False,
-        # 非互動模式無法逐次核准；能落實的只有 sandbox 等級與是否連網。
+        # Non-interactive mode cannot approve calls one by one; only the sandbox level and network
+        # access can be enforced.
         can_gate_tool_calls=False,
         can_restrict_network=True,
         reports_cost=False,
@@ -71,10 +74,11 @@ class CodexAdapter:
         policy: PermissionPolicy,
         previous_usage: dict[str, Any] | None,
     ) -> AsyncIterator[AgentEvent | TurnResult]:
-        """執行一輪對話。`limits` 用不到：Codex 沒有可以在執行中擋下的上限。"""
-        # Codex 的 session id 要等它啟動後才知道，所以另外準備一個啟動前就確定的字串
-        # 讓重啟復原找得到程序：把它放進「最後一則訊息」輸出檔的檔名，就會出現在命令列上。
-        # 檔案放在 worktree 之外，才不會被收尾時一起 commit。
+        """Run one turn. `limits` is unused: Codex has no limits that can be enforced mid-run."""
+        # Codex's session id is only known after it starts, so prepare a separate string fixed
+        # before start so restart recovery can find the process: putting it in the file name of
+        # the "last message" output file makes it appear on the command line.
+        # The file lives outside the worktree so it doesn't get committed during wrap-up.
         marker = f"asv-codex-{uuid.uuid4().hex}"
         last_message_path = self._scratch_dir / f"{marker}.txt"
         arguments = _build_arguments(session_id, cwd, model, policy, last_message_path)
@@ -88,13 +92,13 @@ class CodexAdapter:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=MAX_LINE_BYTES,
-            # 放進自己的 session：在終端機按 Ctrl-C 時訊號才不會直接送到 Codex，
-            # 由 Runner 決定何時中止、結果怎麼記。
+            # Put it in its own session so Ctrl-C in the terminal doesn't send the signal straight
+            # to Codex; Runner decides when to stop and how to record the result.
             start_new_session=True,
         )
         assert process.stdin is not None and process.stdout is not None
         assert process.stderr is not None
-        # stderr 要同時讀掉，否則管線滿了 Codex 會卡住。
+        # Drain stderr concurrently, otherwise Codex blocks once the pipe fills up.
         reading_stderr = asyncio.create_task(process.stderr.read())
         turn = _Turn(session_id, marker, previous_usage)
         try:
@@ -120,18 +124,19 @@ def _build_arguments(
     policy: PermissionPolicy,
     last_message_path: Path,
 ) -> list[str]:
-    """組出 `codex` 之後的參數。權限設定每次都明確傳入，不依賴使用者自己的設定檔。"""
+    """Build the args after `codex`. Always pass permissions explicitly, not via user config."""
     network = f"sandbox_workspace_write.network_access={str(policy.allow_network).lower()}"
     if session_id is None:
         arguments = ["exec", "--json", "-s", str(policy.sandbox_level), "-C", str(cwd)]
     else:
-        # 續接沒有 `-s` 與 `-C`：sandbox 用設定覆寫，工作目錄靠程序本身的工作目錄。
+        # Resume has no `-s` or `-C`: the sandbox is set via a config override, and the working
+        # directory comes from the process's own working directory.
         arguments = ["exec", "resume", session_id, "--json"]
         arguments += ["-c", f'sandbox_mode="{policy.sandbox_level}"']
     arguments += ["-c", network, "-o", str(last_message_path)]
     if model is not None:
         arguments += ["-m", model]
-    # 指示從 stdin 送：內容可能很長（CI log），也可能以連字號開頭。
+    # Send the instructions via stdin: they may be long (CI log) or start with a hyphen.
     return [*arguments, "-"]
 
 
@@ -143,7 +148,7 @@ async def _send_prompt(stdin: asyncio.StreamWriter, prompt: str) -> None:
 
 
 def _parse_line(line: bytes) -> dict[str, Any] | None:
-    """解析一行輸出；不是 JSON 物件的行（例如警告訊息）回傳 None。"""
+    """Parse one output line; return None for lines that are not JSON objects (e.g. warnings)."""
     try:
         parsed = json.loads(line)
     except ValueError:
@@ -158,7 +163,7 @@ def _session_event(session_id: str | None, process_marker: str) -> AgentEvent:
 
 
 class _Turn:
-    """一輪對話讀到目前為止的狀態：session、用量、錯誤訊息。"""
+    """State of one turn read so far: session, usage, error message."""
 
     def __init__(
         self, session_id: str | None, process_marker: str, previous_usage: dict[str, Any] | None
@@ -172,7 +177,7 @@ class _Turn:
         self._error: str | None = None
 
     def handle(self, event: dict[str, Any] | None) -> list[AgentEvent]:
-        """把一筆 Codex 事件轉成我們的事件；不需要記錄的回傳空清單。"""
+        """Convert one Codex event into our events; return an empty list if not recorded."""
         if event is None:
             return []
         kind = event.get("type")
@@ -200,7 +205,7 @@ class _Turn:
         return [_session_event(self._session_id, self._process_marker)]
 
     def result(self, returncode: int, stderr: str) -> TurnResult:
-        """程序結束後組出這一輪的結果。"""
+        """Build this turn's result after the process exits."""
         if self._is_completed and returncode == 0:
             exit_status, detail = ExitStatus.SUCCESS, None
         else:
@@ -222,9 +227,9 @@ class _Turn:
         )
 
     def _turn_tokens(self) -> tuple[int | None, int | None]:
-        """Codex 回報的是整個 session 的累計值，減掉上一輪的累計才是這一輪的用量。
+        """Codex reports cumulative values for the whole session; subtract the previous totals.
 
-        `input_tokens` 已經包含快取的輸入 token。
+        `input_tokens` already includes cached input tokens.
         """
         if self._usage is None:
             return None, None
@@ -264,7 +269,7 @@ def _item_to_event(item: dict[str, Any], *, is_finished: bool) -> AgentEvent | N
             payload["is_error"] = item.get("exit_code") != 0
             payload["output"] = _truncate(item.get("aggregated_output"))
         return AgentEvent(EventType.COMMAND, payload)
-    # 其他種類的項目（檔案變更、MCP 工具、網頁搜尋等）形狀各不相同，原樣保留。
+    # Other item kinds (file changes, MCP tools, web search, etc.) vary in shape; keep them as-is.
     payload["item"] = _truncate(item)
     if is_finished:
         payload["is_error"] = (
@@ -274,7 +279,7 @@ def _item_to_event(item: dict[str, Any], *, is_finished: bool) -> AgentEvent | N
 
 
 def _truncate(value: Any) -> Any:
-    """把過長的字串截短，巢狀的內容也一樣處理。"""
+    """Truncate overly long strings, including nested ones."""
     if isinstance(value, str):
         if len(value) <= MAX_OUTPUT_CHARS:
             return value
@@ -287,10 +292,11 @@ def _truncate(value: Any) -> Any:
 
 
 async def _stop(process: asyncio.subprocess.Process, grace_seconds: float) -> None:
-    """停掉 Codex 與它啟動的子程序，確認結束後才返回。
+    """Stop Codex and the child processes it started; return only once they have exited.
 
-    實測 SIGINT 會讓 Codex 連同子程序一起結束，SIGTERM 不會。等不到的話強制終止；
-    Codex 把子程序放在各自的程序群組，所以要先列出子孫程序再逐一終止。
+    In testing, SIGINT makes Codex exit together with its child processes, SIGTERM does not.
+    If it doesn't exit in time, kill it; Codex puts child processes in their own process
+    groups, so list the descendants first and then kill them one by one.
     """
     with suppress(ProcessLookupError):
         process.send_signal(signal.SIGINT)
@@ -305,7 +311,7 @@ async def _stop(process: asyncio.subprocess.Process, grace_seconds: float) -> No
 
 
 def _descendants(root_pid: int) -> list[int]:
-    """列出一個程序目前所有的子孫程序。"""
+    """List all current descendant processes of a process."""
     listing = subprocess.run(
         ["ps", "-eo", "pid=,ppid="], capture_output=True, text=True, check=False
     ).stdout

@@ -17,7 +17,7 @@ const STATUS_TEXT: Record<StreamStatus, string> = {
   offline: 'Offline — reconnecting…',
 }
 
-/** 目前網址指到哪個任務；`#/tasks/12` 是任務 12 的詳情頁，其他都是看板。 */
+/** Which task the URL points to; `#/tasks/12` is the detail page of task 12, anything else is the board. */
 function taskIdFromHash(hash: string): number | null {
   const match = /^#\/tasks\/(\d+)$/.exec(hash)
   return match ? Number(match[1]) : null
@@ -38,15 +38,18 @@ export function App() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [cards, setCards] = useState<Record<number, Card>>({})
   const [status, setStatus] = useState<StreamStatus>('connecting')
-  // 每次連上 daemon 就加一；詳情頁靠它知道要補抓斷線期間的資料。
+  // Incremented on every connection to the daemon; the detail page uses it to know it must
+  // catch up on what it missed while disconnected.
   const [connectionCount, setConnectionCount] = useState(0)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isCreatingTask, setIsCreatingTask] = useState(false)
   const [isAddingProject, setIsAddingProject] = useState(false)
   const eventListeners = useRef(new Set<EventListener>())
-  // 重新抓看板的期間收到的卡片：它們比抓回來的那一份新，合併時要優先。
+  // Cards pushed while the board is being refetched: they are newer than the fetched copy,
+  // so they win when the two are merged.
   const arrivedWhileLoading = useRef<Map<number, Card> | null>(null)
-  // 只有最後一次發出的載入可以寫入畫面；較早的載入晚回來時直接丟掉。
+  // Only the most recently started load may update the screen; an earlier load that comes
+  // back late is dropped.
   const latestLoad = useRef(0)
   const openTaskId = useOpenTaskId()
 
@@ -79,7 +82,7 @@ export function App() {
 
   useEffect(
     () =>
-      // 先連上推送再抓資料，兩者之間發生的變化才不會漏掉。
+      // Connect to the stream before fetching, so changes in between are not missed.
       connectStream({
         onOpen: () => {
           setConnectionCount((count) => count + 1)
@@ -126,7 +129,7 @@ export function App() {
             className="primary"
             onClick={() => setIsCreatingTask(true)}
             disabled={projects.length === 0}
-            title={projects.length === 0 ? '先加入一個專案' : undefined}
+            title={projects.length === 0 ? 'Add a project first' : undefined}
           >
             + New task
           </button>
@@ -166,7 +169,8 @@ export function App() {
           onAdded={(project) => {
             setProjects((current) => [...current, project])
             setIsAddingProject(false)
-            // 重新抓一次：正在進行的舊載入會因此作廢，不會把新專案蓋掉。
+            // Fetch again: this invalidates any older load still in flight, so it cannot overwrite
+      // the new project.
             void reload()
           }}
           onClose={() => setIsAddingProject(false)}

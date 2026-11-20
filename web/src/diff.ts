@@ -1,4 +1,4 @@
-/** 把 git 的 unified diff 拆成一個個檔案，給 Diff 分頁用。全部是純函式。 */
+/** Split git's unified diff into files for the Diff tab. Pure functions only. */
 
 export type DiffLineKind = 'added' | 'removed' | 'hunk' | 'context' | 'meta'
 
@@ -9,7 +9,7 @@ export interface DiffLine {
 
 export interface DiffFile {
   path: string
-  /** 改名前的路徑；沒有改名時是 null。 */
+  /** The path before a rename; null when the file was not renamed. */
   previousPath: string | null
   added: number
   removed: number
@@ -17,7 +17,8 @@ export interface DiffFile {
 }
 
 const FILE_HEADER = /^diff --git a\/(.+) b\/(.+)$/
-// 檔案開頭的說明行裡只留這幾種；其餘的（index、改名、--- 與 +++）不顯示，路徑已經在標題上。
+// Keep only these header lines of a file; the others (index, rename, --- and +++) are hidden
+// because the path is already in the title.
 const NOTE_PREFIXES = ['new file mode', 'deleted file mode', 'Binary files ', '\\ No newline']
 
 function lineKind(line: string): DiffLineKind {
@@ -27,7 +28,7 @@ function lineKind(line: string): DiffLineKind {
   return 'context'
 }
 
-/** 依檔案分段。看不懂的內容（不是以 `diff --git` 開頭）會被略過。 */
+/** Split by file. Content that is not understood (not starting with `diff --git`) is skipped. */
 export function parseDiff(text: string): DiffFile[] {
   const files: DiffFile[] = []
   let current: DiffFile | null = null
@@ -58,7 +59,7 @@ export function parseDiff(text: string): DiffFile[] {
     if (kind === 'removed') current.removed += 1
     current.lines.push({ kind, text: line })
   }
-  // 最後一行換行之後的空字串不是 diff 的內容。
+  // The empty string after the final newline is not part of the diff.
   for (const file of files) {
     const last = file.lines[file.lines.length - 1]
     if (last && last.kind === 'context' && last.text === '') file.lines.pop()

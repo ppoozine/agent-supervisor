@@ -1,6 +1,7 @@
-"""把 CI 的失敗 log 整理成給 agent 的內容。全部是純函式。
+"""Turn failed CI logs into content for the agent. All functions here are pure.
 
-CI log 動輒數千行，真正的錯誤通常在最後，所以每個失敗的檢查只保留尾段。
+CI logs often run to thousands of lines and the real error is usually at the end, so only the tail
+of each failed check is kept.
 """
 
 import re
@@ -9,23 +10,24 @@ from dataclasses import dataclass
 
 TRUNCATION_NOTICE = "[... earlier output omitted ...]\n"
 
-# `gh run view --log` 每一行的格式是「job 名稱<TAB>步驟名稱<TAB>時間戳 內容」。
+# Each line of `gh run view --log` has the format "job name<TAB>step name<TAB>timestamp content".
 _PREFIX = re.compile(r"^[^\t]*\t[^\t]*\t")
 _TIMESTAMP = re.compile(r"^﻿?\d{4}-\d{2}-\d{2}T[\d:.]+Z ?")
-# 實測 `gh` 會把控制字元 ESC 印成「^[」兩個字元，所以兩種寫法都要去掉。
+# In testing, `gh` prints the ESC control character as the two characters "^[", so both forms must
+# be stripped.
 _ANSI = re.compile(r"(?:\x1b|\^\[)\[[0-9;]*[A-Za-z]")
 
 
 @dataclass(frozen=True)
 class CheckLog:
-    """一個失敗檢查的名稱與它的原始 log。"""
+    """The name of one failed check and its raw log."""
 
     name: str
     text: str
 
 
 def clean(raw: str) -> str:
-    """去掉每一行的 job 與步驟前綴、時間戳、顏色碼。"""
+    """Strip the job and step prefix, timestamp, and color codes from each line."""
     lines = []
     for line in raw.splitlines():
         line = _TIMESTAMP.sub("", _PREFIX.sub("", line))
@@ -34,7 +36,7 @@ def clean(raw: str) -> str:
 
 
 def tail(text: str, max_chars: int) -> str:
-    """保留最後 `max_chars` 個字元，從完整的一行開始；有截掉就加上說明。"""
+    """Keep the last `max_chars` characters, starting at a full line; note any cut."""
     if len(text) <= max_chars:
         return text
     kept = text[-max_chars:]
@@ -47,7 +49,7 @@ def tail(text: str, max_chars: int) -> str:
 def build_fix_prompt(
     head_sha: str, logs: Sequence[CheckLog], without_log: Sequence[str], *, max_chars: int
 ) -> str:
-    """組出交給 agent 的修復指示：失敗的檢查與各自的 log 尾段。"""
+    """Build the fix instructions for the agent: the failed checks and the tail of each log."""
     per_check = max(max_chars // max(len(logs), 1), 1)
     parts = [
         f"CI failed on commit {head_sha}. Fix the cause of the failures below."

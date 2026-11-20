@@ -12,7 +12,7 @@ interface NewTaskDialogProps {
   onClose: () => void
 }
 
-/** 開任務的表單：選專案、選 agent、標題與任務描述。 */
+/** The form for opening a task: project, agent, title and task description. */
 export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskDialogProps) {
   const [projectId, setProjectId] = useState(projects[0]?.id ?? 0)
   const [agentType, setAgentType] = useState(agents[0]?.agent_type ?? '')
@@ -64,7 +64,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
             {agents.map((agent) => (
               <option key={agent.agent_type} value={agent.agent_type}>
                 {agentName(agent.agent_type)}
-                {agent.reports_cost ? '' : '（只回報 token）'}
+                {agent.reports_cost ? '' : ' (reports tokens only)'}
               </option>
             ))}
           </select>
@@ -75,7 +75,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
         <input
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          placeholder="留空就用描述的開頭"
+          placeholder="Leave empty to use the start of the description"
         />
       </label>
       <label>
@@ -84,7 +84,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           rows={7}
-          placeholder="要 agent 做什麼"
+          placeholder="What should the agent do?"
           required
           autoFocus
         />

@@ -5,7 +5,7 @@ import type { EventRow, Run } from '../types'
 
 const NEAR_BOTTOM_PIXELS = 80
 
-/** agent 的輸出，新的在下面。停在底部時會跟著捲動；往上看舊內容時不會被拉走。 */
+/** Agent output, newest at the bottom. Follows new output while scrolled to the bottom; does not jump away while reading older output. */
 export function LogTab({ events, prompt }: { events: EventRow[]; prompt: string }) {
   const lines = useMemo(
     () => events.map(toLogLine).filter((line) => line !== null),
@@ -39,12 +39,12 @@ export function LogTab({ events, prompt }: { events: EventRow[]; prompt: string 
           <pre>{line.text}</pre>
         </div>
       ))}
-      {lines.length === 0 && <p className="empty">還沒有輸出。</p>}
+      {lines.length === 0 && <p className="empty">No output yet.</p>}
     </div>
   )
 }
 
-/** 稽核紀錄，依寫入順序，可依類型篩選。 */
+/** The audit log in write order, filterable by type. */
 export function EventsTab({ events }: { events: EventRow[] }) {
   const [type, setType] = useState('')
   const types = useMemo(() => [...new Set(events.map((event) => event.type))].sort(), [events])
@@ -101,7 +101,7 @@ function duration(run: Run): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
 
-/** 每一次 run 的觸發原因、時間、結果與用量。 */
+/** Each run's trigger, timing, outcome and usage. */
 export function RunsTab({ runs }: { runs: Run[] }) {
   return (
     <table className="runs">

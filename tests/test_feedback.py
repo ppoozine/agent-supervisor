@@ -1,4 +1,4 @@
-"""feedback.py 的測試：哪些留言要餵回 agent，以及餵回的內容。"""
+"""Tests for feedback.py: which PR comments are fed back to the agent, and what is fed back."""
 
 import pytest
 

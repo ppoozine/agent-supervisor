@@ -1,7 +1,7 @@
-"""Claude Code adapter：用官方 Python Agent SDK 控制 Claude Code。
+"""Claude Code adapter: controls Claude Code through the official Python Agent SDK.
 
-SDK 的實際用法與實測結果見 `docs/claude-sdk-notes.md`。
-所有 Claude Code 專屬的字串與參數都只出現在這個檔案。
+See `docs/claude-sdk-notes.md` for how the SDK is actually used and what testing showed.
+All strings and parameters specific to Claude Code appear only in this file.
 """
 
 import asyncio
@@ -51,7 +51,7 @@ INTERRUPT_TIMEOUT_SECONDS = 5.0
 
 
 class SdkClient(Protocol):
-    """本 adapter 用到的 SDK client 介面，測試時以假物件替換。"""
+    """The SDK client interface this adapter uses; replaced with a fake in tests."""
 
     def query(self, prompt: str) -> Any: ...
 
@@ -66,9 +66,10 @@ ClientFactory = Callable[[ClaudeAgentOptions], AbstractAsyncContextManager[SdkCl
 def evaluate_tool_call(
     tool_name: str, tool_input: dict[str, Any], policy: PermissionPolicy, *, cwd: Path
 ) -> str | None:
-    """依權限政策判斷一次工具呼叫；允許時回傳 None，拒絕時回傳原因。
+    """Check one tool call against the policy; return None if allowed, else the reason.
 
-    這是基本防護，不是安全邊界：指令只做前綴比對，擋不住間接的做法。
+    This is a basic safeguard, not a security boundary: commands are only prefix-matched,
+    so indirect approaches are not blocked.
     """
     rules = policy.tool_rules
     allowed_tools = rules.get("allowed_tools")
@@ -81,8 +82,8 @@ def evaluate_tool_call(
     if tool_name != COMMAND_TOOL:
         return None
     if tool_input.get("run_in_background"):
-        # 一個 run 就是一輪做完。背景指令在這一輪結束時會被終止，
-        # agent 卻會當成已經交辦完成，所以一律要求在前景執行。
+        # A run is a single turn. Background commands are killed when the turn ends, yet the
+        # agent would treat them as handed off and done, so always require the foreground.
         return "background execution is not allowed; run the command in the foreground"
     command = str(tool_input.get("command", ""))
     for segment in COMMAND_SEPARATORS.split(command):
@@ -93,7 +94,10 @@ def evaluate_tool_call(
 
 
 def _is_inside(tool_input: dict[str, Any], cwd: Path) -> bool:
-    """寫檔工具的目標路徑是否在工作目錄之內。只做字串層級的正規化，不解析符號連結。"""
+    """Whether a write tool's target path is inside the working directory.
+
+    Paths are only normalized as strings; symbolic links are not resolved.
+    """
     for key in PATH_KEYS:
         target = tool_input.get(key)
         if target is None:
@@ -109,14 +113,15 @@ def _starts_with_command(segment: str, denied: str) -> bool:
 
 
 class ClaudeCodeAdapter:
-    """用 Claude Agent SDK 執行一輪對話。"""
+    """Run one turn with the Claude Agent SDK."""
 
     capabilities = AdapterCapabilities(
         can_resume_session=True,
         can_limit_turns=True,
         can_limit_budget=True,
         can_gate_tool_calls=True,
-        # sandbox 設定實測沒有生效，查明前不宣稱能限制連網。
+        # In testing the sandbox settings had no effect; until that is understood, do not claim
+        # network restriction.
         can_restrict_network=False,
         reports_cost=True,
     )
@@ -141,7 +146,7 @@ class ClaudeCodeAdapter:
         policy: PermissionPolicy,
         previous_usage: dict[str, Any] | None,
     ) -> AsyncIterator[AgentEvent | TurnResult]:
-        """執行一輪對話。新 session 的 id 由這裡事先指定，所以啟動前就能送出。"""
+        """Run one turn. A new session's id is chosen here up front, so it can be emitted early."""
         is_new_session = session_id is None
         active_session_id = session_id or str(uuid.uuid4())
         denials: list[AgentEvent] = []
@@ -149,8 +154,10 @@ class ClaudeCodeAdapter:
             cwd=cwd,
             model=model,
             permission_mode="default",
-            # 兩道關卡用同一套政策。hook 對每一次工具呼叫都會執行，而且先於專案設定裡的
-            # 允許規則與自動放行的唯讀指令；核准回呼只在需要詢問時才被呼叫，負責放行。
+            # Both gates use the same policy. The hook runs for every tool call, and before the
+            # allow rules in project settings and the auto-approved read-only commands; the
+            # approval callback is only called when permission must be asked, and is what lets the
+            # call through.
             hooks={"PreToolUse": [HookMatcher(hooks=[_make_hook(policy, cwd, denials)])]},
             can_use_tool=_make_gate(policy, cwd, denials),
             setting_sources=list(self._setting_sources),  # type: ignore[arg-type]
@@ -159,9 +166,10 @@ class ClaudeCodeAdapter:
             session_id=active_session_id if is_new_session else None,
             resume=None if is_new_session else active_session_id,
         )
-        # 新 session 在 agent 確認之前不公布 session id：如果啟動失敗，
-        # 之後的 run 才不會去續接一個不存在的 session。process_marker 則要先送出，
-        # 讓重啟復原找得到已經啟動的程序。
+        # For a new session, do not publish the session id until the agent confirms it: if
+        # startup fails, later runs then won't try to resume a session that doesn't exist.
+        # process_marker, however, must be emitted first so that restart recovery can find a
+        # process that has already started.
         yield _session_event(None if is_new_session else active_session_id, active_session_id)
 
         tool_event_types: dict[str, EventType] = {}
@@ -207,7 +215,7 @@ def _check(
     cwd: Path,
     denials: list[AgentEvent],
 ) -> str | None:
-    """依政策判斷；拒絕時留下一筆 permission_denied 事件並回傳給 agent 看的訊息。"""
+    """Check the policy; if denied, log permission_denied and return a message for the agent."""
     reason = evaluate_tool_call(tool_name, tool_input, policy, cwd=cwd)
     if reason is None:
         return None
@@ -220,7 +228,7 @@ def _check(
 
 
 def _make_hook(policy: PermissionPolicy, cwd: Path, denials: list[AgentEvent]) -> Any:
-    """建立工具呼叫前的 hook：違反政策就拒絕，否則不表示意見。"""
+    """Build the PreToolUse hook: deny calls that violate the policy, otherwise stay neutral."""
 
     async def pre_tool_use(hook_input: Any, tool_use_id: str | None, context: Any) -> Any:
         message = _check(hook_input["tool_name"], hook_input["tool_input"], policy, cwd, denials)
@@ -238,7 +246,7 @@ def _make_hook(policy: PermissionPolicy, cwd: Path, denials: list[AgentEvent]) -
 
 
 def _make_gate(policy: PermissionPolicy, cwd: Path, denials: list[AgentEvent]) -> Any:
-    """建立核准回呼：需要詢問的呼叫依政策放行或拒絕。"""
+    """Build the approval callback: allow or deny calls that need asking, per the policy."""
 
     async def gate(
         tool_name: str, tool_input: dict[str, Any], context: Any
@@ -252,7 +260,7 @@ def _make_gate(policy: PermissionPolicy, cwd: Path, denials: list[AgentEvent]) -
 
 
 def _to_events(message: Any, tool_event_types: dict[str, EventType]) -> list[AgentEvent]:
-    """把一則 SDK 訊息轉成有型別的事件。不需要記錄的訊息回傳空清單。"""
+    """Convert one SDK message into typed events; return an empty list if it is not recorded."""
     if isinstance(message, AssistantMessage):
         return [
             event
@@ -288,7 +296,7 @@ def _assistant_block_to_event(
 
 
 def _message_event(kind: str, text: str) -> AgentEvent | None:
-    """內容是空的訊息不記錄（SDK 有時會送出沒有文字的思考區塊）。"""
+    """Skip empty messages (the SDK sometimes sends thinking blocks with no text)."""
     if not text.strip():
         return None
     return AgentEvent(EventType.AGENT_MESSAGE, {"kind": kind, "text": text})
@@ -343,7 +351,7 @@ def _to_turn_result(
 def _turn_cost(
     total_cost_usd: float | None, session_id: str, previous_usage: dict[str, Any] | None
 ) -> float | None:
-    """SDK 回報的花費是整個 session 的累計值，減掉上一輪的累計才是這一輪的花費。"""
+    """The SDK reports cumulative session cost; subtract the previous total to get this turn's."""
     if total_cost_usd is None:
         return None
     if previous_usage is None or previous_usage.get("session_id") != session_id:
@@ -355,6 +363,6 @@ def _turn_cost(
 
 
 async def _interrupt_quietly(client: SdkClient) -> None:
-    """串流被提前關閉時要求 agent 停下。失敗也不拋出，因為接著就會斷線。"""
+    """Ask the agent to stop when the stream closes early. Never raises: we disconnect next."""
     with suppress(Exception):
         await asyncio.wait_for(client.interrupt(), INTERRUPT_TIMEOUT_SECONDS)

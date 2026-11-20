@@ -6,12 +6,12 @@ import type { TaskDiff } from '../types'
 
 interface DiffTabProps {
   taskId: number
-  /** 任務最新的 commit；變了就重新抓，開著的分頁才會跟上新的 push。 */
+  /** The task's latest commit; refetch when it changes so an open tab keeps up with new pushes. */
   headSha: string | null
   connectionCount: number
 }
 
-/** 任務的 branch 相對於基底分支的變更，依檔案分段。只包含已經 commit 的內容。 */
+/** Changes on the task's branch relative to the base branch, by file. Only committed content. */
 export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
   const [loaded, setLoaded] = useState<TaskDiff | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -41,13 +41,13 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
   }
   if (loaded === null) return <p className="empty">Loading…</p>
   if (files.length === 0) {
-    return <p className="empty">沒有變更：這個任務還沒有相對於 {loaded.base_branch} 的 commit。</p>
+    return <p className="empty">No changes: this task has no commits against {loaded.base_branch} yet.</p>
   }
   return (
     <div className="diff">
       <p className="diff-summary">
         {files.length} {files.length === 1 ? 'file' : 'files'} changed against {loaded.base_branch}
-        {loaded.is_truncated && ' · diff 太長，後面的部分沒有顯示'}
+        {loaded.is_truncated && ' · diff too long, the rest is not shown'}
       </p>
       {files.map((file) => (
         <section className="diff-file" key={file.path} aria-label={file.path}>

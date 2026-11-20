@@ -1,4 +1,4 @@
-"""ci_log.py 的測試：CI log 的清理、截取與修復指示。"""
+"""Tests for ci_log.py: cleaning and truncating CI logs, and the fix instructions."""
 
 from agent_supervisor.ci_log import TRUNCATION_NOTICE, CheckLog, build_fix_prompt, clean, tail
 

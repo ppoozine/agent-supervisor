@@ -1,4 +1,4 @@
-// API 回應的形狀，對應後端的 `api/views.py`。
+// Shapes of the API responses, matching the backend's `api/views.py`.
 
 export interface Project {
   id: number
@@ -14,7 +14,7 @@ export interface Agent {
   reports_cost: boolean
 }
 
-/** 看板上的一張卡片。`column` 與 `label` 由後端推導，前端只照著顯示。 */
+/** A card on the board. `column` and `label` are derived by the backend; the frontend only displays them. */
 export interface Card {
   id: number
   project_id: number
@@ -32,7 +32,7 @@ export interface Card {
   merge_state: string
   ci_fix_attempts: number
   max_ci_fix_attempts: number
-  /** `null` 表示這種 agent 不回報花費：花費未知，不是零。 */
+  /** `null` means this kind of agent does not report cost: the cost is unknown, not zero. */
   cost_usd: number | null
   tokens: number
   usage_is_complete: boolean
@@ -66,7 +66,7 @@ export interface TaskDetail extends Card {
   runs: Run[]
 }
 
-/** 一筆稽核紀錄。`payload` 的內容依 `type` 而不同。 */
+/** One audit log entry. The contents of `payload` depend on `type`. */
 export interface EventRow {
   id: number
   task_id: number

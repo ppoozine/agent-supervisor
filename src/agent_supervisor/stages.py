@@ -1,10 +1,11 @@
-"""Run 的準備與收尾階段，以及任務的封存。
+"""The prepare and wrap-up stages of a run, and archiving a task.
 
-- 準備：為任務建立專屬的 worktree 與 branch。
-- 收尾：agent 正常結束後，由 supervisor 補 commit、push、開 PR。
-- 封存：保留成果後清掉 worktree。
+- Prepare: create a dedicated worktree and branch for the task.
+- Wrap-up: once the agent ends normally, the supervisor commits leftovers, pushes, opens the PR.
+- Archive: keep the results, then remove the worktree.
 
-收尾的每一步都先查現況再動手，所以重做一次不會重複 push 或重複開 PR。
+Each wrap-up step checks the current state before acting, so redoing it never pushes twice or opens
+a duplicate PR.
 """
 
 from pathlib import Path
@@ -19,11 +20,11 @@ from agent_supervisor.runner import EventWriter
 
 
 class StageError(RuntimeError):
-    """準備或收尾無法進行。"""
+    """The prepare or wrap-up stage cannot proceed."""
 
 
 class RunStages:
-    """提供給 Runner 的準備、收尾與封存動作。"""
+    """The prepare, wrap-up, and archive actions provided to the Runner."""
 
     def __init__(self, conn: aiosqlite.Connection, config: Config, github: GitHub) -> None:
         self._conn = conn
@@ -31,7 +32,7 @@ class RunStages:
         self._github = github
 
     async def prepare(self, task: db.Task, run: db.Run, record: EventWriter) -> None:
-        """確保任務有自己的 worktree，再依 run 的種類準備：抓 CI log，或開始合併。"""
+        """Ensure the task's worktree, then prepare by run kind: fetch CI logs or start a merge."""
         await self._ensure_worktree(task)
         if run.trigger is RunTrigger.CI_FAILURE:
             await self._load_ci_failure(task, run)
@@ -39,10 +40,11 @@ class RunStages:
             await self._start_merge(task, run)
 
     async def _start_merge(self, task: db.Task, run: db.Run) -> None:
-        """把基底分支合併進任務的 branch，停在有衝突的狀態，交給 agent 解。
+        """Merge the base branch into the task's branch, stopping at the conflicts for the agent.
 
-        合併由 supervisor 開始、收尾時由 supervisor commit：有些 agent 在 worktree 裡
-        不能執行 git 的寫入指令，但改檔案沒有問題。以本機的 git 為準，不以 GitHub 的回報為準。
+        The supervisor starts the merge and commits it at wrap-up: some agents cannot run git write
+        commands in the worktree, but editing files is fine. Local git is the source of truth, not
+        what GitHub reports.
         """
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is None:
@@ -67,8 +69,8 @@ class RunStages:
     async def _ensure_worktree(self, task: db.Task) -> None:
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is not None and current.branch is None:
-            # 沒有自己的 branch，表示工作目錄不是這個工具建立的 worktree
-            # （例如指向使用者自己的 repo），不能讓 agent 在裡面執行。
+            # Having no branch of its own means the working directory is not a worktree created by
+            # this tool (e.g. it points at the user's own repo), so the agent must not run in it.
             raise StageError(
                 f"task {current.id} was created before worktrees existed; start a new task"
             )
@@ -83,7 +85,7 @@ class RunStages:
         await db.update_task(self._conn, current.id, branch=branch, worktree_path=str(path))
 
     async def _load_ci_failure(self, task: db.Task, run: db.Run) -> None:
-        """抓失敗檢查的 log，整理後寫成這個 run 實際要送給 agent 的內容。"""
+        """Fetch and clean up the failed checks' logs, saving them as this run's agent input."""
         current = await db.get_task(self._conn, task.id)
         project = await db.get_project(self._conn, current.project_id)
         if project.github_repo is None or current.pr_number is None:
@@ -92,7 +94,8 @@ class RunStages:
         if status.head_sha != run.source_head_sha:
             raise StageError("the pull request moved to another commit since CI failed")
         if not status.failed_checks:
-            # 例如有人在 GitHub 上重跑了失敗的 job：這個 commit 上已經沒有失敗的檢查可以修。
+            # E.g. someone reran the failed job on GitHub: this commit no longer has a failed check
+            # to fix.
             raise StageError(
                 f"CI is no longer failing on this commit (now {status.ci_state}); nothing to fix"
             )
@@ -112,15 +115,16 @@ class RunStages:
         await db.set_run_input_text(self._conn, run.id, prompt)
 
     async def finalize(self, task: db.Task, run: db.Run, record: EventWriter) -> None:
-        """把 agent 的成果發布出去：補 commit、push、必要時開 PR。"""
+        """Publish the agent's results: commit leftovers, push, and open a PR if needed."""
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is None or current.branch is None:
             raise StageError(f"task {current.id} has no worktree to publish")
         project = await db.get_project(self._conn, current.project_id)
         path = Path(current.worktree_path)
 
-        # 合併到一半時即使沒有任何變更也要 commit：衝突全部選「保留自己這邊」的話，
-        # 內容和合併前一模一樣，但沒有這個 commit，合併就不算完成。
+        # Commit even with no changes when a merge is in progress: if every conflict was resolved by
+        # keeping "our side", the content is identical to before the merge, but without this commit
+        # the merge is not complete.
         is_merging = await worktree.is_merge_in_progress(path)
         if is_merging or await worktree.has_uncommitted_changes(path):
             await self._commit(path, project, run)
@@ -135,10 +139,11 @@ class RunStages:
             await self._ensure_pull_request(current, project, record)
 
     async def _commit(self, path: Path, project: db.Project, run: db.Run) -> None:
-        """補 commit。合併到一半時先確認衝突真的解掉了，不能把衝突標記發布出去。
+        """Commit leftovers. Mid-merge, first confirm the conflicts are really resolved.
 
-        不論這個 run 是什麼原因開始的都要檢查：上一個解衝突的 run 可能被中止，
-        留下合併到一半的工作目錄給這一個 run。
+        Conflict markers must not be published. Check this whatever started the run: a previous
+        conflict-resolving run may have been stopped, leaving a half-merged working directory to
+        this run.
         """
         if not await worktree.is_merge_in_progress(path):
             await worktree.commit_all(
@@ -154,15 +159,17 @@ class RunStages:
         )
 
     async def archive(self, task: db.Task) -> None:
-        """清掉任務的 worktree。未 commit 的變更先 commit 到 branch，不 push。"""
+        """Remove the task's worktree. Uncommitted changes go into a branch commit, not pushed."""
         current = await db.get_task(self._conn, task.id)
         if current.worktree_path is None or current.branch is None:
-            # 沒有 worktree，或目錄不是這個工具建立的：沒有東西要清，也不能去動它。
+            # No worktree, or the directory was not created by this tool: nothing to remove, and it
+            # must not be touched.
             return
         project = await db.get_project(self._conn, current.project_id)
         path = Path(current.worktree_path)
         if await worktree.is_merge_in_progress(path):
-            # 解到一半的合併不保留：commit 下去等於把衝突標記存進 branch。任務自己的 commit 都還在。
+            # A half-done merge is not kept: committing it would store conflict markers in the
+            # branch. The task's own commits are all still there.
             await worktree.abort_merge(path)
         if await worktree.has_uncommitted_changes(path):
             await worktree.commit_all(path, "chore(agent): save uncommitted changes before archive")
@@ -172,7 +179,8 @@ class RunStages:
         assert task.branch is not None
         await worktree.push(path, task.branch)
         sha = await worktree.head_sha(path)
-        # 立刻更新快取：不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
+        # Update the cache right away instead of waiting for the next poll, so the card is not
+        # misjudged by an old commit's CI result or a stale approval.
         await db.update_task(
             self._conn,
             task.id,

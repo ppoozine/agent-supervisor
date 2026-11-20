@@ -1,4 +1,4 @@
-"""API 的錯誤回應：一律是 `{"error": {"code": ..., "message": ...}}`。"""
+"""API error responses: always `{"error": {"code": ..., "message": ...}}`."""
 
 from collections.abc import Awaitable, Callable
 
@@ -13,20 +13,21 @@ from agent_supervisor.runner import BudgetExhaustedError, NoActiveRunError, Unkn
 NOT_FOUND, CONFLICT, INVALID, INTERNAL = 404, 409, 422, 500
 
 
-# 框架自己回的錯誤（路徑不存在、方法不對）用的代碼；其他狀態一律是 `http_error`。
+# Codes for errors the framework returns itself (unknown path, wrong method); any other
+# status is `http_error`.
 HTTP_ERROR_CODES = {404: "not_found", 405: "method_not_allowed"}
 Handler = Callable[[Request, Exception], Awaitable[JSONResponse]]
 
 
 class InvalidRequestError(ValueError):
-    """請求的內容不能接受（例如路徑不是 git repo）。"""
+    """The request content is not acceptable (e.g. the path is not a git repo)."""
 
 
 class ProjectExistsError(RuntimeError):
-    """這個 repo 已經加入過。"""
+    """This repo has already been added."""
 
 
-# 例外型別 -> (HTTP 狀態, 機器可讀的代碼)。訊息用例外本身的文字。
+# Exception type -> (HTTP status, machine-readable code). The message is the exception's text.
 ERROR_RESPONSES: dict[type[Exception], tuple[int, str]] = {
     db.NotFoundError: (NOT_FOUND, "not_found"),
     db.RunAlreadyActiveError: (CONFLICT, "run_already_active"),
@@ -36,18 +37,18 @@ ERROR_RESPONSES: dict[type[Exception], tuple[int, str]] = {
     ProjectExistsError: (CONFLICT, "project_exists"),
     UnknownAgentError: (INVALID, "invalid_request"),
     InvalidRequestError: (INVALID, "invalid_request"),
-    # 沒預期到的錯誤（例如封存時 git 失敗）也用同一種形狀回應。
+    # Unexpected errors (e.g. git failing during archive) also get the same response shape.
     Exception: (INTERNAL, "internal_error"),
 }
 
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:
-    """組出一個錯誤回應。"""
+    """Build an error response."""
     return JSONResponse({"error": {"code": code, "message": message}}, status_code=status_code)
 
 
 def install_error_handlers(app: FastAPI) -> None:
-    """讓已知的例外與欄位驗證失敗都用同一種形狀回應。"""
+    """Make known exceptions and field validation failures all respond with the same shape."""
 
     def make_handler(status_code: int, code: str) -> Handler:
         async def handle(request: Request, error: Exception) -> JSONResponse:

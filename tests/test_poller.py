@@ -1,4 +1,4 @@
-"""Poller 的測試：GitHub 狀態快取的更新。GitHub 是替身，Runner 與資料庫是真的。"""
+"""Poller tests: updating the cached GitHub state. GitHub is a fake; the Runner and DB are real."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -25,7 +25,7 @@ from tests.test_stages import FakeGitHub, pr_status
 
 
 class Scene:
-    """一個 PR 開著的任務，加上 Poller。"""
+    """A task with an open PR, plus a Poller."""
 
     def __init__(self, conn: aiosqlite.Connection, config: Config) -> None:
         self.conn = conn
@@ -39,7 +39,7 @@ class Scene:
         await db.update_task(self.conn, task.id, worktree_path="/work")
 
     async def task_with_pr(self, number: int = 7, head_sha: str = "sha-1") -> db.Task:
-        """開一個任務、跑完 initial run，並當作收尾已經 push 且開了 PR。"""
+        """Open a task, finish the initial run, and act as if wrap-up pushed and opened a PR."""
         self.adapter.scripts.append([session_started(), result()])
         project = await db.upsert_project(
             self.conn, f"/repos/demo-{number}", github_repo="owner/demo"
@@ -155,7 +155,7 @@ async def test_finished_pull_request_without_a_run_is_just_recorded(scene: Scene
     scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED, pr_state=PrState.MERGED)
 
     await scene.poller.poll_once()
-    scene.github.statuses.clear()  # 之後不該再查這個 PR
+    scene.github.statuses.clear()  # this PR should not be queried again
     report = await scene.poller.poll_once()
 
     assert (await db.get_task(scene.conn, task.id)).pr_state == "merged"
@@ -177,7 +177,7 @@ async def test_one_failing_query_does_not_block_the_other_tasks(scene: Scene) ->
 async def test_lagging_github_cannot_bring_back_a_commit_we_already_replaced(
     scene: Scene,
 ) -> None:
-    """GitHub 的資料落後剛 push 的 commit 時，不能把快取寫回舊的 commit。"""
+    """When GitHub lags behind a just-pushed commit, the cache must not revert to the old commit."""
     task = await scene.task_with_pr(head_sha="sha-1")
     for sha in ("sha-1", "sha-2"):
         await db.append_event(scene.conn, task.id, None, EventType.PUSHED, {"head_sha": sha})
@@ -195,7 +195,7 @@ async def test_lagging_github_cannot_bring_back_a_commit_we_already_replaced(
 async def test_finished_pull_request_is_recorded_even_if_it_stays_on_an_earlier_commit(
     scene: Scene, final_state: PrState
 ) -> None:
-    """PR 在舊 commit 上被合併或關閉後我們又 push 了一次：GitHub 回報的永遠是舊 commit。"""
+    """PR merged/closed on an old commit, then pushed again: GitHub keeps reporting that commit."""
     task = await scene.task_with_pr(head_sha="sha-1")
     for sha in ("sha-1", "sha-2"):
         await db.append_event(scene.conn, task.id, None, EventType.PUSHED, {"head_sha": sha})
@@ -210,7 +210,7 @@ async def test_finished_pull_request_is_recorded_even_if_it_stays_on_an_earlier_
 
 
 async def test_archived_task_still_learns_how_its_pull_request_ended(scene: Scene) -> None:
-    """封存不會關掉 PR；之後在 GitHub 上合併，任務仍然要知道。"""
+    """Archiving does not close the PR; if it is merged on GitHub later, the task must know."""
     task = await scene.task_with_pr()
     await db.archive_task(scene.conn, task.id)
     scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED, pr_state=PrState.MERGED)

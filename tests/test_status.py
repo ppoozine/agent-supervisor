@@ -1,4 +1,4 @@
-"""status.py 的測試：自動修復條件與看板欄位的推導。"""
+"""Tests for status.py: auto-fix conditions and deriving the board column."""
 
 from typing import Any
 
@@ -29,9 +29,9 @@ def snapshot(
     pending_feedback: int = 0,
     **task_fields: Any,
 ) -> db.TaskSnapshot:
-    """建立一個快照。預設是：PR 開著、CI 通過、最後一次 run 成功。
+    """Build a snapshot. Defaults: PR open, CI passed, last run succeeded.
 
-    `exit_status` 為 None 表示 run 還在執行。
+    An `exit_status` of None means the run is still in progress.
     """
     fields: dict[str, Any] = {
         "pr_number": 7,
@@ -86,7 +86,7 @@ def snapshot(
 
 
 def failing(**overrides: Any) -> db.TaskSnapshot:
-    """一個符合全部自動修復條件的快照，再套用指定的差異。"""
+    """A snapshot meeting every auto-fix condition, with the given overrides applied."""
     return snapshot(**{"ci_state": "failed", **overrides})
 
 
@@ -129,11 +129,11 @@ def test_two_fix_attempts_still_allow_a_third() -> None:
 @pytest.mark.parametrize(
     ("overrides", "column", "label"),
     [
-        # 離開看板
+        # Leaves the board
         pytest.param({"archived_at": "t"}, Column.ARCHIVE, "Archived", id="archived"),
         pytest.param({"pr_state": "merged"}, Column.ARCHIVE, "Merged", id="merged"),
         pytest.param({"pr_state": "closed"}, Column.ARCHIVE, "Closed", id="closed"),
-        # 已封存的任務優先顯示 PR 的結果；PR 還開著時才是 Archived
+        # Archived tasks show the PR outcome first; they are Archived only while the PR is open
         pytest.param(
             {"archived_at": "t", "pr_state": "merged"},
             Column.ARCHIVE,
@@ -235,32 +235,33 @@ def test_board_status_for_each_row_of_the_spec(
 @pytest.mark.parametrize(
     ("overrides", "column", "label"),
     [
-        # 封存優先於一切
+        # Archiving takes precedence over everything
         pytest.param(
             {"archived_at": "t", "exit_status": None}, Column.ARCHIVE, "Archived", id="archived-1st"
         ),
-        # PR 已合併但 run 還沒停下：仍在 Working，停下後才離開看板
+        # PR merged but the run has not stopped: still Working; leaves the board once it stops
         pytest.param(
             {"pr_state": "merged", "exit_status": None},
             Column.WORKING,
             "Working",
             id="merged-but-run-still-going",
         ),
-        # 合併優先於最後一次 run 的結果
+        # Merging takes precedence over the last run's outcome
         pytest.param(
             {"pr_state": "merged", "exit_status": ExitStatus.STOPPED},
             Column.ARCHIVE,
             "Merged",
             id="merged-beats-stopped",
         ),
-        # Working 優先於 Needs you
+        # Working takes precedence over Needs you
         pytest.param(
             {"exit_status": None, "review_state": "changes_requested"},
             Column.WORKING,
             "Working",
             id="running-beats-changes-requested",
         ),
-        # Needs you 優先於 Ready to merge：run 沒有正常結束，即使 CI 是綠的
+        # Needs you takes precedence over Ready to merge: the run did not end normally, even if CI
+        # is green
         pytest.param(
             {"exit_status": ExitStatus.STOPPED},
             Column.NEEDS_YOU,
@@ -273,14 +274,14 @@ def test_board_status_for_each_row_of_the_spec(
             "Changes requested",
             id="changes-requested-beats-ci-running",
         ),
-        # Reviewer 要求修改且 CI 失敗：不自動修復，進 Needs you
+        # Reviewer requested changes and CI failed: no auto-fix; goes to Needs you
         pytest.param(
             {"review_state": "changes_requested", "ci_state": "failed"},
             Column.NEEDS_YOU,
             "Changes requested",
             id="changes-requested-with-failed-ci",
         ),
-        # 上限只擋下一次修復，不影響成果能不能合併
+        # The limit only blocks the next fix; it does not affect whether the work can be merged
         pytest.param(
             {"ci_fix_attempts": 3, "trigger": RunTrigger.CI_FAILURE},
             Column.READY_TO_MERGE,
@@ -294,7 +295,7 @@ def test_board_status_for_each_row_of_the_spec(
             "CI running",
             id="over-budget-ci-running",
         ),
-        # 核准不能蓋過失敗的 CI
+        # Approval cannot override a failed CI
         pytest.param(
             {"review_state": "approved", "ci_state": "failed", "ci_fix_attempts": 3},
             Column.NEEDS_YOU,
@@ -341,7 +342,7 @@ def test_each_broken_condition_blocks_addressing_feedback(overrides: dict[str, A
             "Addressing review",
             id="run-in-progress",
         ),
-        # 留言優先於 CI 失敗：處理留言會產生新的 commit
+        # PR comments take precedence over CI failure: handling them produces a new commit
         pytest.param(
             {"pending_feedback": 1, "ci_state": "failed"},
             Column.WORKING,
@@ -366,7 +367,8 @@ def test_each_broken_condition_blocks_addressing_feedback(overrides: dict[str, A
             "Stopped",
             id="stopped-beats-comments",
         ),
-        # GitHub 在重新審查之前一直回報「要求修改」；留言處理過之後不再擋住流程
+        # GitHub keeps reporting "changes requested" until re-review; once the comments are handled
+        # it no longer blocks the flow
         pytest.param(
             {"review_state": "changes_requested", "last_handled_feedback_event_id": 9},
             Column.READY_TO_MERGE,
@@ -394,7 +396,7 @@ def test_failed_ci_is_fixed_again_once_the_requested_changes_were_addressed() ->
 
 
 def conflicting(**overrides: Any) -> db.TaskSnapshot:
-    """一個符合全部解衝突條件的快照，再套用指定的差異。"""
+    """A snapshot meeting every conflict-resolution condition, with the given overrides applied."""
     return snapshot(**{"merge_state": "conflicting", **overrides})
 
 
@@ -438,7 +440,7 @@ def test_ci_failure_handled_on_a_commit_does_not_hide_a_conflict_on_it() -> None
             "Resolving conflict",
             id="run-in-progress",
         ),
-        # 留言 > 衝突 > CI 失敗
+        # PR comments > conflicts > CI failure
         pytest.param(
             {"merge_state": "conflicting", "pending_feedback": 1},
             Column.WORKING,
@@ -463,7 +465,7 @@ def test_ci_failure_handled_on_a_commit_does_not_hide_a_conflict_on_it() -> None
             "Merge conflict",
             id="attempts-used-up",
         ),
-        # CI 通過但有衝突，或還不知道有沒有衝突：都不能說可以合併
+        # CI passed but there are conflicts, or conflicts are unknown yet: not ready to merge
         pytest.param(
             {"merge_state": "unknown"}, Column.IN_REVIEW, "Checking mergeability", id="unknown"
         ),

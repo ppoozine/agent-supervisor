@@ -1,4 +1,4 @@
-"""config.py 的測試：預設值與 TOML 設定檔。"""
+"""Tests for config.py: defaults and the TOML config file."""
 
 from pathlib import Path
 

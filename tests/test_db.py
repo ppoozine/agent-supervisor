@@ -1,4 +1,4 @@
-"""db.py 的測試：schema、交易與不變量。"""
+"""Tests for db.py: schema, transactions, and invariants."""
 
 import asyncio
 from collections.abc import AsyncIterator
@@ -235,7 +235,7 @@ async def test_last_usage_raw_returns_latest_recorded_usage(conn: aiosqlite.Conn
 
 
 async def with_failed_ci(conn: aiosqlite.Connection, head_sha: str = "sha-1") -> db.Task:
-    """建立一個任務：initial run 已成功、PR 開著、CI 在 head_sha 上失敗。"""
+    """Create a task: the initial run succeeded, the PR is open, and CI failed on head_sha."""
     task, run = await make_task(conn)
     await db.finish_run(conn, run.id, ExitStatus.SUCCESS, tokens_in=1, tokens_out=1, cost_usd=0.1)
     await db.update_task(
@@ -402,10 +402,12 @@ async def test_open_pull_requests_are_polled_even_when_archived(conn: aiosqlite.
 async def test_a_concurrent_write_cannot_commit_half_of_another_transaction(
     conn: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """另一個工作的寫入不能把做到一半的交易提前 commit。
+    """A write from another task must not commit a half-done transaction early.
 
-    讓交易在寫入 run 之後、更新任務之前失敗，期間另一個工作寫了一筆事件。
-    兩者沒有被寫入鎖隔開的話，那筆事件的 commit 會把寫到一半的 run 一起存進去。
+    Make the transaction fail after writing the run and before updating the task, while another
+    task writes an event in between.
+    If the two are not separated by the write lock, committing that event also saves the
+    half-written run.
     """
     task = await with_failed_ci(conn)
     insert_run = db._insert_run
@@ -416,7 +418,7 @@ async def test_a_concurrent_write_cannot_commit_half_of_another_transaction(
         other_write.append(
             asyncio.create_task(db.append_event(conn, task.id, None, EventType.CI_STATUS, {}))
         )
-        for _ in range(20):  # 讓另一個工作有機會執行
+        for _ in range(20):  # give the other task a chance to run
             await asyncio.sleep(0.001)
         raise RuntimeError("failed halfway")
 

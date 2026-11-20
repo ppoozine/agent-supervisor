@@ -1,4 +1,4 @@
-"""API 的測試：REST 端點與事件推送。agent 與 GitHub 是替身，git 與資料庫是真的。"""
+"""API tests: REST endpoints and event streaming. Fake agent and GitHub; real git and DB."""
 
 import asyncio
 import json
@@ -31,7 +31,7 @@ from tests.test_stages import FakeGitHub, pr_status
 
 
 def write_file(name: str):  # type: ignore[no-untyped-def]
-    """劇本步驟：模擬 agent 在工作目錄裡寫一個檔案。"""
+    """Script step: simulate the agent writing a file in the working directory."""
 
     def step(call: Call) -> None:
         (call.cwd / name).write_text("hello\n")
@@ -40,7 +40,7 @@ def write_file(name: str):  # type: ignore[no-untyped-def]
 
 
 class Api:
-    """一個接上替身的應用程式，以及呼叫它的 client。"""
+    """An app wired to fakes, plus a client that calls it."""
 
     def __init__(self, conn: Any, config: Config, repo: GitRepo) -> None:
         self.conn = conn
@@ -60,7 +60,7 @@ class Api:
         )
 
     async def project(self) -> int:
-        """加入測試用的 repo（只加一次），回傳專案編號。"""
+        """Add the test repo (only once) and return the project id."""
         if self.project_id is None:
             response = await self.client.post(
                 "/api/projects",
@@ -73,7 +73,7 @@ class Api:
     async def task(
         self, script: list[Any], *, agent: str = "fake", **fields: Any
     ) -> dict[str, Any]:
-        """開一個任務，回傳建立當下的任務詳情。"""
+        """Open a task and return its details as of creation."""
         adapter = self.adapter if agent == "fake" else self.tokens_only
         adapter.scripts.append(script)
         body = {"project_id": await self.project(), "prompt": "do it", "agent_type": agent}
@@ -82,13 +82,13 @@ class Api:
         return response.json()  # type: ignore[no-any-return]
 
     async def agent_started(self, count: int) -> None:
-        """等到 agent 被啟動了 `count` 次。兩個任務共用劇本清單，要照順序取用才對得上。"""
+        """Wait for `count` agent starts. Tasks share one script list, taken in start order."""
         async with asyncio.timeout(10.0):
-            while len(self.adapter.calls) < count:  # noqa: ASYNC110  # 沒有事件可以等
+            while len(self.adapter.calls) < count:  # noqa: ASYNC110  # there is no event to await
                 await asyncio.sleep(0.01)
 
     async def finished(self, task_id: int) -> dict[str, Any]:
-        """等任務最新的 run 結束，回傳任務詳情。"""
+        """Wait for the task's latest run to finish and return the task details."""
         runs = await db.list_runs(self.conn, task_id)
         await self.supervisor.runner.wait(runs[-1].id)
         return (await self.client.get(f"/api/tasks/{task_id}")).json()  # type: ignore[no-any-return]
@@ -388,7 +388,7 @@ async def test_stream_replays_missed_events_then_continues_live(
         async for chunk in stream_text(api.feed, seen_up_to, lambda: api.is_closing):
             chunks.append(chunk)
             if len(chunks) == 1 + len(events) - 2:
-                # 補送完了：這時再發生的事也要收得到。
+                # Replay is done: anything that happens now must still arrive.
                 await db.update_task(
                     api.conn, created["id"], ci_state=CiState.PASSED, merge_state="clean"
                 )
@@ -434,7 +434,7 @@ async def test_connection_that_reads_too_slowly_is_ended(
     created = await api.task([session_started(), message("a"), message("b"), result()])
     await api.finished(created["id"])
 
-    await api.feed.publish_changes()  # 這條連線沒有在讀，超過上限
+    await api.feed.publish_changes()  # this connection is not reading, so it exceeds the limit
 
     async with asyncio.timeout(5.0):
         rest = [chunk async for chunk in stream]
@@ -453,7 +453,8 @@ async def test_event_that_arrives_during_a_replay_is_sent_only_once(
     stream = stream_text(api.feed, first_id, lambda: False)
     assert await anext(stream) == ": connected\n\n"
 
-    # 已經訂閱、還沒開始補送的這一刻發生的事件：補送與即時兩邊都會有它。
+    # An event that happens after subscribing but before replay starts: it shows up in both the
+    # replay and the live stream.
     await db.append_event(api.conn, created["id"], None, "agent_message", {"text": "during"})
     await api.feed.publish_changes()
     seen: list[int] = []
@@ -492,7 +493,7 @@ async def test_unexpected_failure_still_answers_in_the_agreed_shape(
 
 
 async def test_body_that_is_not_declared_as_json_is_rejected(api: Api) -> None:
-    """網頁不經 preflight 就能送出的請求（純文字的 body）不能開任務。"""
+    """A request a web page can send without preflight (a plain-text body) cannot open a task."""
     body = json.dumps({"project_id": await api.project(), "prompt": "x", "agent_type": "fake"})
 
     response = await api.client.post(
@@ -635,14 +636,14 @@ async def test_web_files_are_served_next_to_the_api(api: Api, tmp_path: Path) ->
     async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1:8765") as client:
         assert "board" in (await client.get("/")).text
         assert (await client.get("/api/projects")).json() == []
-        # 靜態檔案接走了其他所有路徑，錯誤還是要用約定的形狀回應。
+        # Static files take over every other path; errors must still use the agreed shape.
         assert error_of(await client.get("/api/nowhere")) == (404, "not_found")
         assert error_of(await client.delete("/api/tasks")) == (405, "method_not_allowed")
         assert (await client.head("/api/agents")).status_code == 405
 
 
 class Entered:
-    """記下哪些卡片被回報為「剛進 Needs you」。"""
+    """Record which cards were reported as "just entered Needs you"."""
 
     def __init__(self, api: Api) -> None:
         self.cards: list[tuple[int, str]] = []
@@ -661,7 +662,7 @@ async def test_card_entering_needs_you_is_reported_once(api: Api) -> None:
     await db.update_task(api.conn, created["id"], ci_state=CiState.FAILED, merge_state="clean")
     await db.update_task(api.conn, created["id"], review_state="changes_requested")
     await api.feed.publish_changes()
-    # 還在 Needs you 裡，只是資料又變了一次：不重複回報。
+    # Still in Needs you, only the data changed again: do not report it twice.
     await db.update_task(api.conn, created["id"], ci_state=CiState.PASSED)
     await api.feed.publish_changes()
 

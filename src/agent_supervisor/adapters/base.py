@@ -1,7 +1,8 @@
-"""AgentAdapter 介面與相關型別。
+"""The AgentAdapter interface and related types.
 
-Runner 只依賴本檔；各 agent 專屬的細節留在各自的 adapter。
-介面以「一輪對話」為單位：送一段輸入，拿回一串事件，最後一筆是這一輪的結果。
+Runner depends only on this file; details specific to each agent stay in its own adapter.
+The interface works in units of "one turn": send one input, get back a stream of events,
+and the last one is the result of that turn.
 """
 
 from collections.abc import AsyncIterator, Mapping
@@ -14,7 +15,7 @@ from agent_supervisor.enums import EventType, ExitStatus
 
 
 class SandboxLevel(StrEnum):
-    """Agent 可以寫入的範圍。"""
+    """What the agent is allowed to write to."""
 
     READ_ONLY = "read-only"
     WORKSPACE_WRITE = "workspace-write"
@@ -22,7 +23,7 @@ class SandboxLevel(StrEnum):
 
 @dataclass(frozen=True)
 class AdapterCapabilities:
-    """Adapter 如實宣告自己做得到什麼，Runner 依此決定要傳哪些限制。"""
+    """What the adapter truthfully declares it can do; Runner decides which limits to pass."""
 
     can_resume_session: bool
     can_limit_turns: bool
@@ -34,7 +35,7 @@ class AdapterCapabilities:
 
 @dataclass(frozen=True)
 class RunLimits:
-    """單一 run 在執行中由 adapter 擋下的上限；`None` 表示不設限。"""
+    """Limits for a single run that the adapter enforces while running; `None` means no limit."""
 
     max_turns: int | None
     max_budget_usd: float | None
@@ -42,7 +43,7 @@ class RunLimits:
 
 @dataclass(frozen=True)
 class PermissionPolicy:
-    """通用的權限政策。`tool_rules` 的內容由各 adapter 自行解讀。"""
+    """Generic permission policy. Each adapter interprets the contents of `tool_rules` itself."""
 
     sandbox_level: SandboxLevel = SandboxLevel.WORKSPACE_WRITE
     allow_network: bool = True
@@ -51,7 +52,7 @@ class PermissionPolicy:
 
 @dataclass(frozen=True)
 class AgentEvent:
-    """Adapter 送出的有型別事件，`type` 對應 `events.type`。"""
+    """A typed event emitted by an adapter; `type` maps to `events.type`."""
 
     type: EventType
     payload: dict[str, Any]
@@ -59,10 +60,10 @@ class AgentEvent:
 
 @dataclass(frozen=True)
 class TurnResult:
-    """一輪對話的結果，是事件串流的最後一筆。
+    """The result of one turn; the last item in the event stream.
 
-    用量與花費必須是「這一輪」的值；agent 給累計值時由 adapter 換算。
-    未知的值填 `None`，不要填 0。
+    Usage and cost must be the values for "this turn"; when the agent reports cumulative
+    values, the adapter converts them. Fill unknown values with `None`, not 0.
     """
 
     session_id: str | None
@@ -75,7 +76,7 @@ class TurnResult:
 
 
 class AgentAdapter(Protocol):
-    """控制單一種 agent 的介面。"""
+    """Interface for controlling one kind of agent."""
 
     capabilities: AdapterCapabilities
 
@@ -90,11 +91,13 @@ class AgentAdapter(Protocol):
         policy: PermissionPolicy,
         previous_usage: dict[str, Any] | None,
     ) -> AsyncIterator[AgentEvent | TurnResult]:
-        """執行一輪對話，依序送出事件，最後送出一筆 `TurnResult`。
+        """Run one turn, yielding events in order and finally one `TurnResult`.
 
-        - `session_id` 為 `None` 表示開新 session。
-        - 一拿到 session id 就要送出 `session_started` 事件。
-        - `previous_usage` 是同一個任務上一輪的 `usage_raw`，供換算單輪用量。
-        - 串流被關閉時，必須把底下的 agent 與它的子程序都停掉。
+        - `session_id` of `None` means start a new session.
+        - Emit a `session_started` event as soon as the session id is known.
+        - `previous_usage` is the `usage_raw` of the same task's previous turn, used to
+          derive this turn's usage.
+        - When the stream is closed, the underlying agent and its child processes must be
+          stopped.
         """
         ...

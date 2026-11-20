@@ -11,10 +11,12 @@ interface DialogProps {
 }
 
 /**
- * 蓋在畫面上的表單。API 拒絕時把原因顯示在按鈕上方。
+ * A form laid over the page. When the API refuses, the reason is shown above the buttons.
  *
- * 用瀏覽器原生的 modal：焦點留在表單裡，背景不能操作，按 Escape 關閉。
- * 送出之後、回應回來之前不能關，否則回應會作用在已經不存在的表單上。
+ * Uses the browser's native modal: focus stays in the form, the background is inert, and
+ * Escape closes it.
+ * It cannot be closed between submitting and the response, or the response would act on a
+ * form that no longer exists.
  */
 export function Dialog(props: DialogProps) {
   const element = useRef<HTMLDialogElement>(null)
@@ -22,7 +24,7 @@ export function Dialog(props: DialogProps) {
   useEffect(() => {
     const dialog = element.current
     if (dialog === null || dialog.open) return
-    // 測試環境（jsdom）沒有 showModal，退回成一般的開啟狀態。
+    // The test environment (jsdom) has no showModal, so fall back to a plain open state.
     if (typeof dialog.showModal === 'function') dialog.showModal()
     else dialog.setAttribute('open', '')
   }, [])
@@ -41,7 +43,7 @@ export function Dialog(props: DialogProps) {
       className="dialog"
       aria-label={props.title}
       onCancel={(event) => {
-        // Escape：由我們決定關不關，不讓瀏覽器直接關掉。
+        // Escape: we decide whether to close, instead of letting the browser close it directly.
         event.preventDefault()
         close()
       }}
