@@ -95,6 +95,10 @@ class SystemProcessTable:
             os.kill(pid, signal.SIGKILL if force else signal.SIGINT)
         except ProcessLookupError:
             return
+        except PermissionError:
+            # Owned by another user (e.g. started with sudo): it keeps running, and the caller
+            # reports it as a process that could not be stopped.
+            return
 
 
 @dataclass

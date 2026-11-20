@@ -1,6 +1,7 @@
 """Tests for recovery.py: the single-daemon lock, and handling unfinished runs at startup."""
 
 import asyncio
+import os
 import subprocess
 import sys
 import uuid
@@ -289,6 +290,13 @@ def test_system_table_ignores_a_process_that_is_already_gone(marker: str) -> Non
     process.wait()
 
     SystemProcessTable().terminate(process.pid, force=True)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root may signal any process, including init")
+def test_system_table_leaves_a_process_it_may_not_signal() -> None:
+    # A process owned by another user (e.g. root) cannot be signalled; that must not raise, so the
+    # run is held instead of crashing recovery.
+    SystemProcessTable().terminate(1, force=True)
 
 
 async def test_recovery_stops_a_real_leftover_process(
