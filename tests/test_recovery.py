@@ -1,6 +1,10 @@
 """recovery.py 的測試：單一 daemon 的鎖，以及啟動時處理未結束的 run。"""
 
-from collections.abc import AsyncIterator
+import asyncio
+import subprocess
+import sys
+import uuid
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
 import aiosqlite
@@ -8,7 +12,12 @@ import pytest
 
 from agent_supervisor import db
 from agent_supervisor.enums import EventType, ExitStatus
-from agent_supervisor.recovery import AlreadyRunningError, InstanceLock, recover_open_runs
+from agent_supervisor.recovery import (
+    AlreadyRunningError,
+    InstanceLock,
+    SystemProcessTable,
+    recover_open_runs,
+)
 
 
 class FakeProcessTable:
@@ -155,3 +164,129 @@ async def test_finished_runs_are_left_alone(conn: aiosqlite.Connection) -> None:
 
     assert report.interrupted_run_ids == []
     assert (await db.get_run(conn, run.id)).exit_status == ExitStatus.SUCCESS
+
+
+# 以下測試操作真的作業系統程序與檔案鎖，用來確認 `pgrep`、訊號與 `flock`
+# 在 macOS 與 Linux 上的行為一致（CI 兩個平台都跑）。
+
+_SLEEPER = """
+import signal, sys, time
+if sys.argv[1] == "ignore":
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+print("ready", flush=True)
+time.sleep(30)
+"""
+
+
+def start_sleeper(marker: str, *, ignore_interrupt: bool = False) -> subprocess.Popen[str]:
+    """啟動一個命令列帶著 marker 的程序，等它準備好（訊號處理已設定）才返回。"""
+    mode = "ignore" if ignore_interrupt else "default"
+    process = subprocess.Popen(
+        [sys.executable, "-c", _SLEEPER, mode, marker], stdout=subprocess.PIPE, text=True
+    )
+    assert process.stdout is not None
+    assert process.stdout.readline() == "ready\n"
+    return process
+
+
+@pytest.fixture
+def marker() -> str:
+    return f"asv-recovery-probe-{uuid.uuid4().hex}"
+
+
+@pytest.fixture
+def sleepers() -> Iterator[list[subprocess.Popen[str]]]:
+    started: list[subprocess.Popen[str]] = []
+    yield started
+    for process in started:
+        process.kill()
+        process.wait()
+
+
+def test_system_table_finds_processes_by_their_command_line(
+    marker: str, sleepers: list[subprocess.Popen[str]]
+) -> None:
+    sleepers.append(start_sleeper(marker))
+
+    assert SystemProcessTable().find(marker) == [sleepers[0].pid]
+    assert SystemProcessTable().find(f"{marker}-other") == []
+
+
+def test_system_table_interrupt_ends_a_process_that_handles_it(
+    marker: str, sleepers: list[subprocess.Popen[str]]
+) -> None:
+    sleepers.append(start_sleeper(marker))
+    table = SystemProcessTable()
+
+    table.terminate(sleepers[0].pid, force=False)
+
+    assert sleepers[0].wait(timeout=5) != 0
+    assert table.find(marker) == []
+
+
+def test_system_table_force_ends_a_process_that_ignores_the_interrupt(
+    marker: str, sleepers: list[subprocess.Popen[str]]
+) -> None:
+    sleepers.append(start_sleeper(marker, ignore_interrupt=True))
+    table = SystemProcessTable()
+
+    table.terminate(sleepers[0].pid, force=False)
+    with pytest.raises(subprocess.TimeoutExpired):
+        sleepers[0].wait(timeout=0.3)
+    table.terminate(sleepers[0].pid, force=True)
+
+    assert sleepers[0].wait(timeout=5) == -9
+    assert table.find(marker) == []
+
+
+def test_system_table_ignores_a_process_that_is_already_gone(marker: str) -> None:
+    process = start_sleeper(marker)
+    process.kill()
+    process.wait()
+
+    SystemProcessTable().terminate(process.pid, force=True)
+
+
+async def test_recovery_stops_a_real_leftover_process(
+    conn: aiosqlite.Connection, marker: str, sleepers: list[subprocess.Popen[str]]
+) -> None:
+    sleepers.append(start_sleeper(marker, ignore_interrupt=True))
+    run = await open_run(conn, marker)
+
+    # 真正的遺留程序屬於已經結束的 daemon，由 init 回收；這裡由測試自己回收。
+    reaping = asyncio.create_task(asyncio.to_thread(sleepers[0].wait))
+    report = await recover_open_runs(conn, SystemProcessTable(), grace_seconds=0.3)
+    await reaping
+
+    assert report.interrupted_run_ids == [run.id]
+    assert SystemProcessTable().find(marker) == []
+
+
+_LOCK_HOLDER = """
+import sys, time
+from pathlib import Path
+from agent_supervisor.recovery import InstanceLock
+lock = InstanceLock.acquire(Path(sys.argv[1]))
+print("locked", flush=True)
+time.sleep(30)
+"""
+
+
+def test_lock_held_by_another_process_is_refused_and_names_its_owner(tmp_path: Path) -> None:
+    lock_path = tmp_path / "daemon.lock"
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _LOCK_HOLDER, str(lock_path)], stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline() == "locked\n"
+
+        with pytest.raises(AlreadyRunningError):
+            InstanceLock.acquire(lock_path)
+        assert InstanceLock.read_owner_pid(lock_path) == holder.pid
+    finally:
+        holder.kill()
+        holder.wait()
+
+    # 持有者結束後，作業系統會釋放它的鎖。
+    InstanceLock.acquire(lock_path).release()
