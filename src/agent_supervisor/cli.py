@@ -1,16 +1,17 @@
-"""最小的命令列介面，供階段 1 手動驗證用。
+"""A minimal command-line interface for manual verification in phase 1.
 
-`serve` 啟動常駐的 daemon（API、輪詢與自動修復）。`start`、`message`、`archive`、`watch`
-是階段 1 留下來的前景模式，不需要 daemon。daemon 與前景指令共用同一把鎖，
-同一時間只能有一個在執行。
+`serve` starts the long-running daemon (API, polling and auto-fix). `start`, `message`,
+`archive` and `watch` are foreground modes left over from phase 1 that don't need the daemon.
+The daemon and the foreground commands share one lock, so only one can run at a time.
 
-- `watch`（或 `start` / `message` 加上 `--watch`）會持續輪詢 GitHub 並自動修復 CI，
-  直到按 Ctrl-C。
-- `stop` 通知正在執行的那一個程序中止所有 run，但程序本身繼續監看。
-- Ctrl-C 中止所有 run 並結束程序。
+- `watch` (or `start` / `message` with `--watch`) keeps polling GitHub and auto-fixing CI
+  until Ctrl-C is pressed.
+- `stop` tells the running process to stop all runs, but the process itself keeps watching.
+- Ctrl-C stops all runs and exits the process.
 
-兩種訊號都只是設定一個事件，由指令在適當的時機處理，所以啟動途中送到的也不會漏掉：
-run 建立前收到 Ctrl-C 就不建立；`stop` 的請求留到 run 開始之後才處理。
+Both signals only set an event that the command handles at the right moment, so signals
+arriving during startup are not lost: Ctrl-C received before the run is created means it is
+not created; a `stop` request is held until the run has started.
 """
 
 import argparse
@@ -44,7 +45,7 @@ from agent_supervisor.runner import BudgetExhaustedError, Runner, UnknownAgentEr
 from agent_supervisor.supervisor import Supervisor, build_supervisor
 
 DEFAULT_AGENT = "claude_code"
-WATCH_HELP = "run 開始後不退出，接著輪詢 GitHub 並自動修復 CI，直到按 Ctrl-C"
+WATCH_HELP = "keep running after the run starts, polling GitHub and auto-fixing CI until Ctrl-C"
 MAX_LINE_CHARS = 200
 EXIT_OK, EXIT_FAILED, EXIT_ALREADY_RUNNING = 0, 1, 2
 EXPECTED_ERRORS = (
@@ -59,7 +60,7 @@ EXPECTED_ERRORS = (
 
 @dataclass(frozen=True)
 class _Session:
-    """一個前景程序在執行期間用到的所有元件。"""
+    """All components a foreground process uses while it runs."""
 
     supervisor: Supervisor
     quit_requested: asyncio.Event
@@ -68,12 +69,12 @@ class _Session:
 
     @property
     def runner(self) -> Runner:
-        """執行與中止 run 的元件。"""
+        """The component that runs and stops runs."""
         return self.supervisor.runner
 
     @property
     def conn(self) -> aiosqlite.Connection:
-        """資料庫連線。"""
+        """The database connection."""
         return self.supervisor.conn
 
 
@@ -81,8 +82,9 @@ ForegroundAction = Callable[[_Session], Awaitable[int]]
 
 
 def main() -> None:
-    """命令列進入點。"""
-    # 監看模式會跑很久，輸出導到檔案或管線時也要逐行寫出，不然看不到進度。
+    """Command-line entry point."""
+    # Watch mode runs for a long time; flush line by line even when output goes to a file or
+    # pipe, otherwise progress is invisible.
     sys.stdout.reconfigure(line_buffering=True)  # type: ignore[union-attr]
     code = asyncio.run(
         run(
@@ -97,7 +99,7 @@ def main() -> None:
 
 
 def default_adapters() -> dict[str, AgentAdapter]:
-    """`--agent` 可以指定的 agent 種類與各自的 adapter。"""
+    """Agent types `--agent` accepts and their adapters."""
     return {DEFAULT_AGENT: ClaudeCodeAdapter(), "codex": CodexAdapter()}
 
 
@@ -109,7 +111,10 @@ async def run(
     processes: ProcessTable,
     github: GitHub,
 ) -> int:
-    """解析參數並執行對應的指令，回傳結束代碼。`config` 為 None 時從設定檔讀取。"""
+    """Parse the arguments, run the matching command and return the exit code.
+
+    When `config` is None, it is read from the config file.
+    """
     args = _build_parser().parse_args(argv)
     if config is None:
         config = load_config(Path(args.config))
@@ -134,40 +139,55 @@ async def run(
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="asv", description="agent-supervisor 階段 1 的驗證工具")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH), help="設定檔路徑")
+    parser = argparse.ArgumentParser(
+        prog="asv", description="agent-supervisor: phase 1 verification tool"
+    )
+    parser.add_argument(
+        "--config", default=str(DEFAULT_CONFIG_PATH), help="path to the config file"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    project = commands.add_parser("project", help="管理已登記的 repo")
+    project = commands.add_parser("project", help="manage registered repos")
     project_commands = project.add_subparsers(dest="project_command", required=True)
-    add = project_commands.add_parser("add", help="登記一個本機 repo，或更新它的設定")
+    add = project_commands.add_parser("add", help="register a local repo or update its settings")
     add.add_argument("repo_path", type=absolute_path)
-    add.add_argument("--github-repo", help="owner/name（預設從 origin 的網址讀出）")
-    add.add_argument("--default-branch", help="worktree 的基底分支（預設讀遠端的預設分支）")
-    add.add_argument("--require-review", action="store_true", help="要有 review 核准才算可合併")
+    add.add_argument("--github-repo", help="owner/name (defaults to the origin URL)")
+    add.add_argument(
+        "--default-branch",
+        help="base branch for worktrees (defaults to the remote's default branch)",
+    )
+    add.add_argument(
+        "--require-review",
+        action="store_true",
+        help="require an approving review before a PR counts as mergeable",
+    )
 
-    start = commands.add_parser("start", help="開一個任務並執行到結束")
-    start.add_argument("prompt", help="給 agent 的任務描述")
-    start.add_argument("--project", type=absolute_path, required=True, help="本機 repo 的路徑")
-    start.add_argument("--title", help="任務標題（預設取描述的開頭）")
-    start.add_argument("--agent", default=DEFAULT_AGENT, help="agent 種類：claude_code 或 codex")
-    start.add_argument("--model", help="模型（預設用 agent 的預設值）")
+    start = commands.add_parser("start", help="open a task and run it to completion")
+    start.add_argument("prompt", help="task description for the agent")
+    start.add_argument(
+        "--project", type=absolute_path, required=True, help="path to the local repo"
+    )
+    start.add_argument("--title", help="task title (defaults to the start of the description)")
+    start.add_argument("--agent", default=DEFAULT_AGENT, help="agent type: claude_code or codex")
+    start.add_argument("--model", help="model (defaults to the agent's default)")
     start.add_argument("--watch", action="store_true", help=WATCH_HELP)
 
-    message = commands.add_parser("message", help="對既有任務的同一個 session 追加指令")
+    message = commands.add_parser(
+        "message", help="send a follow-up instruction to an existing task's session"
+    )
     message.add_argument("task_id", type=int)
     message.add_argument("text")
     message.add_argument("--watch", action="store_true", help=WATCH_HELP)
 
-    commands.add_parser("watch", help="持續輪詢 GitHub 並自動修復 CI，直到按 Ctrl-C")
-    commands.add_parser("serve", help="啟動常駐的 daemon：API、輪詢與自動修復，直到按 Ctrl-C")
-    commands.add_parser("stop", help="中止所有正在執行的 run（監看中的程序會繼續監看）")
-    commands.add_parser("list", help="列出所有任務與目前推導出的看板欄位")
+    commands.add_parser("watch", help="keep polling GitHub and auto-fixing CI until Ctrl-C")
+    commands.add_parser("serve", help="start the daemon (API, polling and auto-fix) until Ctrl-C")
+    commands.add_parser("stop", help="stop all active runs (a watching process keeps watching)")
+    commands.add_parser("list", help="list all tasks with their currently derived board column")
 
-    archive = commands.add_parser("archive", help="封存任務並清掉它的 worktree")
+    archive = commands.add_parser("archive", help="archive a task and remove its worktree")
     archive.add_argument("task_id", type=int)
 
-    show = commands.add_parser("show", help="列出任務的 run 與事件")
+    show = commands.add_parser("show", help="show a task's runs and events")
     show.add_argument("task_id", type=int)
     return parser
 
@@ -179,9 +199,10 @@ async def _in_foreground(
     github: GitHub,
     action: ForegroundAction,
 ) -> int:
-    """取得單一實例的鎖、做完重啟復原，再執行指令。"""
-    # 先裝好訊號處理再拿鎖：別的程序一看到鎖被拿走就可能送訊號過來，
-    # 那時還沒有處理函式的話，SIGUSR1 的預設行為會直接結束這個程序。
+    """Acquire the single-instance lock, run restart recovery, then run the command."""
+    # Install signal handlers before taking the lock: another process may send a signal as soon
+    # as it sees the lock is taken, and without a handler by then, SIGUSR1's default action
+    # would terminate this process outright.
     quit_requested = asyncio.Event()
     stop_requested = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -236,10 +257,11 @@ async def _with_lock(
 
 @asynccontextmanager
 async def _stopping_on_request(session: _Session) -> AsyncIterator[None]:
-    """區塊執行期間，每收到一次 `asv stop` 就中止所有 run。
+    """While the block runs, stop all runs each time `asv stop` is received.
 
-    進入區塊之前就送到的請求還留在事件裡，一進來就會處理。所以要等 run 已經開始
-    才進入這個區塊，否則請求會在沒有任何 run 的時候被用掉。
+    A request that arrived before entering the block is still held in the event and is handled
+    immediately on entry. So only enter this block once the run has started, otherwise the
+    request would be used up while there is no run.
     """
     stopper = asyncio.create_task(_stop_whenever_requested(session))
     try:
@@ -298,7 +320,7 @@ async def _follow(session: _Session, run: db.Run, *, watch: bool) -> int:
 
 
 async def _wait_or_quit(session: _Session, run: db.Run) -> db.Run:
-    """等 run 結案；收到 Ctrl-C 就中止它。Ctrl-C 在 run 建立途中就送到也一樣有效。"""
+    """Wait for the run to finish; stop it on Ctrl-C, even if Ctrl-C came while it was created."""
     waiting = asyncio.create_task(session.runner.wait(run.id))
     quitting = asyncio.create_task(session.quit_requested.wait())
     try:
@@ -311,7 +333,7 @@ async def _wait_or_quit(session: _Session, run: db.Run) -> db.Run:
 
 
 async def _watch(session: _Session) -> int:
-    """持續輪詢與派工，直到收到 Ctrl-C；結束前中止還在跑的 run。"""
+    """Keep polling and dispatching until Ctrl-C; stop any active run before exiting."""
     print(f"watching (every {session.poll_interval_seconds:g}s); press Ctrl-C to quit")
     async with _stopping_on_request(session):
         while not session.quit_requested.is_set():
@@ -342,12 +364,13 @@ async def _poll_and_dispatch(session: _Session) -> None:
 
 
 async def _project_for(conn: aiosqlite.Connection, repo_path: Path) -> db.Project:
-    """取得已登記的專案；沒登記過就用偵測到的設定登記。"""
+    """Get the registered project; if not registered, register it with detected settings."""
     existing = await db.get_project_by_path(conn, str(repo_path))
     if existing is not None and existing.github_repo is not None:
         return existing
     if existing is not None:
-        # 登記過但還不知道 GitHub repo（例如較早的版本登記的），補上偵測到的值。
+        # Registered but the GitHub repo is unknown (e.g. registered by an older version); fill in
+        # the detected value.
         return await db.upsert_project(
             conn,
             str(repo_path),
@@ -473,7 +496,7 @@ def _format_run(run: db.Run) -> str:
 
 
 def _format_event(event_type: EventType | str, payload: dict[str, Any]) -> str:
-    """把一筆事件排成一行，內容過長時截斷。"""
+    """Format one event as a single line, truncating overly long content."""
     if event_type == EventType.AGENT_MESSAGE:
         body = f"({payload.get('kind')}) {payload.get('text')}"
     elif event_type in (EventType.COMMAND, EventType.TOOL_CALL):
