@@ -33,8 +33,8 @@ MVP 只證明一件事：一個任務從開單到 CI 綠燈，中間 CI 失敗�
 - Orchestrator 自動拆任務
 - 回覆 PR 上的留言、把留言標成已解決、在看板內合併 PR
 - 從 issue 自動建任務、webhook
-- 互動式的人工核准關卡（階段 5）
-- 自製的 API agent（階段 6）
+- 互動式的人工核准關卡（階段 8）
+- 直接打 endpoint 的 agent（階段 5）
 - 桌面安裝檔、多人與登入
 - Container sandbox
 
@@ -423,7 +423,7 @@ Dispatcher 發現任務符合條件時，在同一個交易內重新檢查條件
 
 Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基本的限制。
 
-**信任前提**：階段 1 到 4 只把這個工具用在自己信任的 repo 上。這裡的政策是基本防護，**不是安全邊界**。Agent 只要能執行測試或 shell，就有辦法透過它們間接做到清單外的事（例如讓測試程式去 push）。worktree 只隔離工作目錄，各 worktree 仍共用同一份 git 資料。真正的隔離要等階段 5 的 container sandbox。
+**信任前提**：在治理（階段 8）做完之前，只把這個工具用在自己信任的 repo 上。這裡的政策是基本防護，**不是安全邊界**。Agent 只要能執行測試或 shell，就有辦法透過它們間接做到清單外的事（例如讓測試程式去 push）。worktree 只隔離工作目錄，各 worktree 仍共用同一份 git 資料。真正的隔離要等階段 8 的 container sandbox。
 
 - `PermissionPolicy` 是通用的資料結構，包含三部分：
   - sandbox 等級：唯讀，或只能寫工作目錄
@@ -434,7 +434,7 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 - Agent 不需要 push、開 PR 或呼叫 `gh`，這些由 supervisor 做，允許清單不含這些動作。
 - Runner 內不出現任何 agent 專屬的字串。
 
-互動式核准、路徑限制、依專案設定的政策留到階段 5。
+互動式核准、路徑限制、依專案設定的政策留到階段 8。
 
 ## Daemon 重啟後的復原
 
@@ -639,7 +639,7 @@ class AgentAdapter(Protocol):
 | --- | --- | --- |
 | Claude Code | 官方 Python Agent SDK（`claude-agent-sdk`） | 階段 1 |
 | Codex | 用 subprocess 包 `codex exec` 的非互動模式，逐行讀 JSONL 事件；調查與實測結果見 `codex-notes.md` | 階段 1.5 |
-| 自製 API agent | 直接呼叫模型 API，自己寫 agent 迴圈 | 階段 6 |
+| 直接打 endpoint 的 agent | 直接呼叫模型 API，自己寫 agent 迴圈 | 階段 5 |
 
 Claude Code 選 SDK 而不是自己包 CLI 的理由見 `03-decisions.md` 第 16 筆；Codex 選包 CLI 而不是官方 SDK 的理由見第 48 筆。
 
