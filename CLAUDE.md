@@ -116,7 +116,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 - 每一步一個 branch、一個 PR，PR 描述寫明對應規格的哪一步
 - 新增行為必須附測試；`uv run pytest` 與 `uv run ruff check` 都要過才算完成
 - 型別註記寫完整；公開函式寫一行 docstring
-- 註解與文件用繁體中文，程式碼識別字與 commit message 用英文
+- 程式碼的註解與 docstring、介面文字、對外的文件（README 等）用英文；`docs/` 下的設計文件用繁體中文（決策第 143 筆）。程式碼識別字與 commit message 用英文
 - 遇到規格沒寫清楚的地方，先停下來問我，不要自行擴充範圍
 
 ## 常用指令

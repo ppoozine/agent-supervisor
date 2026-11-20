@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 
-# 同一個 PR 或 branch 推了新的 commit，就取消前一次還在跑的檢查。
+# A new commit on the same PR or branch cancels the checks still running for the previous one.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,7 +23,8 @@ jobs:
         os: [macos-latest, ubuntu-latest]
     steps:
       - uses: actions/checkout@v7
-      # setup-uv 不提供 major 版本的 tag，只能釘完整版本。Python 版本由 uv 讀 .python-version。
+      # setup-uv publishes no major-version tag, so pin the full version.
+      # uv picks the Python version from .python-version.
       - uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
