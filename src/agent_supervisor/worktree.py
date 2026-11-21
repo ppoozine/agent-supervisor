@@ -203,9 +203,33 @@ async def has_unpushed_commits(worktree_path: Path, branch: str) -> bool:
     return int(await _git(worktree_path, "rev-list", "--count", "HEAD", *exclusion)) > 0
 
 
-async def push(worktree_path: Path, branch: str) -> None:
-    """Push the branch to the remote."""
-    await _git(worktree_path, "push", "-u", REMOTE, branch)
+async def fetch_remote_branch(worktree_path: Path, branch: str) -> str | None:
+    """Fetch the branch from the remote and return its latest commit; None if it is not there."""
+    listing = await _git(worktree_path, "ls-remote", "--heads", REMOTE, f"refs/heads/{branch}")
+    if not listing:
+        return None
+    await fetch(worktree_path, branch)
+    return listing.split()[0]
+
+
+async def is_ancestor_of_head(worktree_path: Path, commit: str) -> bool:
+    """Whether the commit is HEAD or one of its ancestors."""
+    result = await run_command(
+        ["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=worktree_path
+    )
+    if result.returncode not in (0, 1):
+        detail = (result.stderr or result.stdout).strip()
+        raise GitError(f"git merge-base --is-ancestor {commit} HEAD failed: {detail}")
+    return result.returncode == 0
+
+
+async def push(worktree_path: Path, branch: str, *, replacing: str | None = None) -> None:
+    """Push the branch to the remote.
+
+    With `replacing`, overwrite the remote branch, but only while it is still at that commit.
+    """
+    lease = [] if replacing is None else [f"--force-with-lease=refs/heads/{branch}:{replacing}"]
+    await _git(worktree_path, "push", "-u", *lease, REMOTE, branch)
 
 
 async def ensure_repository(repo_path: Path) -> None:

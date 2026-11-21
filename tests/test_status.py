@@ -81,6 +81,7 @@ def snapshot(
         require_review=require_review,
         last_run=run,
         usage=usage,
+        budget=usage,
         pending_feedback=pending_feedback,
     )
 

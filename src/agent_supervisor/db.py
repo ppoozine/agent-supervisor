@@ -212,6 +212,9 @@ class TaskSnapshot:
     require_review: bool
     last_run: Run | None
     usage: TaskUsage
+    """The whole task's usage, for display."""
+    budget: TaskUsage
+    """Usage counted against the limits: only since the latest human intervention."""
     pending_feedback: int = 0
     """Number of PR comments not yet fed back to the agent."""
 
@@ -531,6 +534,7 @@ async def get_snapshot(conn: aiosqlite.Connection, task_id: int) -> TaskSnapshot
         require_review=project.require_review,
         last_run=None if row is None else _to_run(row),
         usage=await get_task_usage(conn, task_id),
+        budget=await get_budget_usage(conn, task_id),
         pending_feedback=int(pending["total"]),
     )
 
@@ -817,13 +821,32 @@ async def get_task_token_totals(conn: aiosqlite.Connection, task_id: int) -> tup
 
 async def get_task_usage(conn: aiosqlite.Connection, task_id: int) -> TaskUsage:
     """Sum the cost and token counts of all the task's runs."""
+    return await _sum_usage(conn, task_id, since_run_id=0)
+
+
+async def get_budget_usage(conn: aiosqlite.Connection, task_id: int) -> TaskUsage:
+    """Sum the usage counted against the task's limits.
+
+    Counting starts again from the latest run a person started (the task's initial run or a
+    message): a person stepping in grants another full budget, as it does fix attempts.
+    """
+    row = await _fetch_one(
+        conn,
+        "SELECT COALESCE(MAX(id), 0) AS id FROM runs WHERE task_id = ? AND trigger IN (?, ?)",
+        (task_id, RunTrigger.INITIAL, RunTrigger.USER_MESSAGE),
+    )
+    assert row is not None
+    return await _sum_usage(conn, task_id, since_run_id=int(row["id"]))
+
+
+async def _sum_usage(conn: aiosqlite.Connection, task_id: int, *, since_run_id: int) -> TaskUsage:
     row = await _fetch_one(
         conn,
         "SELECT COALESCE(SUM(cost_usd), 0) AS cost,"
         " COALESCE(SUM(COALESCE(tokens_in, 0) + COALESCE(tokens_out, 0)), 0) AS tokens,"
         " COALESCE(SUM(ended_at IS NOT NULL AND tokens_in IS NULL), 0) AS unknown_runs"
-        " FROM runs WHERE task_id = ?",
-        (task_id,),
+        " FROM runs WHERE task_id = ? AND id >= ?",
+        (task_id, since_run_id),
     )
     assert row is not None
     return TaskUsage(
@@ -841,6 +864,17 @@ async def get_last_usage_raw(conn: aiosqlite.Connection, task_id: int) -> dict[s
         (task_id, EventType.STATE_CHANGE),
     )
     return None if row is None else json.loads(row["usage_raw"])
+
+
+async def get_last_pushed_sha(conn: aiosqlite.Connection, task_id: int) -> str | None:
+    """The commit the supervisor pushed most recently for the task; None if it never pushed."""
+    row = await _fetch_one(
+        conn,
+        "SELECT json_extract(payload, '$.head_sha') AS sha FROM events"
+        " WHERE task_id = ? AND type = ? ORDER BY id DESC LIMIT 1",
+        (task_id, EventType.PUSHED),
+    )
+    return None if row is None else row["sha"]
 
 
 async def _was_pushed_earlier(conn: aiosqlite.Connection, task_id: int, head_sha: str) -> bool:

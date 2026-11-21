@@ -215,11 +215,16 @@ Agent 正常結束這一輪之後，Runner 依序做下面的事。不論是哪�
 收尾是 run 的一部分：全部做完才寫入 `ended_at`，所以收尾期間卡片仍在 Working。
 
 1. worktree 有未 commit 的變更，或停在合併到一半的狀態 → 由 supervisor 補一個 commit，訊息是 `chore(agent): save uncommitted changes from run <run 編號>`。合併到一半時先檢查衝突是否真的解掉，見「Merge conflict」。
-2. branch 相對於遠端有新的 commit → push，寫入 `pushed` 事件，並立刻把 `head_sha` 更新為剛 push 的 commit、`ci_state` 設為 `pending`、`review_state` 設為 `none`、`merge_state` 設為 `unknown`。這樣不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
+2. branch 相對於遠端有新的 commit → push（遠端的歷史被 agent 改寫時見下方「改寫過的歷史」），寫入 `pushed` 事件，並立刻把 `head_sha` 更新為剛 push 的 commit、`ci_state` 設為 `pending`、`review_state` 設為 `none`、`merge_state` 設為 `unknown`。這樣不用等下一次輪詢，卡片就不會被舊 commit 的 CI 結果或舊的核准誤判。
 3. 還沒有 PR 且 branch 相對於基底分支有 commit → 開 PR，回填 `pr_number` 並把 `pr_state` 設為 `open`，寫入 `pr_opened` 事件。PR 的標題是任務標題，內容是任務描述加上一行註明來源的文字。
 4. branch 相對於基底分支沒有任何 commit → 不開 PR，卡片進 Needs you（標籤 `No changes`）。
 
 補 commit、push 或開 PR 任何一步失敗時，run 的 `exit_status` 記為 `error`，寫入一筆事件說明原因，卡片進 Needs you。不自動重試。
+
+**改寫過的歷史**：agent 可能 amend 或 rebase 已經 push 過的 commit，沒有一種方法能對每種 agent 都擋住（Codex 無法逐次攔截指令）。所以 push 前先 fetch 遠端的 branch，遠端最新的 commit 不是本機 `HEAD` 的祖先時：
+
+- 遠端最新的 commit 是 supervisor 最近一次 push 的（最後一筆 `pushed` 事件的 `head_sha`）→ 代表是 agent 改寫了歷史，用 `--force-with-lease=<branch>:<那個 commit>` 覆蓋。這個參數只在遠端仍停在那個 commit 時才覆蓋，fetch 之後才有人 push 的話 push 會失敗。`pushed` 事件另外記 `forced: true` 與被取代的 `replaced_sha`。PR 上針對舊 commit 的 review 留言會變成過時。
+- 不是 → 遠端有別人 push 的 commit（例如有人在 GitHub 上套用了 review 的建議），不覆蓋：run 以 `error` 結束，訊息寫明遠端有不是這個工具 push 的 commit，由人處理。
 
 收尾的每一步都要先查現況再動手，重做一次不會出錯：已經 push 過就不再 push，GitHub 上這個 branch 已經有 PR 就回填它的編號與實際狀態、不再開一個。收尾做到一半 daemon 當掉時，run 會被標成 `interrupted`；之後使用者送訊息讓它繼續，那一次 run 結束時的收尾會把沒做完的補上。
 
@@ -251,7 +256,7 @@ PR 被合併或關閉時如果還有 run 在執行，Poller 會中止那個 run�
 1. `head_sha` 上的所有 CI 檢查都已結束，且至少一個失敗
 2. `head_sha` 不等於 `last_handled_head_sha`
 3. `ci_fix_attempts` 小於 3
-4. 任務的剩餘預算大於零：花費上限減去累計 `cost_usd`，以及 token 上限減去累計 token 數，兩者都要大於零
+4. 任務的剩餘預算大於零：花費上限減去累計 `cost_usd`，以及 token 上限減去累計 token 數，兩者都要大於零（從最近一次人介入起累計，見「防無限迴圈」第 3 條）
 5. 沒有 run 正在執行
 6. PR 開著，任務未封存
 7. 最後一次 run 的 `exit_status` 是 `success`
@@ -279,15 +284,15 @@ Dispatcher 發現任務符合條件時：
 - 抓 log 之前會再確認 PR 的最新 commit 仍是 `source_head_sha`，已經不是就以 `error` 結束。
 - log 會去掉每行的時間戳與顏色碼，每個失敗的檢查只保留尾段。所有檢查合計的長度上限是全域設定（暫定 20,000 個字元），平均分給各個檢查。實測一個吵雜的失敗步驟有 3,008 行、320 KB，真正的錯誤在最後兩行。
 
-**修復次數的歸零**：使用者送訊息時，在建立 run 的同一個交易內把 `ci_fix_attempts` 與 `feedback_attempts` 歸零。人已經介入，自動修復重新有 3 次機會、留言處理重新有 5 次；花費與 token 上限仍然有效。PR 上的留言不會讓這兩個次數歸零，理由見「Review 留言回饋」。
+**修復次數的歸零**：使用者送訊息時，在建立 run 的同一個交易內把 `ci_fix_attempts` 與 `feedback_attempts` 歸零。人已經介入，自動修復重新有 3 次機會、留言處理重新有 5 次；花費與 token 也從這個 run 起重新累計（見「防無限迴圈」第 3 條）。PR 上的留言不會讓這兩個次數歸零，理由見「Review 留言回饋」。
 
-使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務的花費或 token 已達上限時，目前的實作會拒絕新的訊息（這一點尚未定案，見 `03-decisions.md`）。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。PR 已關閉（不是合併）且未封存的任務，送訊息前先向 GitHub 查一次 PR 是不是重新開啟了：Poller 隔好幾輪才查一次已關閉的 PR（見「背景工作」），不先查的話，剛在 GitHub 上重新開啟就送的訊息仍會被拒絕。查詢失敗時回報 GitHub 的錯誤，不建立 run。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
+使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。送訊息不會因為花費或 token 上限被拒絕：人送訊息就開始一份新的預算。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。PR 已關閉（不是合併）且未封存的任務，送訊息前先向 GitHub 查一次 PR 是不是重新開啟了：Poller 隔好幾輪才查一次已關閉的 PR（見「背景工作」），不先查的話，剛在 GitHub 上重新開啟就送的訊息仍會被拒絕。查詢失敗時回報 GitHub 的錯誤，不建立 run。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
 
 **防無限迴圈**
 
 1. 同一個 commit 的 CI 失敗只餵回一次：比對 `last_handled_head_sha`。同一個 commit 的衝突只處理一次：比對 `last_handled_conflict_head_sha`。同一則留言也只餵回一次：比對 `last_handled_feedback_event_id`。
 2. 自動修復最多 3 次：`ci_fix_attempts` 到 3 就停止，解衝突也算在這 3 次裡。留言的自動處理最多 5 次：`feedback_attempts` 到 5 就停止。
-3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`，其中 `tokens_in` 包含快取的輸入 token。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
+3. 單一任務的花費上限與 token 上限：累計 `cost_usd` 或累計 token 數任何一個達到上限，就不再啟動自動修復；兩個上限值都是全域設定。從最近一次人介入（任務的第一個 run，或使用者送訊息建立的 run）起累計，之前的 run 不算：人每介入一次，就多一份預算，和修復次數的歸零一樣。卡片上顯示的花費與 token 仍然是整個任務的總和。累計 token 數是所有 run 的 `tokens_in` 加 `tokens_out`，其中 `tokens_in` 包含快取的輸入 token。`TurnResult` 回報的必須是**這一輪**的用量；agent 給的是整個 session 的累計值時（例如 Codex 的 CLI），由 adapter 相減換算。
 4. 單一 run 的上限：Runner 把「剩餘預算」與「最多輪數」交給 adapter，在執行中就擋下，不等 run 結束。Adapter 做不到時由 `capabilities` 表明。
 5. 單一 run 的執行時間上限：由 Runner 自己計時，不依賴 agent。超過就中止這個 run，`exit_status` 記為 `limit_reached`。這是所有 adapter 都有的最後一道防線。
 
@@ -532,7 +537,6 @@ API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠
 | 專案已經加入過 | 409 | `project_exists` |
 | 任務已有 run 在執行（送訊息、封存） | 409 | `run_already_active` |
 | 任務已封存，或 PR 已合併或關閉 | 409 | `task_not_runnable` |
-| 花費或 token 已達上限 | 409 | `budget_exhausted` |
 | 沒有 run 可以中止 | 409 | `no_active_run` |
 | 重啟前留下的 run，遺留程序還是停不掉 | 409 | `process_still_running` |
 | 欄位不合法、agent 種類不存在、路徑不是 git repo 工作目錄的最上層、body 不是以 JSON 的型別送出 | 422 | `invalid_request` |

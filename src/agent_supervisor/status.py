@@ -63,8 +63,8 @@ _WORKING_LABELS = {
 
 
 def has_remaining_budget(snapshot: TaskSnapshot, limits: Limits) -> bool:
-    """Whether the task's cumulative cost and token count are both still below the limits."""
-    return snapshot.usage.cost_usd < limits.cost_usd and snapshot.usage.tokens < limits.tokens
+    """Whether the cost and tokens since the latest human intervention are below the limits."""
+    return snapshot.budget.cost_usd < limits.cost_usd and snapshot.budget.tokens < limits.tokens
 
 
 def can_auto_fix(snapshot: TaskSnapshot, limits: Limits) -> bool:

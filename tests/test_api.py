@@ -219,13 +219,15 @@ async def test_message_is_refused_while_a_run_is_active(api: Api) -> None:
     assert len(await db.list_runs(api.conn, created["id"])) == 1
 
 
-async def test_message_is_refused_once_the_budget_is_used_up(api: Api) -> None:
+async def test_message_is_accepted_after_the_budget_is_used_up(api: Api) -> None:
     created = await api.task([session_started(), result(cost_usd=1.5)])
     await api.finished(created["id"])
+    api.adapter.scripts.append([result(cost_usd=0.1)])
 
     response = await api.client.post(f"/api/tasks/{created['id']}/messages", json={"text": "more"})
 
-    assert error_of(response) == (409, "budget_exhausted")
+    assert response.status_code == 201, response.text
+    assert (await api.finished(created["id"]))["runs"][-1]["exit_status"] == "success"
 
 
 async def test_stop_ends_only_the_named_task(api: Api) -> None:

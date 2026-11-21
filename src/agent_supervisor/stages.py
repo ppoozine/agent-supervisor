@@ -10,6 +10,7 @@ a duplicate PR.
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
@@ -181,8 +182,23 @@ class RunStages:
         await worktree.remove(Path(project.repo_path), path)
 
     async def _push(self, task: db.Task, path: Path, record: EventWriter) -> None:
+        """Push the branch; overwrite it only if the agent rewrote what the supervisor pushed.
+
+        The agent may amend or rebase commits that were already pushed, and no agent can be
+        reliably stopped from doing so. The remote branch is overwritten only while it is still at
+        the commit the supervisor pushed last; a commit someone else pushed is never overwritten.
+        """
         assert task.branch is not None
-        await worktree.push(path, task.branch)
+        remote_sha = await worktree.fetch_remote_branch(path, task.branch)
+        replaced = None
+        if remote_sha is not None and not await worktree.is_ancestor_of_head(path, remote_sha):
+            if remote_sha != await db.get_last_pushed_sha(self._conn, task.id):
+                raise StageError(
+                    f"the remote branch {task.branch} has commit {remote_sha[:8]} that this tool"
+                    " did not push; not overwriting it"
+                )
+            replaced = remote_sha
+        await worktree.push(path, task.branch, replacing=replaced)
         sha = await worktree.head_sha(path)
         # Update the cache right away instead of waiting for the next poll, so the card is not
         # misjudged by an old commit's CI result or a stale approval.
@@ -194,7 +210,10 @@ class RunStages:
             review_state=ReviewState.NONE,
             merge_state=MergeState.UNKNOWN,
         )
-        await record(EventType.PUSHED, {"branch": task.branch, "head_sha": sha})
+        payload: dict[str, Any] = {"branch": task.branch, "head_sha": sha}
+        if replaced is not None:
+            payload |= {"forced": True, "replaced_sha": replaced}
+        await record(EventType.PUSHED, payload)
 
     async def _ensure_pull_request(
         self, task: db.Task, project: db.Project, record: EventWriter

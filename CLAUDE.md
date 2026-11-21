@@ -92,7 +92,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 4. **防無限迴圈**：
    - 同一個 commit 的 CI 失敗只餵回一次（比對 `last_handled_head_sha`）；同一個 commit 的衝突只處理一次（比對 `last_handled_conflict_head_sha`）；同一則留言只餵回一次（比對 `last_handled_feedback_event_id`）
    - 自動修復與解衝突合計最多 3 次（`ci_fix_attempts`）；留言的自動處理最多 5 次（`feedback_attempts`）；PR 上的留言不會讓這兩個次數歸零
-   - 單一任務累計 `cost_usd` 或累計 token 數達到全域上限就停止
+   - 單一任務累計 `cost_usd` 或累計 token 數達到全域上限就停止；從最近一次人介入（開任務或送訊息）起累計，送訊息不因預算被拒
    - 單一 run 的輪數與花費上限由 adapter 在執行中擋下；執行時間上限由 Runner 自己計時
    - Stop、中斷、出錯之後不自動開新的 run，等人介入
    - 這些規則只決定能不能再自動修復，不影響成果能不能合併；細節以規格為準

@@ -34,10 +34,6 @@ class NoActiveRunError(RuntimeError):
     """The task has no run in progress, so there is nothing to stop."""
 
 
-class BudgetExhaustedError(RuntimeError):
-    """The task has hit its cost or token limit and cannot create another run."""
-
-
 class NoWorkingDirectoryError(RuntimeError):
     """The task still has no working directory after the prepare stage; the agent cannot run."""
 
@@ -115,10 +111,12 @@ class Runner:
         return run
 
     async def send_message(self, task_id: int, text: str) -> db.Run:
-        """Send a follow-up instruction to the same session of an existing task as a new run."""
+        """Send a follow-up instruction to the same session of an existing task as a new run.
+
+        Never refused for the task's cost or token limit: a message starts a new budget.
+        """
         async with self._lock_for(task_id):
             task = await db.get_task(self._conn, task_id)
-            await self._require_remaining_budget(task_id)
             run = await db.create_run(self._conn, task_id, RunTrigger.USER_MESSAGE, text)
             self._launch(task, run)
         return run
@@ -271,13 +269,6 @@ class Runner:
             job.work.cancel()
         await asyncio.wait({job.work})
 
-    async def _require_remaining_budget(self, task_id: int) -> None:
-        usage = await db.get_task_usage(self._conn, task_id)
-        if usage.cost_usd >= self._config.task_cost_limit_usd:
-            raise BudgetExhaustedError(f"task {task_id} reached its cost limit")
-        if usage.tokens >= self._config.task_token_limit:
-            raise BudgetExhaustedError(f"task {task_id} reached its token limit")
-
     async def _execute(self, task: db.Task, job: _Job, deadline: float) -> None:
         """Execute a run's prepare, agent, and wrap-up stages; the run is always finished."""
 
@@ -332,7 +323,7 @@ class Runner:
 
     async def _limits_for(self, task_id: int, adapter: AgentAdapter) -> RunLimits:
         capabilities = adapter.capabilities
-        usage = await db.get_task_usage(self._conn, task_id)
+        usage = await db.get_budget_usage(self._conn, task_id)
         remaining = max(self._config.task_cost_limit_usd - usage.cost_usd, 0.0)
         return RunLimits(
             max_turns=self._config.max_turns_per_run if capabilities.can_limit_turns else None,

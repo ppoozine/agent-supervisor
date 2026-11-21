@@ -42,7 +42,7 @@ from agent_supervisor.recovery import (
     SystemProcessTable,
     recover_open_runs,
 )
-from agent_supervisor.runner import BudgetExhaustedError, Runner, UnknownAgentError
+from agent_supervisor.runner import Runner, UnknownAgentError
 from agent_supervisor.supervisor import Supervisor, build_supervisor
 
 DEFAULT_AGENT = "claude_code"
@@ -53,7 +53,6 @@ EXPECTED_ERRORS = (
     db.NotFoundError,
     db.RunAlreadyActiveError,
     db.TaskNotRunnableError,
-    BudgetExhaustedError,
     UnknownAgentError,
     worktree.GitError,
     # Sending a message to a task with a closed PR first asks GitHub whether it was reopened.
