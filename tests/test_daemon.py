@@ -1,6 +1,7 @@
 """Daemon tests: a real HTTP server (localhost only) is started; the agent and GitHub are fakes."""
 
 import asyncio
+import logging
 import os
 import signal
 import socket
@@ -238,4 +239,46 @@ async def test_failing_polling_round_does_not_stop_later_rounds(asv: Daemon) -> 
 
     assert failures == 2
     assert ready["ci_state"] == "passed"
+    assert await asv.quit() == 0
+
+
+async def test_first_start_creates_its_data_directory_and_serves_the_board(
+    asv: Daemon,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_supervisor.daemon")
+    board = tmp_path / "package" / "web_dist"
+    board.mkdir(parents=True)
+    (board / "index.html").write_text("<p>the board</p>")
+    monkeypatch.setattr(daemon, "WEB_DIST", board)
+    assert not asv.config.data_dir.exists()
+
+    await asv.start()
+    page = await asv.client.get("/")
+
+    assert (page.status_code, page.text) == (200, "<p>the board</p>")
+    assert asv.config.db_path.exists()
+    assert f"board and API at http://127.0.0.1:{asv.config.api_port}" in caplog.text
+    assert await asv.quit() == 0
+
+
+async def test_without_a_built_board_the_root_says_how_to_get_one(
+    asv: Daemon,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_supervisor.daemon")
+    monkeypatch.setattr(daemon, "WEB_DIST", tmp_path / "package" / "web_dist")
+
+    await asv.start()
+    page = await asv.client.get("/")
+    api = await asv.client.get("/api/projects")
+
+    assert page.status_code == 200
+    assert "The board is not included in this installation" in page.text
+    assert api.status_code == 200
+    assert "this installation has no board" in caplog.text
     assert await asv.quit() == 0

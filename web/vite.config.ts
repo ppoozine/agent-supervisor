@@ -1,9 +1,15 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
-// 開發時前端在 5173，把 /api 轉給本機的 daemon；正式使用時由 daemon 直接提供 dist。
+// During development the frontend runs on 5173 and forwards /api to the local daemon. The build
+// goes into the Python package, where the daemon serves it from, and release packages carry it.
 export default defineConfig({
   plugins: [react()],
+  build: {
+    outDir: '../src/agent_supervisor/web_dist',
+    // The directory is outside web/, so Vite only empties it when told to.
+    emptyOutDir: true,
+  },
   server: {
     proxy: { '/api': 'http://127.0.0.1:8765' },
   },

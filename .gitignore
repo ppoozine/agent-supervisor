@@ -224,3 +224,5 @@ __marimo__/
 
 # Frontend
 web/node_modules/
+# Built by `npm run build` in web/; release packages carry it, git does not.
+src/agent_supervisor/web_dist/
