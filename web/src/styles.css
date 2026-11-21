@@ -286,6 +286,21 @@ label.checkbox input {
   text-align: left;
 }
 
+.sidebar-settings {
+  display: block;
+  margin-top: auto;
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+.sidebar-settings:hover,
+.sidebar-settings.is-open {
+  background: var(--panel-raised);
+  color: var(--text);
+  text-decoration: none;
+}
+
 .main {
   display: flex;
   flex-direction: column;
@@ -731,3 +746,74 @@ td pre {
 .diff-line.diff-hunk { color: var(--blue); background: color-mix(in srgb, var(--blue) 8%, transparent); }
 .diff-line.diff-meta { color: var(--muted); font-style: italic; }
 
+/* Settings page */
+.settings {
+  max-width: 760px;
+  padding: 16px 20px 32px;
+  overflow-y: auto;
+}
+
+.settings h2 {
+  margin: 20px 0 8px;
+  font-size: 15px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.settings-header button {
+  margin-left: auto;
+}
+
+.tool {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.tool-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.tool-state {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.tool-state.is-usable {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  color: var(--green);
+}
+
+.tool-state.is-unusable {
+  background: color-mix(in srgb, var(--orange) 18%, transparent);
+  color: var(--orange);
+}
+
+.tool-fix {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--mono);
+  white-space: pre-wrap;
+  user-select: all;
+}
+
+.notice {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+}

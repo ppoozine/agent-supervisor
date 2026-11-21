@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { createTask, errorMessage } from '../api'
 import type { Agent, Project, TaskDetail } from '../types'
 import { Dialog } from './Dialog'
-import { agentName } from './TaskCard'
 
 interface NewTaskDialogProps {
   projects: Project[]
@@ -12,10 +11,16 @@ interface NewTaskDialogProps {
   onClose: () => void
 }
 
-/** The form for opening a task: project, agent, title and task description. */
+/**
+ * The form for opening a task: project, agent, title and task description.
+ *
+ * Only agents that could be used at the daemon's last check are offered; the settings page says
+ * what the others are missing.
+ */
 export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskDialogProps) {
+  const usableAgents = agents.filter((agent) => agent.usable)
   const [projectId, setProjectId] = useState(projects[0]?.id ?? 0)
-  const [agentType, setAgentType] = useState(agents[0]?.agent_type ?? '')
+  const [agentType, setAgentType] = useState(usableAgents[0]?.agent_type ?? '')
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -43,6 +48,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
       title="New task"
       submitLabel="Start task"
       isBusy={isBusy}
+      canSubmit={usableAgents.length > 0}
       error={error}
       onSubmit={() => void submit()}
       onClose={onClose}
@@ -61,15 +67,23 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
         <label>
           Agent
           <select value={agentType} onChange={(event) => setAgentType(event.target.value)}>
-            {agents.map((agent) => (
+            {usableAgents.map((agent) => (
               <option key={agent.agent_type} value={agent.agent_type}>
-                {agentName(agent.agent_type)}
+                {agent.display_name}
                 {agent.reports_cost ? '' : ' (reports tokens only)'}
               </option>
             ))}
           </select>
         </label>
       </div>
+      {usableAgents.length < agents.length && (
+        <div className="muted">
+          {usableAgents.length === 0 ? 'No agent can be used yet. ' : 'Some agents are not ready. '}
+          <a href="#/settings" onClick={onClose}>
+            See Settings
+          </a>
+        </div>
+      )}
       <label>
         Title
         <input
