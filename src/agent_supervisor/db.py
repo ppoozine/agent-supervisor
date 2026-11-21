@@ -843,6 +843,17 @@ async def get_last_usage_raw(conn: aiosqlite.Connection, task_id: int) -> dict[s
     return None if row is None else json.loads(row["usage_raw"])
 
 
+async def get_last_pushed_sha(conn: aiosqlite.Connection, task_id: int) -> str | None:
+    """The commit the supervisor pushed most recently for the task; None if it never pushed."""
+    row = await _fetch_one(
+        conn,
+        "SELECT json_extract(payload, '$.head_sha') AS sha FROM events"
+        " WHERE task_id = ? AND type = ? ORDER BY id DESC LIMIT 1",
+        (task_id, EventType.PUSHED),
+    )
+    return None if row is None else row["sha"]
+
+
 async def _was_pushed_earlier(conn: aiosqlite.Connection, task_id: int, head_sha: str) -> bool:
     row = await _fetch_one(
         conn,

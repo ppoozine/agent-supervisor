@@ -26,6 +26,7 @@ from agent_supervisor.github import (
     PullRequest,
     PullRequestStatus,
 )
+from agent_supervisor.runner import EventWriter
 from agent_supervisor.stages import RunStages, StageError
 from tests.conftest import GitRepo
 
@@ -100,13 +101,16 @@ class FakeGitHub:
 
 
 class Recorder:
-    """Collect the events written during wrap-up."""
+    """Collect the events written during wrap-up, and store them as the Runner would."""
 
-    def __init__(self) -> None:
+    def __init__(self, store: EventWriter | None = None) -> None:
         self.events: list[tuple[EventType, dict[str, Any]]] = []
+        self._store = store
 
     async def __call__(self, event_type: EventType, payload: dict[str, Any]) -> None:
         self.events.append((event_type, payload))
+        if self._store is not None:
+            await self._store(event_type, payload)
 
     def types(self) -> list[EventType]:
         return [event_type for event_type, _ in self.events]
@@ -120,7 +124,7 @@ class Scene:
         self.repo = repo
         self.github = FakeGitHub()
         self.stages = RunStages(conn, config, self.github)  # type: ignore[arg-type]
-        self.record = Recorder()
+        self.record = Recorder(self._store)
         self.task: db.Task
         self.run: db.Run
 
@@ -136,6 +140,9 @@ class Scene:
             agent_type="fake",
             model=None,
         )
+
+    async def _store(self, event_type: EventType, payload: dict[str, Any]) -> None:
+        await db.append_event(self.conn, self.task.id, self.run.id, event_type, payload)
 
     async def prepare(self) -> Path:
         await self.stages.prepare(self.task, self.run, self.record)
@@ -297,6 +304,7 @@ async def test_later_finalize_pushes_new_commits_to_the_same_pull_request(scene:
     assert task.head_sha == scene.remote_sha()
     assert (task.ci_state, task.review_state) == ("pending", "none")
     assert scene.record.types() == [EventType.PUSHED, EventType.PR_OPENED, EventType.PUSHED]
+    assert "forced" not in scene.record.events[-1][1]
 
 
 async def test_repeating_finalize_with_nothing_new_does_nothing(scene: Scene) -> None:
@@ -329,8 +337,62 @@ async def test_push_failure_is_reported(scene: Scene) -> None:
     (path / "greeting.txt").write_text("hello\n")
     scene.repo.git("remote", "set-url", "origin", "/nonexistent/origin.git")
 
-    with pytest.raises(worktree.GitError, match="push"):
+    # The remote is first read before pushing, so that is where the failure shows up.
+    with pytest.raises(worktree.GitError, match=r"nonexistent/origin\.git"):
         await scene.finalize()
+
+
+def push_as_someone_else(scene: Scene, tmp_path: Path) -> str:
+    """Add a commit to the task's branch from another clone, as a person on GitHub would."""
+    assert scene.task.branch is not None
+    other = tmp_path / "other"
+    scene.repo.git("clone", "-q", "-b", scene.task.branch, str(scene.repo.origin), str(other))
+    (other / "suggestion.txt").write_text("from review\n")
+    scene.repo.git("add", "suggestion.txt", cwd=other)
+    identity = ["-c", "user.email=other@example.com", "-c", "user.name=Other"]
+    scene.repo.git(*identity, "commit", "-q", "-m", "apply suggestion", cwd=other)
+    scene.repo.git("push", "-q", "origin", scene.task.branch, cwd=other)
+    return scene.repo.git("rev-parse", "HEAD", cwd=other)
+
+
+async def test_commits_the_agent_rewrote_after_pushing_replace_the_pushed_ones(
+    scene: Scene,
+) -> None:
+    path = await scene.prepare()
+    (path / "greeting.txt").write_text("hello\n")
+    await scene.finalize()
+    pushed = scene.remote_sha()
+    (path / "greeting.txt").write_text("hello, amended\n")
+    scene.repo.git("commit", "-q", "-a", "--amend", "-m", "feat: add greeting", cwd=path)
+
+    task = await scene.finalize()
+
+    assert scene.remote_sha() == await worktree.head_sha(path) == task.head_sha
+    event_type, payload = scene.record.events[-1]
+    assert event_type is EventType.PUSHED
+    assert (payload["forced"], payload["replaced_sha"]) == (True, pushed)
+
+
+@pytest.mark.parametrize("agent_rewrote", [False, True], ids=["new-commit", "rewritten"])
+async def test_a_commit_someone_else_pushed_is_never_overwritten(
+    scene: Scene, tmp_path: Path, agent_rewrote: bool
+) -> None:
+    path = await scene.prepare()
+    (path / "greeting.txt").write_text("hello\n")
+    await scene.finalize()
+    theirs = push_as_someone_else(scene, tmp_path)
+    (path / "greeting.txt").write_text("hello again\n")
+    if agent_rewrote:
+        scene.repo.git("commit", "-q", "-a", "--amend", "-m", "feat: add greeting", cwd=path)
+    else:
+        await worktree.commit_all(path, "feat: more greeting")
+    events_before = len(scene.record.events)
+
+    with pytest.raises(StageError, match="did not push"):
+        await scene.finalize()
+
+    assert scene.remote_sha() == theirs
+    assert len(scene.record.events) == events_before
 
 
 async def test_pull_request_failure_can_be_retried_without_pushing_again(scene: Scene) -> None:
