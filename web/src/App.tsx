@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { errorMessage, listAgents, listProjects, listTasks } from './api'
 import { AddProjectForm } from './components/AddProjectForm'
@@ -6,6 +6,7 @@ import { Board } from './components/Board'
 import { NewTaskDialog } from './components/NewTaskDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
+import { AgentNames } from './components/TaskCard'
 import { TaskPage } from './components/TaskPage'
 import { connectStream, type StreamStatus } from './stream'
 import type { Agent, Card, EventRow, Project } from './types'
@@ -115,88 +116,94 @@ export function App() {
   }, [])
 
   const allCards = Object.values(cards)
+  const agentNames = useMemo(
+    () => Object.fromEntries(agents.map((agent) => [agent.agent_type, agent.display_name])),
+    [agents],
+  )
   const blocker = newTaskBlocker(projects, agents)
   // Only once agents have loaded: an empty list while loading is not "none usable".
   const hasNoUsableAgent = agents.length > 0 && !agents.some((agent) => agent.usable)
   const openCard = openTaskId === null ? undefined : cards[openTaskId]
 
   return (
-    <div className="layout">
-      <Sidebar
-        projects={projects}
-        cards={allCards}
-        openTaskId={openTaskId}
-        isSettingsOpen={page.kind === 'settings'}
-        onAddProject={() => setIsAddingProject(true)}
-      />
-      <main className="main">
-        <header className="topbar">
-          <h1>
-            {page.kind === 'board' ? (
-              'Board'
-            ) : (
-              <a className="back" href="#/">
-                ← Board
-              </a>
-            )}
-          </h1>
-          <span className={`connection connection-${status}`}>{STATUS_TEXT[status]}</span>
-          <button
-            className="primary"
-            onClick={() => setIsCreatingTask(true)}
-            disabled={blocker !== null}
-            title={blocker ?? undefined}
-          >
-            + New task
-          </button>
-        </header>
-        {loadError && (
-          <div className="alert" role="alert">
-            {loadError}
-          </div>
-        )}
-        {page.kind === 'board' && hasNoUsableAgent && (
-          <div className="alert" role="status">
-            No agent can be used yet. <a href="#/settings">See Settings</a> for what is missing.
-          </div>
-        )}
-        {page.kind === 'settings' && <SettingsPage onChecked={() => void reload()} />}
-        {page.kind === 'board' && <Board cards={allCards} projects={projects} />}
-        {openTaskId !== null && (
-          <TaskPage
-            key={openTaskId}
-            taskId={openTaskId}
-            card={openCard}
-            project={projects.find((project) => project.id === openCard?.project_id)}
-            connectionCount={connectionCount}
-            subscribeToEvents={subscribeToEvents}
-            onTaskChanged={showCard}
+    <AgentNames.Provider value={agentNames}>
+      <div className="layout">
+        <Sidebar
+          projects={projects}
+          cards={allCards}
+          openTaskId={openTaskId}
+          isSettingsOpen={page.kind === 'settings'}
+          onAddProject={() => setIsAddingProject(true)}
+        />
+        <main className="main">
+          <header className="topbar">
+            <h1>
+              {page.kind === 'board' ? (
+                'Board'
+              ) : (
+                <a className="back" href="#/">
+                  ← Board
+                </a>
+              )}
+            </h1>
+            <span className={`connection connection-${status}`}>{STATUS_TEXT[status]}</span>
+            <button
+              className="primary"
+              onClick={() => setIsCreatingTask(true)}
+              disabled={blocker !== null}
+              title={blocker ?? undefined}
+            >
+              + New task
+            </button>
+          </header>
+          {loadError && (
+            <div className="alert" role="alert">
+              {loadError}
+            </div>
+          )}
+          {page.kind === 'board' && hasNoUsableAgent && (
+            <div className="alert" role="status">
+              No agent can be used yet. <a href="#/settings">See Settings</a> for what is missing.
+            </div>
+          )}
+          {page.kind === 'settings' && <SettingsPage onChecked={() => void reload()} />}
+          {page.kind === 'board' && <Board cards={allCards} projects={projects} />}
+          {openTaskId !== null && (
+            <TaskPage
+              key={openTaskId}
+              taskId={openTaskId}
+              card={openCard}
+              project={projects.find((project) => project.id === openCard?.project_id)}
+              connectionCount={connectionCount}
+              subscribeToEvents={subscribeToEvents}
+              onTaskChanged={showCard}
+            />
+          )}
+        </main>
+        {isCreatingTask && (
+          <NewTaskDialog
+            projects={projects}
+            agents={agents}
+            onCreated={(task) => {
+              showCard(task)
+              setIsCreatingTask(false)
+            }}
+            onClose={() => setIsCreatingTask(false)}
           />
         )}
-      </main>
-      {isCreatingTask && (
-        <NewTaskDialog
-          projects={projects}
-          agents={agents}
-          onCreated={(task) => {
-            showCard(task)
-            setIsCreatingTask(false)
-          }}
-          onClose={() => setIsCreatingTask(false)}
-        />
-      )}
-      {isAddingProject && (
-        <AddProjectForm
-          onAdded={(project) => {
-            setProjects((current) => [...current, project])
-            setIsAddingProject(false)
-            // Fetch again: this invalidates any older load still in flight, so it cannot overwrite
-      // the new project.
-            void reload()
-          }}
-          onClose={() => setIsAddingProject(false)}
-        />
-      )}
-    </div>
+        {isAddingProject && (
+          <AddProjectForm
+            onAdded={(project) => {
+              setProjects((current) => [...current, project])
+              setIsAddingProject(false)
+              // Fetch again: this invalidates any older load still in flight, so it cannot overwrite
+        // the new project.
+              void reload()
+            }}
+            onClose={() => setIsAddingProject(false)}
+          />
+        )}
+      </div>
+    </AgentNames.Provider>
   )
 }

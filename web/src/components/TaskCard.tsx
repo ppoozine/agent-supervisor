@@ -1,16 +1,21 @@
+import { createContext, useContext } from 'react'
+
 import { formatUsage, timeAgo } from '../format'
 import type { Card } from '../types'
 import { StatusLabel } from './StatusLabel'
 
-const AGENT_NAMES: Record<string, string> = { claude_code: 'Claude Code', codex: 'Codex' }
+/** Display names of agent types, from the daemon's agent list (adapters can be added by plugins). */
+export const AgentNames = createContext<Record<string, string>>({})
 
-/** Display names of agents; an unknown type is shown by its id. */
-export function agentName(agentType: string): string {
-  return AGENT_NAMES[agentType] ?? agentType
+/** Look up an agent type's display name; a type the daemon does not know is shown by its id. */
+export function useAgentName(): (agentType: string) => string {
+  const names = useContext(AgentNames)
+  return (agentType) => names[agentType] ?? agentType
 }
 
 /** A card on the board; clicking it opens the task detail page. */
 export function TaskCard({ card }: { card: Card }) {
+  const agentName = useAgentName()
   return (
     <a className="card" href={`#/tasks/${card.id}`}>
       <div className="card-head">
