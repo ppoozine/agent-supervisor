@@ -36,7 +36,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
-    throw new ApiError(0, 'unreachable', 'Cannot reach the daemon. Make sure asv serve is running.')
+    throw new ApiError(0, 'unreachable', 'Cannot reach the daemon. Make sure agsv serve is running.')
   }
   const data: unknown = await response.json().catch(() => null)
   if (!response.ok) {

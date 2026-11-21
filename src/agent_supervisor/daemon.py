@@ -34,8 +34,9 @@ from agent_supervisor.supervisor import Supervisor, build_supervisor
 
 HOST = "127.0.0.1"
 GRACEFUL_SHUTDOWN_SECONDS = 3
-# Output of the frontend's `npm run build`; if it hasn't been built, only the API is served.
-WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
+# The built frontend, inside the package: `npm run build` writes it here when working from the repo,
+# and release packages carry it. An install from a git URL has none, and only the API is served.
+WEB_DIST = Path(__file__).resolve().parent / "web_dist"
 EXIT_OK, EXIT_ALREADY_RUNNING = 0, 2
 logger = logging.getLogger("agent_supervisor.daemon")
 
@@ -59,9 +60,9 @@ async def serve(
     quit_requested = asyncio.Event()
     stop_requested = asyncio.Event()
     loop = asyncio.get_running_loop()
-    # Install signal handlers before taking the lock: `asv stop` may send SIGUSR1 as soon as it sees
-    # the lock taken, and with no handler in place yet, the default action would kill this process
-    # and leave the agent behind.
+    # Install signal handlers before taking the lock: `agsv stop` may send SIGUSR1 as soon as it
+    # sees the lock taken, and with no handler in place yet, the default action would kill this
+    # process and leave the agent behind.
     handlers = {
         signal.SIGINT: quit_requested.set,
         signal.SIGTERM: quit_requested.set,
@@ -89,7 +90,7 @@ async def _serve_with_lock(
     try:
         lock = InstanceLock.acquire(config.lock_path)
     except AlreadyRunningError:
-        print("another asv instance is already running", file=sys.stderr)
+        print("another agsv instance is already running", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
     conn = await db.connect(config.db_path)
     try:
@@ -139,6 +140,14 @@ async def _run_until_quit(
     supervisor: Supervisor, quit_requested: asyncio.Event, stop_requested: asyncio.Event
 ) -> None:
     config = supervisor.config
+    web_dist = WEB_DIST if (WEB_DIST / "index.html").is_file() else None
+    url = f"http://{HOST}:{config.api_port}"
+    logger.info("board and API at %s; data in %s", url, config.data_dir)
+    if web_dist is None:
+        logger.warning(
+            "this installation has no board, only the API; install a release package, or build"
+            " the frontend with `npm run build` in web/ when working from the repo"
+        )
     notifier = Notifier(enabled=config.notify_needs_you)
     feed = ChangeFeed(supervisor, on_needs_you=notifier.card_needs_you)
     await feed.start()
@@ -148,7 +157,7 @@ async def _run_until_quit(
                 supervisor,
                 feed,
                 is_closing=quit_requested.is_set,
-                static_dir=WEB_DIST if WEB_DIST.is_dir() else None,
+                static_dir=web_dist,
             ),
             host=HOST,
             port=config.api_port,
@@ -182,7 +191,7 @@ async def _exit_when_quitting(server: uvicorn.Server, quit_requested: asyncio.Ev
 
 
 async def _stop_whenever_requested(supervisor: Supervisor, stop_requested: asyncio.Event) -> None:
-    """Stop all runs each time `asv stop` arrives; the daemon keeps running."""
+    """Stop all runs each time `agsv stop` arrives; the daemon keeps running."""
     while True:
         await stop_requested.wait()
         stop_requested.clear()

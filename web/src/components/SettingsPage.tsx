@@ -50,7 +50,7 @@ export function SettingsPage({ onChecked }: SettingsPageProps) {
       <p className="muted">
         agent-supervisor runs the agents you have installed and signed in to yourself. It never signs
         you in and never stores keys or tokens. After fixing something in a terminal, check again;
-        environment variables only take effect when asv serve is started from a shell that has them.
+        environment variables only take effect when agsv serve is started from a shell that has them.
       </p>
       {error && (
         <div className="alert" role="alert">

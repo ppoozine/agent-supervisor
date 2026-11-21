@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, Header, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -56,6 +56,20 @@ class MessageRequest(BaseModel):
     """Send a follow-up instruction to the task's same session."""
 
     text: str = Field(min_length=1)
+
+
+# Shown at `/` when this installation carries no built frontend (e.g. installed from a git URL).
+MISSING_BOARD_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>agent-supervisor</title></head>
+<body style="font-family: sans-serif; max-width: 640px; margin: 48px auto; line-height: 1.5">
+<h1>The board is not included in this installation</h1>
+<p>The daemon is running and its API is at <code>/api</code>, but this installation has no
+built frontend. Installs from a git URL never include it.</p>
+<p>To get the board, install a release package instead (see the README), or, when working
+from a clone of the repository, run <code>npm install</code> and <code>npm run build</code> in
+<code>web/</code> and restart <code>agsv serve</code>.</p>
+</body></html>
+"""
 
 
 def create_app(
@@ -286,7 +300,14 @@ def create_app(
         )
 
     app.mount("/api", api)
-    if static_dir is not None:
-        # Mount last: `/` catches every other path.
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="web")
+    if static_dir is None:
+
+        @app.get("/", response_class=HTMLResponse)
+        async def missing_board() -> str:
+            """Explain why there is no board instead of answering 404."""
+            return MISSING_BOARD_PAGE
+
+        return app
+    # Mount last: `/` catches every other path.
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="web")
     return app

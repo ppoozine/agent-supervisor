@@ -1,0 +1,58 @@
+name: Release
+
+# Pushing a tag such as v0.3.0 builds the frontend into the package and attaches the package files
+# to a GitHub Release. The package is not published to PyPI.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # setup-uv publishes no major-version tag, so pin the full version.
+      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Check that the tag matches the package version
+        run: |
+          version="$(uv version --short)"
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match the package version $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # The build goes into src/agent_supervisor/web_dist, which git ignores but the package
+      # carries.
+      - name: Build the frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the package
+        run: uv build
+
+      - name: Check that the package carries the board and runs
+        run: |
+          unzip -l dist/*.whl | grep -q "agent_supervisor/web_dist/index.html"
+          uvx --from "$(ls dist/*.whl)" agsv --help
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Versions such as 0.3.0rc1 are marked as pre-releases.
+          prerelease=""
+          case "$VERSION" in *a* | *b* | *rc* | *dev*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" --generate-notes $prerelease

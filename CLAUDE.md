@@ -49,7 +49,7 @@ src/agent_supervisor/
   enums.py           # 共用的列舉值：run 的觸發原因、結案結果、事件型別
   runner.py          # run 的生命週期：建立、準備、agent 執行、收尾、結案
   recovery.py        # 單一 daemon 的鎖、啟動時處理未結束的 run
-  cli.py             # 指令 asv：serve 啟動 daemon，其餘是階段 1 留下的前景模式
+  cli.py             # 指令 agsv：serve 啟動 daemon，其餘是階段 1 留下的前景模式
   supervisor.py      # 組裝 Runner / Poller / Dispatcher，以及「輪詢一輪再派工」
   daemon.py          # 常駐的 daemon：啟動順序、訊號、背景輪詢、關閉
   stages.py          # run 的準備（建 worktree、抓 CI log、開始合併）與收尾（commit、push、開 PR）、封存
@@ -67,7 +67,7 @@ src/agent_supervisor/
   config.py
   notifier.py        # 卡片進 Needs you 時發系統通知（macOS 用 osascript，Linux 用 notify-send）
   api/
-    app.py           # `/api` 底下的 REST 端點與 GET /api/stream；有 web/dist 時掛在 /
+    app.py           # `/api` 底下的 REST 端點與 GET /api/stream；有 web_dist 時掛在 /，沒有時 / 說明怎麼取得
     feed.py          # 偵測資料庫的變化並推送給 SSE 連線
     views.py         # 把資料轉成回應內容（純函式）
     errors.py        # 錯誤回應的形狀與對應
@@ -126,14 +126,14 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 ```
 uv sync
 uv run pytest
-uv run asv --help
-uv run asv serve          # 啟動 daemon；看板與 API 在 http://127.0.0.1:8765
+uv run agsv --help
+uv run agsv serve          # 啟動 daemon；看板與 API 在 http://127.0.0.1:8765
 uv run ruff check .
 uv run ruff format .
 
 cd web
 npm install
-npm run build             # 產生 web/dist，daemon 啟動時會提供它
+npm run build             # 產生 src/agent_supervisor/web_dist（git 不追蹤），daemon 啟動時會提供它
 npm run dev               # 開發用，http://localhost:5173，/api 轉給 daemon
 npm test
 ```

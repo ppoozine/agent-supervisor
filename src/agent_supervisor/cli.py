@@ -143,7 +143,7 @@ async def run(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="asv", description="agent-supervisor: phase 1 verification tool"
+        prog="agsv", description="agent-supervisor: supervise AI coding agents"
     )
     parser.add_argument(
         "--config", default=str(DEFAULT_CONFIG_PATH), help="path to the config file"
@@ -232,7 +232,7 @@ async def _with_lock(
     try:
         lock = InstanceLock.acquire(config.lock_path)
     except AlreadyRunningError:
-        print("another asv instance is already running", file=sys.stderr)
+        print("another agsv instance is already running", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
     conn = await db.connect(config.db_path)
     try:
@@ -262,7 +262,7 @@ async def _with_lock(
 
 @asynccontextmanager
 async def _stopping_on_request(session: _Session) -> AsyncIterator[None]:
-    """While the block runs, stop all runs each time `asv stop` is received.
+    """While the block runs, stop all runs each time `agsv stop` is received.
 
     A request that arrived before entering the block is still held in the event and is handled
     immediately on entry. So only enter this block once the run has started, otherwise the
