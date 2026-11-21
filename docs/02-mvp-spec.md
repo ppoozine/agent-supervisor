@@ -451,7 +451,7 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 
 同一時間只允許一個 daemon 在執行。第二個 daemon 啟動時發現已經有一個在跑，就直接結束，避免把別人正在跑的 run 當成遺留的。
 
-Daemon 的啟動順序：先裝好訊號處理，拿到單一實例的鎖，做完下面的復原，檢查每種 agent 與 gh 並寫進 log（見「Agent 與 gh 的檢查」），才開始接受連線。關閉時（Ctrl-C 或 SIGTERM）先停止接受連線、結束開著的 SSE 連線，再把還在執行的 run 中止並標成 `interrupted`。收到 `asv stop` 送來的 SIGUSR1 時中止所有 run，daemon 繼續執行。
+Daemon 的啟動順序：先裝好訊號處理，拿到單一實例的鎖，做完下面的復原，檢查每種 agent 與 gh 並寫進 log（見「Agent 與 gh 的檢查」），才開始接受連線。關閉時（Ctrl-C 或 SIGTERM）先停止接受連線、結束開著的 SSE 連線，再把還在執行的 run 中止並標成 `interrupted`。收到 `agsv stop` 送來的 SIGUSR1 時中止所有 run，daemon 繼續執行。
 
 階段 1 的前景指令（`start`、`message`、`watch`、`archive`）保留，和 daemon 共用同一把鎖，所以 daemon 在跑的時候它們會被拒絕；`list`、`show`、`project add` 只讀寫資料庫，隨時可用。
 
@@ -521,7 +521,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 
 **工具不碰憑證**：只解析需要的欄位，不回傳、不記錄工具的原始輸出（Codex 的輸出可能含有部分的 key）；環境變數只看有沒有設，不讀值；不加 `--show-token`；帳號的 email、組織、GitHub 帳號名稱也不回傳。不做登入流程，不儲存 API key 或 token。
 
-**Claude 的引導**：沒有登入時，`fix` 先列設定 `ANTHROPIC_API_KEY`（在啟動 `asv serve` 的同一個 shell 裡），訂閱登入的 `claude auth login` 列在後面。偵測到訂閱登入（`claude.ai` 或 `claude setup-token` 的 token）時照常可以用，`notice` 引用 Agent SDK 文件的條文原文，說明文件沒講清楚的地方（沿用使用者自己在本機的登入算不算「提供」、怎麼取得許可），由使用者自己判斷，並說明設了 `ANTHROPIC_API_KEY` 就會優先使用它。
+**Claude 的引導**：沒有登入時，`fix` 先列設定 `ANTHROPIC_API_KEY`（在啟動 `agsv serve` 的同一個 shell 裡），訂閱登入的 `claude auth login` 列在後面。偵測到訂閱登入（`claude.ai` 或 `claude setup-token` 的 token）時照常可以用，`notice` 引用 Agent SDK 文件的條文原文，說明文件沒講清楚的地方（沿用使用者自己在本機的登入算不算「提供」、怎麼取得許可），由使用者自己判斷，並說明設了 `ANTHROPIC_API_KEY` 就會優先使用它。
 
 **什麼時候檢查**：daemon 啟動時檢查一次，每種工具一行寫進 log，能用的是 INFO，不能用的是 WARNING 並附上要執行的指令；沒有任何 agent 能用時再多一行 WARNING，指向設定頁。daemon 照常啟動。之後 `GET /setup` 與 `GET /agents` 回傳記下的結果，不會每次都重新檢查（gh 每次都要連網）；`POST /setup/check` 重新檢查並更新記下的結果。
 
@@ -547,7 +547,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | `POST /api/setup/check` | 重新檢查每種 agent 與 gh，回傳新的結果 |
 | `GET /api/stream` | SSE：狀態變更與 agent log |
 
-API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。所有端點都在 `/api` 底下；`/` 留給前端的檔案（見「前端」）。下文提到端點時省略 `/api`。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。
+API 由常駐的 daemon 提供（`agsv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。所有端點都在 `/api` 底下；`/` 留給前端的檔案（見「前端」）。下文提到端點時省略 `/api`。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。
 
 **回應的內容**
 
@@ -595,7 +595,7 @@ API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠
 
 React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.md`。
 
-- **由誰提供**：`npm run build` 的產物在 `web/dist`，daemon 啟動時如果有這個目錄就把它掛在 `/`，開 `http://127.0.0.1:8765` 就是看板。沒有 build 過時 daemon 只提供 API。開發時跑 `npm run dev`（連接埠 5173），Vite 把 `/api` 轉給 daemon。
+- **由誰提供**：`npm run build` 的產物放在套件目錄裡的 `src/agent_supervisor/web_dist`（git 不追蹤）。daemon 啟動時如果有這個目錄就把它掛在 `/`，開 `http://127.0.0.1:8765` 就是看板；開發時與安裝後找的是同一個位置。沒有時（從 git 安裝、或還沒 build 過）daemon 只提供 API，log 寫一行警告，`/` 顯示一頁說明怎麼取得看板。開發時跑 `npm run dev`（連接埠 5173），Vite 把 `/api` 轉給 daemon。
 - **三個畫面**：看板（`#/`）、任務詳情頁（`#/tasks/{id}`）與設定頁（`#/settings`，側欄最下方的連結），用網址的 hash 切換。
 - **設定頁**：列出每種 agent 與 gh 的狀態（`GET /setup`）：能不能用、版本、用什麼登入；不能用的寫原因與要在 terminal 執行的指令，有 `notice` 的另外顯示（Claude 用訂閱登入時的條文說明）。「Check again」送 `POST /setup/check`，完成後重新抓 agent 清單。見「Agent 與 gh 的檢查」。
 - **只能開能用的 agent**：開任務的表單只列 `usable` 的 agent，有不能用的就附上設定頁的連結；一個都不能用時表單送不出去，「New task」按鈕停用，看板上方顯示提示連到設定頁。
@@ -606,6 +606,26 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 - **Log 分頁與 Events 分頁用同一份事件**：Log 把 agent 的訊息、指令與輸出、工具呼叫排成容易讀的樣子，Events 原樣列出並可依類型篩選。
 - **封存前的確認**：任務的 PR 還開著時，按 Archive 先跳出確認框說明後果，確認才送出。只做在介面上，API 與 CLI 不擋。
 - **錯誤**：API 回的 `message` 直接顯示在操作的旁邊。
+
+## 安裝與發布
+
+指令是 `agsv`（決策第 162 筆）。不發布到 PyPI（第 148 筆），安裝方式寫在 README（第 163 筆）：
+
+| 方式 | 看板 | 需要 |
+| --- | --- | --- |
+| `uv tool install <Release 上的 .whl 網址>` | 有 | uv（會自己下載 Python 3.13） |
+| `uv tool install git+https://github.com/…/agent-supervisor` | 沒有，只有 CLI 與 API | uv |
+| clone 後 `uv sync`、在 `web/` 執行 `npm install` 與 `npm run build` | 有 | uv、Node.js |
+
+**發布**：push `v*` 的 tag 時，`.github/workflows/release.yml` 依序：
+
+1. 確認 tag 等於 `v` 加上 `pyproject.toml` 的版本，不一致就失敗
+2. build 前端到套件目錄
+3. `uv build` 產出 wheel 與 sdist
+4. 確認 wheel 裡有前端的 `index.html`，並用 wheel 執行一次 `agsv --help`
+5. 用 `gh release create` 建立 Release 並附上兩個檔案；版本含 `a`、`b`、`rc`、`dev` 的標成 pre-release
+
+**第一次執行**：不需要設定檔（沒有就用預設值），資料目錄（預設 `~/.agent-supervisor`）在 daemon 取得鎖與開資料庫時自動建立。啟動時 log 寫出看板的網址與資料目錄的位置。
 
 ## 背景工作與 Agent adapter
 
