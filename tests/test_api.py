@@ -16,7 +16,7 @@ from agent_supervisor.api import views
 from agent_supervisor.api.app import create_app
 from agent_supervisor.api.feed import ChangeFeed, StreamMessage, stream_text
 from agent_supervisor.config import Config
-from agent_supervisor.enums import CiState, ExitStatus
+from agent_supervisor.enums import CiState, ExitStatus, PrState
 from agent_supervisor.supervisor import build_supervisor
 from tests.conftest import GitRepo
 from tests.fake_adapter import (
@@ -542,6 +542,36 @@ async def test_adding_a_project_twice_is_refused_and_keeps_its_settings(api: Api
     assert error_of(again) == (409, "project_exists")
     [project] = (await api.client.get("/api/projects")).json()
     assert (project["default_branch"], project["require_review"]) == ("develop", True)
+
+
+async def closed_task(api: Api, *, github_state: PrState) -> int:
+    """A finished task whose PR was last seen closed; GitHub now reports `github_state`."""
+    created = await api.task([session_started(), result()])
+    await api.finished(created["id"])
+    await db.update_task(api.conn, created["id"], pr_number=7, pr_state="closed", head_sha="sha-1")
+    api.github.statuses[7] = pr_status("sha-1", CiState.PASSED, pr_state=github_state)
+    return int(created["id"])
+
+
+async def test_message_to_a_task_whose_pull_request_was_just_reopened_is_accepted(
+    api: Api,
+) -> None:
+    task_id = await closed_task(api, github_state=PrState.OPEN)
+    api.adapter.scripts.append([result()])
+
+    response = await api.client.post(f"/api/tasks/{task_id}/messages", json={"text": "more"})
+
+    assert response.status_code == 201, response.text
+    assert response.json()["pr_state"] == "open"
+    assert (await api.finished(task_id))["runs"][-1]["exit_status"] == "success"
+
+
+async def test_message_to_a_task_whose_pull_request_is_still_closed_is_refused(api: Api) -> None:
+    task_id = await closed_task(api, github_state=PrState.CLOSED)
+
+    response = await api.client.post(f"/api/tasks/{task_id}/messages", json={"text": "more"})
+
+    assert error_of(response) == (409, "task_not_runnable")
 
 
 async def test_subdirectory_of_a_repo_is_not_accepted_as_a_project(api: Api) -> None:

@@ -169,7 +169,7 @@ def create_app(
     @api.post("/tasks/{task_id}/messages", status_code=201)
     async def send_message(task_id: int, request: MessageRequest) -> dict[str, Any]:
         """Send a follow-up instruction to the same session, creating a new run."""
-        await asyncio.shield(runner.send_message(task_id, request.text))
+        await asyncio.shield(supervisor.send_message(task_id, request.text))
         return await task_detail(task_id)
 
     @api.post("/tasks/{task_id}/stop")
