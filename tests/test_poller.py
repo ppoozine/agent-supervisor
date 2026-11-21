@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
@@ -18,7 +19,7 @@ from agent_supervisor.enums import (
     ReviewState,
 )
 from agent_supervisor.github import FeedbackItem, FeedbackKind, GitHubError
-from agent_supervisor.poller import Poller
+from agent_supervisor.poller import CLOSED_CHECK_EVERY, CLOSED_CHECK_WINDOW, Poller
 from agent_supervisor.runner import EventWriter, Runner
 from tests.fake_adapter import FakeAdapter, result, session_started
 from tests.test_stages import FakeGitHub, pr_status
@@ -219,6 +220,93 @@ async def test_archived_task_still_learns_how_its_pull_request_ended(scene: Scen
 
     assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.MERGED
     assert [change.task_id for change in report.changes] == [task.id]
+
+
+async def closed_task(scene: Scene, *, number: int = 7) -> db.Task:
+    """A task whose PR the Poller has already seen closed."""
+    task = await scene.task_with_pr(number=number)
+    await db.update_task(scene.conn, task.id, pr_state=PrState.CLOSED)
+    return await db.get_task(scene.conn, task.id)
+
+
+async def test_reopened_pull_request_is_noticed_and_accepts_messages_again(scene: Scene) -> None:
+    task = await closed_task(scene)
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED)
+
+    report = await scene.poller.poll_once()
+
+    assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.OPEN
+    assert [change.task_id for change in report.changes] == [task.id]
+    scene.adapter.scripts.append([result()])
+    run = await scene.runner.send_message(task.id, "one more thing")
+    await scene.runner.wait(run.id)
+    assert (await db.get_run(scene.conn, run.id)).exit_status == ExitStatus.SUCCESS
+
+
+async def test_closed_pull_requests_are_checked_only_every_few_rounds(scene: Scene) -> None:
+    task = await closed_task(scene)
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED, pr_state=PrState.CLOSED)
+    await scene.poller.poll_once()  # the first round checks closed PRs; still closed
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED)
+
+    for _ in range(CLOSED_CHECK_EVERY - 1):
+        await scene.poller.poll_once()
+        assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.CLOSED
+    await scene.poller.poll_once()
+
+    assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.OPEN
+
+
+async def test_closed_pull_request_untouched_for_long_is_no_longer_checked(scene: Scene) -> None:
+    task = await closed_task(scene)
+    long_ago = (datetime.now(UTC) - CLOSED_CHECK_WINDOW - timedelta(minutes=1)).isoformat()
+    await scene.conn.execute("UPDATE tasks SET updated_at = ? WHERE id = ?", (long_ago, task.id))
+    await scene.conn.commit()
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED)
+
+    report = await scene.poller.poll_once()
+
+    assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.CLOSED
+    assert report.changes == ()
+
+
+@pytest.mark.parametrize("kind", ["merged", "archived"])
+async def test_merged_or_archived_tasks_are_not_checked_for_reopening(
+    scene: Scene, kind: str
+) -> None:
+    """A merged PR cannot be reopened; an archived task cannot run again anyway."""
+    task = await closed_task(scene)
+    if kind == "merged":
+        await db.update_task(scene.conn, task.id, pr_state=PrState.MERGED)
+    else:
+        await db.archive_task(scene.conn, task.id)
+    scene.github.statuses.clear()  # any query would be reported as an error
+
+    report = await scene.poller.poll_once()
+    await scene.poller.check_reopened(task.id)
+
+    assert report.errors == ()
+    assert (await db.get_task(scene.conn, task.id)).pr_state != PrState.OPEN
+
+
+async def test_check_reopened_queries_a_closed_task_right_away(scene: Scene) -> None:
+    task = await closed_task(scene)
+    other = await closed_task(scene, number=8)
+    await scene.poller.poll_once()  # use up the first round, which checks closed PRs anyway
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PASSED)
+    scene.github.statuses[8] = pr_status("sha-1", CiState.PASSED)
+
+    await scene.poller.check_reopened(task.id)
+
+    assert (await db.get_task(scene.conn, task.id)).pr_state == PrState.OPEN
+    assert (await db.get_task(scene.conn, other.id)).pr_state == PrState.CLOSED
+
+
+async def test_check_reopened_reports_a_failed_query(scene: Scene) -> None:
+    task = await closed_task(scene)
+
+    with pytest.raises(GitHubError):
+        await scene.poller.check_reopened(task.id)
 
 
 def general_comment(github_id: str, *, is_bot: bool = False) -> FeedbackItem:

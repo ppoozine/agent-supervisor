@@ -3,10 +3,14 @@
 PR state, latest commit, CI result, and review result are updated together as one set.
 Querying GitHub takes time, and the supervisor may have just pushed a new commit meanwhile, so the
 write compares against the `head_sha` seen before the query and discards the result if it differs.
+
+A closed PR can be reopened on GitHub. Recently closed tasks are checked too, but only every few
+rounds, and right away when someone sends a message to one.
 """
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import aiosqlite
 
@@ -16,6 +20,12 @@ from agent_supervisor.github import GitHub, GitHubError, PullRequestStatus
 from agent_supervisor.process import CommandTimeoutError
 
 StopRun = Callable[[int], Awaitable[bool]]
+
+# Check closed PRs on the first round and then every this many rounds (5 minutes at the default
+# 30-second interval).
+CLOSED_CHECK_EVERY = 10
+# Closed PRs untouched for longer than this are not checked any more.
+CLOSED_CHECK_WINDOW = timedelta(days=14)
 
 
 @dataclass(frozen=True)
@@ -42,28 +52,54 @@ class Poller:
         self._conn = conn
         self._github = github
         self._stop_run = stop_run
+        self._rounds = 0
 
     async def poll_once(self) -> PollReport:
-        """Query every task with an open PR once. One failed task query doesn't affect others."""
+        """Query every task with an open PR once. One failed task query doesn't affect others.
+
+        Every `CLOSED_CHECK_EVERY` rounds, starting with the first, recently closed PRs are queried
+        too, to notice one that was reopened.
+        """
+        tasks = await db.list_tasks_with_open_pr(self._conn)
+        if self._rounds % CLOSED_CHECK_EVERY == 0:
+            since = (datetime.now(UTC) - CLOSED_CHECK_WINDOW).isoformat(timespec="milliseconds")
+            tasks += await db.list_recently_closed_tasks(self._conn, since)
+        self._rounds += 1
+
         changes: list[PollChange] = []
         errors: list[tuple[int, str]] = []
         new_feedback: list[int] = []
-        for task in await db.list_tasks_with_open_pr(self._conn):
-            project = await db.get_project(self._conn, task.project_id)
-            if project.github_repo is None or task.pr_number is None:
-                continue
+        for task in tasks:
             try:
-                status = await self._github.get_pull_request_status(
-                    project.github_repo, task.pr_number
-                )
-                change = await self._apply(task, status)
-                if change is not None:
-                    changes.append(change)
-                if await self._record_feedback(task, project.github_repo, status):
-                    new_feedback.append(task.id)
+                change, has_new_feedback = await self._poll_task(task)
             except (GitHubError, CommandTimeoutError) as error:
                 errors.append((task.id, str(error)))
+                continue
+            if change is not None:
+                changes.append(change)
+            if has_new_feedback:
+                new_feedback.append(task.id)
         return PollReport(tuple(changes), tuple(errors), tuple(new_feedback))
+
+    async def check_reopened(self, task_id: int) -> None:
+        """Query an unarchived task with a closed PR right away, in case it was reopened.
+
+        Any other task is left alone. A failed query raises `GitHubError` or `CommandTimeoutError`.
+        """
+        task = await db.get_task(self._conn, task_id)
+        if task.pr_state != PrState.CLOSED or task.archived_at is not None:
+            return
+        await self._poll_task(task)
+
+    async def _poll_task(self, task: db.Task) -> tuple[PollChange | None, bool]:
+        """Query one task's PR; return the change, and whether it has new PR comments to handle."""
+        project = await db.get_project(self._conn, task.project_id)
+        if project.github_repo is None or task.pr_number is None:
+            return None, False
+        status = await self._github.get_pull_request_status(project.github_repo, task.pr_number)
+        change = await self._apply(task, status)
+        has_new_feedback = await self._record_feedback(task, project.github_repo, status)
+        return change, has_new_feedback
 
     async def _record_feedback(self, task: db.Task, repo: str, status: PullRequestStatus) -> bool:
         """Fetch unrecorded PR comments as events; return whether there are new ones to handle.

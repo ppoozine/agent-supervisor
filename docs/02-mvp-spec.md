@@ -281,7 +281,7 @@ Dispatcher 發現任務符合條件時：
 
 **修復次數的歸零**：使用者送訊息時，在建立 run 的同一個交易內把 `ci_fix_attempts` 與 `feedback_attempts` 歸零。人已經介入，自動修復重新有 3 次機會、留言處理重新有 5 次；花費與 token 上限仍然有效。PR 上的留言不會讓這兩個次數歸零，理由見「Review 留言回饋」。
 
-使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務的花費或 token 已達上限時，目前的實作會拒絕新的訊息（這一點尚未定案，見 `03-decisions.md`）。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
+使用者送訊息（`POST /tasks/{id}/messages`）走同一套建立 run 的程序。任務的花費或 token 已達上限時，目前的實作會拒絕新的訊息（這一點尚未定案，見 `03-decisions.md`）。任務已經有未結束的 run、已封存，或 PR 已合併或關閉時，新的 run 建不起來，API 回報錯誤。PR 已關閉（不是合併）且未封存的任務，送訊息前先向 GitHub 查一次 PR 是不是重新開啟了：Poller 隔好幾輪才查一次已關閉的 PR（見「背景工作」），不先查的話，剛在 GitHub 上重新開啟就送的訊息仍會被拒絕。查詢失敗時回報 GitHub 的錯誤，不建立 run。這樣 Dispatcher 與使用者不會同時讓兩個 run 用同一個 session 與 worktree。
 
 **防無限迴圈**
 
@@ -575,10 +575,12 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 | 工作 | 負責 |
 | --- | --- |
 | Runner | 啟動或續接 agent session，把事件寫進 `events`，結束時回填用量並做收尾 |
-| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），把 `pr_state`、`head_sha`、`ci_state`、`review_state`、`merge_state` 當成一組一起更新；未封存的任務另外把 PR 上新的留言記成事件 |
+| Poller | 每 30 秒查詢 PR 開著的任務（含已封存的），每 10 輪（含啟動後的第一輪）另外查 PR 已關閉、未封存、最近 14 天內有更新的任務，把 `pr_state`、`head_sha`、`ci_state`、`review_state`、`merge_state` 當成一組一起更新；未封存的任務另外把 PR 上新的留言記成事件 |
 | Dispatcher | 依序檢查三種條件，符合的就建立對應的 run 交給 Runner：留言回饋（`review_feedback`）、解衝突（`merge_conflict`）、自動修復（`ci_failure`） |
 
 Poller 用一次 `gh pr view` 查回五個欄位。Review 狀態照 GitHub 回報的寫入：收尾時 push 之後會先設成 `none`，但 GitHub 預設不會因為新的 commit 撤銷核准，所以下一次輪詢可能又變回 `approved`。單一任務查詢失敗不影響其他任務，下一輪再查。
+
+**PR 關閉後可能重新開啟。** 在 GitHub 上重新開啟之後，`pr_state` 變回 `open`，卡片回到看板，可以再送訊息，也恢復自動修復與留言回饋。已關閉的 PR 不必每輪查：每 10 輪查一次（預設約 5 分鐘），只查最近 14 天內有更新的任務（關閉時 `updated_at` 就會更新，所以是關閉後 14 天內）；送訊息時另外即時查一次。合併的 PR 不能重新開啟，已封存的任務不能再建立 run，這兩種都不查。
 
 **所有模組共用一條資料庫連線，寫入由一把鎖排隊。** Dispatcher 的交易包含好幾步，沒有鎖的話 Runner 同時間的寫入會把它切成兩半。
 

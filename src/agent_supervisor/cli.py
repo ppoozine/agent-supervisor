@@ -33,7 +33,8 @@ from agent_supervisor.adapters.claude_code import ClaudeCodeAdapter
 from agent_supervisor.adapters.codex import CodexAdapter
 from agent_supervisor.config import DEFAULT_CONFIG_PATH, Config, absolute_path, load_config
 from agent_supervisor.enums import EventType, ExitStatus
-from agent_supervisor.github import GitHub
+from agent_supervisor.github import GitHub, GitHubError
+from agent_supervisor.process import CommandTimeoutError
 from agent_supervisor.recovery import (
     AlreadyRunningError,
     InstanceLock,
@@ -55,6 +56,9 @@ EXPECTED_ERRORS = (
     BudgetExhaustedError,
     UnknownAgentError,
     worktree.GitError,
+    # Sending a message to a task with a closed PR first asks GitHub whether it was reopened.
+    GitHubError,
+    CommandTimeoutError,
 )
 
 
@@ -301,7 +305,7 @@ async def _start(session: _Session, args: argparse.Namespace) -> int:
 async def _message(session: _Session, args: argparse.Namespace) -> int:
     if session.quit_requested.is_set():
         return _refuse_to_start()
-    run = await session.runner.send_message(args.task_id, args.text)
+    run = await session.supervisor.send_message(args.task_id, args.text)
     return await _follow(session, run, watch=args.watch)
 
 

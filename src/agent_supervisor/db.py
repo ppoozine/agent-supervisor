@@ -575,6 +575,19 @@ async def list_tasks_with_open_pr(conn: aiosqlite.Connection) -> list[Task]:
     return [_to_task(row) for row in await cursor.fetchall()]
 
 
+async def list_recently_closed_tasks(conn: aiosqlite.Connection, since: str) -> list[Task]:
+    """List unarchived tasks whose PR is closed, updated at or after `since` (ISO 8601 UTC).
+
+    A closed PR can be reopened on GitHub; a merged one cannot, so merged PRs are not listed.
+    """
+    cursor = await conn.execute(
+        "SELECT * FROM tasks WHERE pr_number IS NOT NULL AND pr_state = ?"
+        " AND archived_at IS NULL AND updated_at >= ? ORDER BY id",
+        (PrState.CLOSED, since),
+    )
+    return [_to_task(row) for row in await cursor.fetchall()]
+
+
 async def apply_github_state(
     conn: aiosqlite.Connection,
     task_id: int,

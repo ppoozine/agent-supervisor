@@ -39,6 +39,15 @@ class Supervisor:
         adapter = self.adapters.get(agent_type)
         return adapter is not None and adapter.capabilities.reports_cost
 
+    async def send_message(self, task_id: int, text: str) -> db.Run:
+        """Send a follow-up instruction, first checking whether a closed PR was reopened.
+
+        Closed PRs are only polled every few rounds, so without this check a message sent right
+        after reopening the PR would still be refused.
+        """
+        await self.poller.check_reopened(task_id)
+        return await self.runner.send_message(task_id, text)
+
     async def poll_and_dispatch(
         self, quit_requested: asyncio.Event
     ) -> tuple[PollReport | None, list[db.Run]]:
