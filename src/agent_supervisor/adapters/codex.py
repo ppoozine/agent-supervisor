@@ -38,7 +38,7 @@ DEFAULT_EXECUTABLE = ("codex",)
 INSTALL_COMMAND = "npm install -g @openai/codex"
 SIGN_IN_COMMANDS = (
     "codex login",
-    "export CODEX_API_KEY=<your API key>  # or this; then start asv serve from this shell",
+    "export CODEX_API_KEY=<your API key>  # or this; then start agsv serve from this shell",
 )
 COMMAND_ITEM = "command_execution"
 ERROR_ITEM = "error"

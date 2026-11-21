@@ -64,7 +64,7 @@ INTERRUPT_TIMEOUT_SECONDS = 5.0
 
 INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash"
 SIGN_IN_COMMANDS = (
-    "export ANTHROPIC_API_KEY=<your API key>  # then start asv serve from this shell",
+    "export ANTHROPIC_API_KEY=<your API key>  # then start agsv serve from this shell",
     "claude auth login  # or sign in with a Claude subscription instead",
 )
 # Quoted from https://code.claude.com/docs/en/agent-sdk/overview (checked 2026-11-21).
@@ -76,7 +76,7 @@ SUBSCRIPTION_NOTICE = (
     " It does not say whether a tool that reuses the login you made yourself on this computer"
     " counts as offering it, or how to get approval. agent-supervisor never signs you in and"
     " never stores credentials; whether this use is fine for you is your call. To use an API key"
-    " instead, set ANTHROPIC_API_KEY before starting asv serve; it takes precedence over the"
+    " instead, set ANTHROPIC_API_KEY before starting agsv serve; it takes precedence over the"
     " subscription login."
 )
 

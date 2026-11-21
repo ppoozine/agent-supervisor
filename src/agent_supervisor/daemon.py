@@ -59,9 +59,9 @@ async def serve(
     quit_requested = asyncio.Event()
     stop_requested = asyncio.Event()
     loop = asyncio.get_running_loop()
-    # Install signal handlers before taking the lock: `asv stop` may send SIGUSR1 as soon as it sees
-    # the lock taken, and with no handler in place yet, the default action would kill this process
-    # and leave the agent behind.
+    # Install signal handlers before taking the lock: `agsv stop` may send SIGUSR1 as soon as it
+    # sees the lock taken, and with no handler in place yet, the default action would kill this
+    # process and leave the agent behind.
     handlers = {
         signal.SIGINT: quit_requested.set,
         signal.SIGTERM: quit_requested.set,
@@ -89,7 +89,7 @@ async def _serve_with_lock(
     try:
         lock = InstanceLock.acquire(config.lock_path)
     except AlreadyRunningError:
-        print("another asv instance is already running", file=sys.stderr)
+        print("another agsv instance is already running", file=sys.stderr)
         return EXIT_ALREADY_RUNNING
     conn = await db.connect(config.db_path)
     try:
@@ -182,7 +182,7 @@ async def _exit_when_quitting(server: uvicorn.Server, quit_requested: asyncio.Ev
 
 
 async def _stop_whenever_requested(supervisor: Supervisor, stop_requested: asyncio.Event) -> None:
-    """Stop all runs each time `asv stop` arrives; the daemon keeps running."""
+    """Stop all runs each time `agsv stop` arrives; the daemon keeps running."""
     while True:
         await stop_requested.wait()
         stop_requested.clear()
