@@ -102,7 +102,7 @@ async def _serve_with_lock(
                 " its task is blocked until you stop that process",
                 run_id,
             )
-        supervisor = build_supervisor(conn, config, adapters, github)
+        supervisor = build_supervisor(conn, config, adapters, github, processes=processes)
         try:
             await _run_until_quit(supervisor, quit_requested, stop_requested)
         finally:

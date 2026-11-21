@@ -7,6 +7,7 @@ doesn't drift apart.
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import partial
 
 import aiosqlite
 
@@ -16,6 +17,7 @@ from agent_supervisor.config import Config
 from agent_supervisor.dispatcher import Dispatcher
 from agent_supervisor.github import GitHub
 from agent_supervisor.poller import Poller, PollReport
+from agent_supervisor.recovery import ProcessTable, finish_leftover_run
 from agent_supervisor.runner import EventCallback, Runner
 from agent_supervisor.stages import RunStages
 
@@ -84,8 +86,12 @@ def build_supervisor(
     github: GitHub,
     *,
     on_event: EventCallback | None = None,
+    processes: ProcessTable | None = None,
 ) -> Supervisor:
-    """Build all components from a DB connection that is open and done with restart recovery."""
+    """Build all components from a DB connection that is open and done with restart recovery.
+
+    Without `processes`, runs left unfinished at startup cannot be finished with Stop.
+    """
     stages = RunStages(conn, config, github)
     runner = Runner(
         conn,
@@ -95,6 +101,9 @@ def build_supervisor(
         finalize=stages.finalize,
         archive=stages.archive,
         on_event=on_event,
+        finish_leftover=(
+            None if processes is None else partial(finish_leftover_run, conn, processes=processes)
+        ),
     )
     limits = status.Limits(config.task_cost_limit_usd, config.task_token_limit)
     return Supervisor(

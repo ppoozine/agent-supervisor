@@ -19,10 +19,16 @@ from agent_supervisor import db
 from agent_supervisor.enums import EventType, ExitStatus
 
 POLL_SECONDS = 0.02
+# How long a process gets to exit after a polite request, and again after a forced one.
+GRACE_SECONDS = 5.0
 
 
 class AlreadyRunningError(RuntimeError):
     """Another daemon is already running."""
+
+
+class ProcessStillRunningError(RuntimeError):
+    """A leftover run's agent process could not be stopped, so the run cannot be finished."""
 
 
 class InstanceLock:
@@ -89,6 +95,10 @@ class SystemProcessTable:
             os.kill(pid, signal.SIGKILL if force else signal.SIGINT)
         except ProcessLookupError:
             return
+        except PermissionError:
+            # Owned by another user (e.g. started with sudo): it keeps running, and the caller
+            # reports it as a process that could not be stopped.
+            return
 
 
 @dataclass
@@ -100,7 +110,7 @@ class RecoveryReport:
 
 
 async def recover_open_runs(
-    conn: aiosqlite.Connection, processes: ProcessTable, *, grace_seconds: float = 5.0
+    conn: aiosqlite.Connection, processes: ProcessTable, *, grace_seconds: float | None = None
 ) -> RecoveryReport:
     """Handle unfinished runs left over from the previous startup.
 
@@ -111,25 +121,66 @@ async def recover_open_runs(
     """
     report = RecoveryReport()
     for run in await db.list_open_runs(conn):
-        marker = await _process_marker(conn, run)
-        if marker is not None and not await _stop_processes(processes, marker, grace_seconds):
+        if await _stop_run_processes(
+            conn, run, processes, GRACE_SECONDS if grace_seconds is None else grace_seconds
+        ):
             report.held_run_ids.append(run.id)
             continue
-        await db.finish_run(conn, run.id, ExitStatus.INTERRUPTED)
-        await db.append_event(
-            conn,
-            run.task_id,
-            run.id,
-            EventType.STATE_CHANGE,
-            {
-                "change": "run_ended",
-                "exit_status": str(ExitStatus.INTERRUPTED),
-                "detail": "daemon restarted while the run was active",
-                "usage_raw": None,
-            },
-        )
+        await _finish_interrupted(conn, run, "daemon restarted while the run was active")
         report.interrupted_run_ids.append(run.id)
     return report
+
+
+async def finish_leftover_run(
+    conn: aiosqlite.Connection,
+    run: db.Run,
+    processes: ProcessTable,
+    *,
+    grace_seconds: float | None = None,
+) -> None:
+    """Finish a run left unfinished at startup, at the user's request.
+
+    Its agent process is stopped again first, the same way as at startup: finishing the run while
+    the process may still be editing the worktree would let a new run work there at the same time.
+    Raise `ProcessStillRunningError` if it still cannot be stopped; the user can stop it by hand and
+    try again.
+    """
+    remaining = await _stop_run_processes(
+        conn, run, processes, GRACE_SECONDS if grace_seconds is None else grace_seconds
+    )
+    if remaining:
+        pids = ", ".join(str(pid) for pid in remaining)
+        raise ProcessStillRunningError(
+            f"the agent process of run {run.id} is still running (pid {pids});"
+            " stop it and try again"
+        )
+    await _finish_interrupted(conn, run, "stopped by the user after the daemon restarted")
+
+
+async def _stop_run_processes(
+    conn: aiosqlite.Connection, run: db.Run, processes: ProcessTable, grace_seconds: float
+) -> list[int]:
+    """Stop the run's agent processes; return the pids still running (empty when all stopped)."""
+    marker = await _process_marker(conn, run)
+    if marker is None:
+        return []
+    return await _stop_processes(processes, marker, grace_seconds)
+
+
+async def _finish_interrupted(conn: aiosqlite.Connection, run: db.Run, detail: str) -> None:
+    await db.finish_run(conn, run.id, ExitStatus.INTERRUPTED)
+    await db.append_event(
+        conn,
+        run.task_id,
+        run.id,
+        EventType.STATE_CHANGE,
+        {
+            "change": "run_ended",
+            "exit_status": str(ExitStatus.INTERRUPTED),
+            "detail": detail,
+            "usage_raw": None,
+        },
+    )
 
 
 async def _process_marker(conn: aiosqlite.Connection, run: db.Run) -> str | None:
@@ -143,17 +194,17 @@ async def _process_marker(conn: aiosqlite.Connection, run: db.Run) -> str | None
     return next((marker for marker in reversed(markers) if marker), None)
 
 
-async def _stop_processes(processes: ProcessTable, marker: str, grace_seconds: float) -> bool:
-    """Ask politely to exit, then force-terminate after a timeout. Return whether all exited."""
+async def _stop_processes(processes: ProcessTable, marker: str, grace_seconds: float) -> list[int]:
+    """Ask politely to exit, then force-terminate after a timeout. Return the pids still running."""
     for force in (False, True):
         pids = processes.find(marker)
         if not pids:
-            return True
+            return []
         for pid in pids:
             processes.terminate(pid, force=force)
         if await _wait_until_gone(processes, marker, grace_seconds):
-            return True
-    return False
+            return []
+    return processes.find(marker)
 
 
 async def _wait_until_gone(processes: ProcessTable, marker: str, grace_seconds: float) -> bool:

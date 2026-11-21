@@ -11,9 +11,9 @@ from typing import Any
 import httpx
 import pytest
 
-from agent_supervisor import daemon, db
+from agent_supervisor import daemon, db, recovery
 from agent_supervisor.config import Config
-from agent_supervisor.enums import CiState, ExitStatus
+from agent_supervisor.enums import CiState, EventType, ExitStatus
 from agent_supervisor.github import FailedCheck
 from agent_supervisor.recovery import InstanceLock
 from tests.conftest import GitRepo
@@ -43,13 +43,14 @@ class Daemon:
             base_url=f"http://127.0.0.1:{self.config.api_port}", trust_env=False, timeout=10.0
         )
         self.serving: asyncio.Task[int] | None = None
+        self.processes = FakeProcessTable({})
 
     def serve(self) -> asyncio.Task[int]:
         return asyncio.create_task(
             daemon.serve(
                 self.config,
                 {"fake": self.adapter},
-                FakeProcessTable({}),
+                self.processes,
                 self.github,  # type: ignore[arg-type]
             )
         )
@@ -175,6 +176,35 @@ async def test_stop_signal_stops_the_runs_but_the_daemon_keeps_serving(asv: Daem
 
     assert stopped["label"] == "Stopped"
     assert (await asv.client.get("/api/projects")).status_code == 200
+    assert await asv.quit() == 0
+
+
+async def test_stop_finishes_a_run_whose_process_outlived_the_previous_daemon(
+    asv: Daemon, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(recovery, "GRACE_SECONDS", 0.05)
+    conn = await db.connect(asv.config.db_path)
+    await db.init_schema(conn)
+    project = await db.upsert_project(conn, str(asv.repo.path))
+    task, run = await db.create_task_with_initial_run(
+        conn, project_id=project.id, title="t", prompt="p", agent_type="fake", model=None
+    )
+    await db.append_event(
+        conn, task.id, run.id, EventType.SESSION_STARTED, {"process_marker": "marker-1"}
+    )
+    await conn.close()
+    asv.processes = FakeProcessTable({"marker-1": [43]}, survives_force=True)
+    await asv.start()
+    assert (await asv.card(task.id))["has_open_run"] is True
+
+    refused = await asv.client.post(f"/api/tasks/{task.id}/stop")
+    asv.processes.processes["marker-1"].clear()  # the user kills the process by hand
+    stopped = await asv.client.post(f"/api/tasks/{task.id}/stop")
+
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "process_still_running"
+    assert stopped.status_code == 200, stopped.text
+    assert (await asv.card(task.id))["has_open_run"] is False
     assert await asv.quit() == 0
 
 

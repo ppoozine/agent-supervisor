@@ -47,12 +47,49 @@ def branch_name(task_id: int, title: str) -> str:
 
 
 async def create(repo_path: Path, worktree_path: Path, *, branch: str, base_branch: str) -> None:
-    """Update the remote base branch first, then create a new branch and worktree from it."""
+    """Update the remote base branch first, then create a new branch and worktree from it.
+
+    Also finishes a creation that was cut off earlier. The caller only creates a worktree the task
+    has not recorded yet, so the agent never ran in whatever an earlier attempt left behind: a
+    registered worktree at this path is removed and made again, and an existing branch is reused
+    instead of failing on `-b`.
+    """
     await fetch(repo_path, base_branch)
+    await prune(repo_path)
+    if await _is_registered(repo_path, worktree_path):
+        # Forced twice: a cut-off `worktree add` leaves the worktree locked as "initializing", and
+        # both prune and a single --force skip locked worktrees.
+        await _git(repo_path, "worktree", "remove", "--force", "--force", str(worktree_path))
     worktree_path.parent.mkdir(parents=True, exist_ok=True)
+    if await _branch_exists(repo_path, branch):
+        await _git(repo_path, "worktree", "add", str(worktree_path), branch)
+        return
     await _git(
         repo_path, "worktree", "add", "-b", branch, str(worktree_path), f"{REMOTE}/{base_branch}"
     )
+
+
+async def prune(repo_path: Path) -> None:
+    """Forget worktrees whose directories no longer exist."""
+    await _git(repo_path, "worktree", "prune")
+
+
+async def _is_registered(repo_path: Path, worktree_path: Path) -> bool:
+    listing = await _git(repo_path, "worktree", "list", "--porcelain")
+    for line in listing.splitlines():
+        path = Path(line.removeprefix("worktree "))
+        if line.startswith("worktree ") and await asyncio.to_thread(
+            _is_same_directory, path, worktree_path
+        ):
+            return True
+    return False
+
+
+async def _branch_exists(repo_path: Path, branch: str) -> bool:
+    result = await run_command(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=repo_path
+    )
+    return result.returncode == 0
 
 
 async def remove(repo_path: Path, worktree_path: Path) -> None:

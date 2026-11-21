@@ -8,6 +8,7 @@ Each wrap-up step checks the current state before acting, so redoing it never pu
 a duplicate PR.
 """
 
+import asyncio
 from pathlib import Path
 
 import aiosqlite
@@ -167,6 +168,10 @@ class RunStages:
             return
         project = await db.get_project(self._conn, current.project_id)
         path = Path(current.worktree_path)
+        if not await asyncio.to_thread(path.exists):
+            # An earlier archive removed the worktree but was cut off before marking the task.
+            await worktree.prune(Path(project.repo_path))
+            return
         if await worktree.is_merge_in_progress(path):
             # A half-done merge is not kept: committing it would store conflict markers in the
             # branch. The task's own commits are all still there.

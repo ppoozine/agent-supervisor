@@ -1,5 +1,6 @@
 """Tests for stages.py: run preparation, wrap-up, and archiving. git is real; GitHub is a fake."""
 
+import shutil
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -180,6 +181,56 @@ async def test_prepare_does_nothing_when_the_worktree_already_exists(scene: Scen
     assert (path / "work-in-progress.txt").read_text() == "keep me"
 
 
+async def interrupted_prepare(scene: Scene, tmp_path: Path, *, with_worktree: bool) -> Path:
+    """Leave what a prepare cut off before recording the worktree would leave behind."""
+    branch = worktree.branch_name(scene.task.id, scene.task.title)
+    path = tmp_path / "data" / "worktrees" / "repo" / f"task-{scene.task.id}"
+    if with_worktree:
+        await worktree.create(scene.repo.path, path, branch=branch, base_branch="main")
+    else:
+        scene.repo.git("branch", branch, "origin/main")
+    return path
+
+
+async def test_prepare_resumes_when_the_worktree_was_created_but_not_recorded(
+    scene: Scene, tmp_path: Path
+) -> None:
+    expected = await interrupted_prepare(scene, tmp_path, with_worktree=True)
+
+    path = await scene.prepare()
+
+    assert path == expected
+    assert (path / "README.md").exists()
+    assert scene.task.branch == f"asv/task-{scene.task.id}-add-greeting"
+
+
+async def test_prepare_resumes_when_only_the_branch_was_created(
+    scene: Scene, tmp_path: Path
+) -> None:
+    expected = await interrupted_prepare(scene, tmp_path, with_worktree=False)
+
+    path = await scene.prepare()
+
+    assert path == expected
+    assert (path / "README.md").exists()
+
+
+@pytest.mark.parametrize("directory_left", [True, False], ids=["directory-left", "directory-gone"])
+async def test_prepare_resumes_when_git_was_killed_while_adding_the_worktree(
+    scene: Scene, tmp_path: Path, directory_left: bool
+) -> None:
+    # A killed `git worktree add` leaves the worktree registered and locked as "initializing".
+    expected = await interrupted_prepare(scene, tmp_path, with_worktree=True)
+    scene.repo.git("worktree", "lock", "--reason", "initializing", str(expected))
+    if not directory_left:
+        shutil.rmtree(expected)
+
+    path = await scene.prepare()
+
+    assert path == expected
+    assert (path / "README.md").exists()
+
+
 async def test_finalize_commits_pushes_and_opens_a_pull_request(scene: Scene) -> None:
     path = await scene.prepare()
     (path / "greeting.txt").write_text("hello\n")
@@ -320,6 +371,19 @@ async def test_archive_commits_leftovers_locally_and_removes_the_worktree(scene:
     assert not path.exists()
     assert scene.repo.git("show", f"{scene.task.branch}:half-done.txt") == "unfinished"
     assert scene.repo.git("branch", "--list", scene.task.branch, cwd=scene.repo.origin) == ""
+
+
+async def test_archive_completes_when_the_worktree_was_already_removed(scene: Scene) -> None:
+    # The previous archive removed the worktree but was cut off before marking the task.
+    path = await scene.prepare()
+    (path / "half-done.txt").write_text("unfinished\n")
+    await scene.stages.archive(scene.task)
+    assert not path.exists()
+
+    await scene.stages.archive(scene.task)
+
+    assert scene.task.branch is not None
+    assert scene.repo.git("show", f"{scene.task.branch}:half-done.txt") == "unfinished"
 
 
 async def test_archive_keeps_the_worktree_when_leftovers_cannot_be_committed(scene: Scene) -> None:

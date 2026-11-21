@@ -202,6 +202,12 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 
 任務的工作目錄如果不是這個工具建立的 worktree（沒有自己的 branch），準備階段會拒絕執行，封存時也不會去動那個目錄。
 
+**建 worktree 做到一半中斷**（例如 daemon 被強制關掉）：下一次準備時接著完成，不會因為 branch 已經存在而失敗。
+
+- 先清掉目錄已經不在的 worktree 登記（`git worktree prune`）。
+- 這個路徑上還登記著 worktree 的話，先移除再重建（`--force` 兩次：被終止的 `git worktree add` 會把 worktree 鎖成 initializing，`prune` 與單一個 `--force` 都會跳過鎖住的 worktree）。任務還沒記下 worktree，表示 agent 從沒在裡面執行過，移除不會丟掉成果；建到一半的 worktree 內容也可能不完整，重建比較可靠。
+- 任務的 branch 已經存在就沿用它（`git worktree add <路徑> <branch>`），不再用 `-b` 新建。branch 名稱帶著任務編號，已經存在的一定是這個任務上次建的。
+
 ## Run 結束後的收尾
 
 Agent 正常結束這一輪之後，Runner 依序做下面的事。不論是哪一種 trigger 都一樣。
@@ -456,7 +462,9 @@ Daemon 啟動時，在開始接受任何新工作之前，先找出所有 `ended
 
 先停掉遺留程序的原因：daemon 是突然死掉的話，上一次啟動的 agent 可能還在背景繼續改檔，這時讓新的 run 進同一個 worktree 會互相覆蓋。
 
-無法確認某個 run 的遺留程序已經停止時，那個 run 維持未結束，該任務因此建不了新的 run；daemon 在啟動訊息中列出這些任務，由人手動處理。
+無法確認某個 run 的遺留程序已經停止時，那個 run 維持未結束，該任務因此建不了新的 run；daemon 在啟動訊息中列出這些任務。
+
+這種 run 用 Stop 結案：Stop 找不到這個 daemon 正在執行的 run 時，改用同樣的方法再停一次遺留程序，確認停了就把 run 標成 `interrupted`，事件註明是使用者手動結案。還是停不掉就回報 `process_still_running` 並列出程序編號，由人自己終止之後再按一次 Stop。不提供「不管程序、直接結案」：程序可能還在改同一個 worktree，結案後新的 run 會和它同時改檔。PR 被合併或關閉時的自動中止不處理這種 run，避免輪詢等在一個停不掉的程序上。
 
 辨識遺留程序的方法：adapter 在 `session_started` 事件裡提供 `process_marker`，復原時找出命令列包含這個字串的程序，先送 SIGINT，等不到再強制終止。未結束的 run 如果連一筆 `session_started` 都沒有，表示 agent 還沒啟動，直接標成 `interrupted`。
 
@@ -480,6 +488,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 - worktree 裡有未 commit 的變更時，supervisor 先把它們 commit 到任務的 branch，再清掉 worktree。這個 commit 只留在本機，不 push。
 - 封存只清掉 worktree，branch 保留，所以成果不會因為封存而消失。
 - 補 commit 失敗時（例如 commit hook 擋下）拒絕封存並回報原因，不刪除 worktree。
+- 封存做到一半中斷、worktree 已經刪掉但任務還沒標成封存時，再封存一次會直接完成：目錄已經不在就當作已刪除，只清掉 git 裡的 worktree 登記。
 - 封存不會關掉 PR，也沒有取消封存。PR 還開著的任務封存之後，Poller 仍然繼續查它，所以之後在 GitHub 上合併或關閉，卡片的標籤會跟著變；但不再自動修復 CI，也不能再送訊息。
 
 ## API
@@ -525,6 +534,7 @@ API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠
 | 任務已封存，或 PR 已合併或關閉 | 409 | `task_not_runnable` |
 | 花費或 token 已達上限 | 409 | `budget_exhausted` |
 | 沒有 run 可以中止 | 409 | `no_active_run` |
+| 重啟前留下的 run，遺留程序還是停不掉 | 409 | `process_still_running` |
 | 欄位不合法、agent 種類不存在、路徑不是 git repo 工作目錄的最上層、body 不是以 JSON 的型別送出 | 422 | `invalid_request` |
 | 沒預期到的錯誤（例如封存時 git 失敗） | 500 | `internal_error` |
 

@@ -358,6 +358,47 @@ async def test_prepare_failure_ends_the_run_as_error_without_starting_the_agent(
     assert adapter.calls == []
 
 
+async def leftover_run(conn: aiosqlite.Connection) -> db.Run:
+    """A run still open from before a restart: no job in this Runner is running it."""
+    project = await db.upsert_project(conn, "/repos/demo")
+    _, run = await db.create_task_with_initial_run(
+        conn, project_id=project.id, title="t", prompt="p", agent_type="fake", model=None
+    )
+    return run
+
+
+async def test_stop_hands_a_leftover_run_to_be_finished(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    run = await leftover_run(conn)
+    handed: list[int] = []
+
+    async def finish_leftover(leftover: db.Run) -> None:
+        handed.append(leftover.id)
+
+    runner = make_runner(conn, config, FakeAdapter([]), finish_leftover=finish_leftover)
+
+    await runner.stop(run.task_id)
+
+    assert handed == [run.id]
+
+
+async def test_automatic_stop_leaves_a_leftover_run_alone(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    # Stopping because the PR closed must not block the poller on a process it may not stop.
+    run = await leftover_run(conn)
+    handed: list[int] = []
+
+    async def finish_leftover(leftover: db.Run) -> None:
+        handed.append(leftover.id)
+
+    runner = make_runner(conn, config, FakeAdapter([]), finish_leftover=finish_leftover)
+
+    assert await runner.stop_if_running(run.task_id) is False
+    assert handed == []
+
+
 async def test_stop_during_finalize_does_not_become_success(
     conn: aiosqlite.Connection, config: Config, tmp_path: Path
 ) -> None:
