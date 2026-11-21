@@ -29,8 +29,7 @@ import aiosqlite
 
 from agent_supervisor import daemon, db, status, worktree
 from agent_supervisor.adapters.base import AgentAdapter
-from agent_supervisor.adapters.claude_code import ClaudeCodeAdapter
-from agent_supervisor.adapters.codex import CodexAdapter
+from agent_supervisor.adapters.loading import load_adapters
 from agent_supervisor.config import DEFAULT_CONFIG_PATH, Config, absolute_path, load_config
 from agent_supervisor.enums import EventType, ExitStatus
 from agent_supervisor.github import GitHub, GitHubError
@@ -102,8 +101,8 @@ def main() -> None:
 
 
 def default_adapters() -> dict[str, AgentAdapter]:
-    """Agent types `--agent` accepts and their adapters."""
-    return {DEFAULT_AGENT: ClaudeCodeAdapter(), "codex": CodexAdapter()}
+    """Agent types `--agent` accepts and their adapters: every installed adapter."""
+    return load_adapters()
 
 
 async def run(
