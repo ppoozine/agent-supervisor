@@ -28,6 +28,7 @@ from agent_supervisor.github import (
 )
 from agent_supervisor.runner import EventWriter
 from agent_supervisor.stages import RunStages, StageError
+from agent_supervisor.tool_status import AuthKind, ToolStatus
 from tests.conftest import GitRepo
 
 
@@ -65,6 +66,12 @@ class FakeGitHub:
         self.on_status_query: Any = None
         self.feedback: dict[int, list[FeedbackItem]] = {}
         self.feedback_queries: list[int] = []
+        self.cli_status = ToolStatus(
+            installed=True, version="2.0.0", auth=AuthKind.ACCOUNT, auth_label="keyring"
+        )
+
+    async def check_cli(self) -> ToolStatus:
+        return self.cli_status
 
     async def list_feedback(self, repo: str, number: int) -> list[FeedbackItem]:
         self.feedback_queries.append(number)

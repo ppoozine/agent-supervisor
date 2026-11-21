@@ -4,6 +4,8 @@ from dataclasses import asdict
 from typing import Any
 
 from agent_supervisor import db, status
+from agent_supervisor.readiness import Readiness
+from agent_supervisor.tool_status import ToolStatus
 
 
 def project_view(project: db.Project) -> dict[str, Any]:
@@ -79,3 +81,33 @@ def diff_view(text: str, *, base_branch: str) -> dict[str, Any]:
         text = text[:MAX_DIFF_CHARS]
         text = text[: text.rfind("\n") + 1]
     return {"diff": text, "is_truncated": is_truncated, "base_branch": base_branch}
+
+
+def tool_status_view(tool: ToolStatus) -> dict[str, Any]:
+    """Whether one tool can be used, what it is signed in with, and how to fix it if not."""
+    return {
+        "usable": tool.usable,
+        "installed": tool.installed,
+        "version": tool.version,
+        "auth": str(tool.auth),
+        "auth_label": tool.auth_label,
+        "detail": tool.detail,
+        "fix": list(tool.fix),
+        "notice": tool.notice,
+    }
+
+
+def readiness_view(readiness: Readiness, display_names: dict[str, str]) -> dict[str, Any]:
+    """Every agent's and gh's status, and when they were checked."""
+    return {
+        "checked_at": readiness.checked_at,
+        "agents": [
+            {
+                "agent_type": agent_type,
+                "display_name": display_names[agent_type],
+                **tool_status_view(tool),
+            }
+            for agent_type, tool in readiness.agents.items()
+        ],
+        "github": tool_status_view(readiness.github),
+    }

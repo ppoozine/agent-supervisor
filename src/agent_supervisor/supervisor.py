@@ -17,6 +17,7 @@ from agent_supervisor.config import Config
 from agent_supervisor.dispatcher import Dispatcher
 from agent_supervisor.github import GitHub
 from agent_supervisor.poller import Poller, PollReport
+from agent_supervisor.readiness import ReadinessChecker
 from agent_supervisor.recovery import ProcessTable, finish_leftover_run
 from agent_supervisor.runner import EventCallback, Runner
 from agent_supervisor.stages import RunStages
@@ -33,6 +34,7 @@ class Supervisor:
     poller: Poller
     dispatcher: Dispatcher
     limits: status.Limits
+    readiness: ReadinessChecker
 
     def reports_cost(self, agent_type: str) -> bool:
         """Whether this kind of agent reports cost; if not, cost is "unknown" rather than zero."""
@@ -123,4 +125,5 @@ def build_supervisor(
         poller=Poller(conn, github, stop_run=runner.stop_if_running),
         dispatcher=Dispatcher(conn, runner, limits),
         limits=limits,
+        readiness=ReadinessChecker(adapters, github),
     )

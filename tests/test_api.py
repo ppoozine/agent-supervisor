@@ -18,6 +18,7 @@ from agent_supervisor.api.feed import ChangeFeed, StreamMessage, stream_text
 from agent_supervisor.config import Config
 from agent_supervisor.enums import CiState, ExitStatus, PrState
 from agent_supervisor.supervisor import build_supervisor
+from agent_supervisor.tool_status import ToolStatus
 from tests.conftest import GitRepo
 from tests.fake_adapter import (
     FULL_CAPABILITIES,
@@ -650,13 +651,61 @@ async def test_failed_publish_sends_the_same_events_on_the_next_try(
     assert kinds == {"event", "task"}
 
 
-async def test_agents_are_listed_with_whether_they_report_cost(api: Api) -> None:
+async def test_agents_are_listed_with_whether_they_can_be_used_and_report_cost(
+    api: Api,
+) -> None:
+    api.tokens_only.status = ToolStatus(installed=False, detail="not installed", fix=("install",))
+
     listed = (await api.client.get("/api/agents")).json()
 
     assert listed == [
-        {"agent_type": "fake", "reports_cost": True},
-        {"agent_type": "tokens-only", "reports_cost": False},
+        {"agent_type": "fake", "display_name": "Fake", "usable": True, "reports_cost": True},
+        {
+            "agent_type": "tokens-only",
+            "display_name": "Fake",
+            "usable": False,
+            "reports_cost": False,
+        },
     ]
+
+
+async def test_setup_reports_each_agent_and_gh(api: Api) -> None:
+    api.tokens_only.status = ToolStatus(
+        installed=True, version="0.9.0", detail="not signed in", fix=("codex login",)
+    )
+
+    setup = (await api.client.get("/api/setup")).json()
+
+    assert setup["checked_at"]
+    fake, tokens_only = setup["agents"]
+    assert fake == {
+        "agent_type": "fake",
+        "display_name": "Fake",
+        "usable": True,
+        "installed": True,
+        "version": "1.0.0",
+        "auth": "api_key",
+        "auth_label": "TEST_KEY",
+        "detail": None,
+        "fix": [],
+        "notice": None,
+    }
+    assert (tokens_only["usable"], tokens_only["detail"]) == (False, "not signed in")
+    assert tokens_only["fix"] == ["codex login"]
+    assert (setup["github"]["usable"], setup["github"]["auth"]) == (True, "account")
+
+
+async def test_setup_is_kept_until_checked_again(api: Api) -> None:
+    before = (await api.client.get("/api/setup")).json()
+    api.github.cli_status = ToolStatus(installed=False, detail="not installed")
+
+    kept = (await api.client.get("/api/setup")).json()
+    checked = await api.client.post("/api/setup/check")
+
+    assert kept == before
+    assert checked.status_code == 200
+    assert checked.json()["github"]["usable"] is False
+    assert (await api.client.get("/api/setup")).json()["github"]["usable"] is False
 
 
 async def test_web_files_are_served_next_to_the_api(api: Api, tmp_path: Path) -> None:

@@ -451,7 +451,7 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 
 同一時間只允許一個 daemon 在執行。第二個 daemon 啟動時發現已經有一個在跑，就直接結束，避免把別人正在跑的 run 當成遺留的。
 
-Daemon 的啟動順序：先裝好訊號處理，拿到單一實例的鎖，做完下面的復原，才開始接受連線。關閉時（Ctrl-C 或 SIGTERM）先停止接受連線、結束開著的 SSE 連線，再把還在執行的 run 中止並標成 `interrupted`。收到 `asv stop` 送來的 SIGUSR1 時中止所有 run，daemon 繼續執行。
+Daemon 的啟動順序：先裝好訊號處理，拿到單一實例的鎖，做完下面的復原，檢查每種 agent 與 gh 並寫進 log（見「Agent 與 gh 的檢查」），才開始接受連線。關閉時（Ctrl-C 或 SIGTERM）先停止接受連線、結束開著的 SSE 連線，再把還在執行的 run 中止並標成 `interrupted`。收到 `asv stop` 送來的 SIGUSR1 時中止所有 run，daemon 繼續執行。
 
 階段 1 的前景指令（`start`、`message`、`watch`、`archive`）保留，和 daemon 共用同一把鎖，所以 daemon 在跑的時候它們會被拒絕；`list`、`show`、`project add` 只讀寫資料庫，隨時可用。
 
@@ -496,6 +496,37 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 - 封存做到一半中斷、worktree 已經刪掉但任務還沒標成封存時，再封存一次會直接完成：目錄已經不在就當作已刪除，只清掉 git 裡的 worktree 登記。
 - 封存不會關掉 PR，也沒有取消封存。PR 還開著的任務封存之後，Poller 仍然繼續查它，所以之後在 GitHub 上合併或關閉，卡片的標籤會跟著變；但不再自動修復 CI，也不能再送訊息。
 
+## Agent 與 gh 的檢查
+
+讓使用者知道自己能用哪些 agent、缺了什麼（決策第 140、158 到 161 筆）。每個 adapter 有 `check()`，gh 的檢查在 `github.py`，都回傳同一個形狀（`tool_status.ToolStatus`）：
+
+| 欄位 | 內容 |
+| --- | --- |
+| `installed`、`version` | 有沒有安裝、版本 |
+| `auth` | 用哪一種登入：`api_key`（依用量計費，含 gateway 的 token）、`subscription`（claude.ai、ChatGPT 等個人方案的額度）、`cloud_provider`（Bedrock、Vertex 等）、`account`（gh 這類非 agent 工具的帳號）、`other`（認不出來的方式）、`none` |
+| `auth_label` | 給人看的登入方式，例如 `claude.ai (max)`、`ANTHROPIC_API_KEY`、`keyring`；不是憑證 |
+| `usable` | 有安裝而且 `auth` 不是 `none` |
+| `detail`、`fix` | 不能用時的原因，以及要在 terminal 執行的指令 |
+| `notice` | 能用但使用者應該知道的事；目前只有 Claude 用訂閱登入時的條文說明 |
+
+**怎麼檢查**：都不會花用量，也不呼叫 agent 的 API。
+
+| | 指令 | 判斷 |
+| --- | --- | --- |
+| Claude Code | SDK 實際會執行的 CLI（SDK 自帶的那一個，沒有才用 PATH 上的 `claude`）的 `--version` 與 `auth status --json` | `authMethod`：`claude.ai` → 訂閱；`api_key` → API key；`oauth_token` → 環境裡有 `ANTHROPIC_AUTH_TOKEN` 時是 gateway 的 token，否則是 `claude setup-token` 的訂閱 token；`third_party` → 雲端供應商 |
+| Codex | `codex --version` 與 `codex login status` | 環境裡有 `CODEX_API_KEY` 就是 API key（`login status` 不會反映它）；否則看 `login status` 的結束碼與固定的字樣（`ChatGPT`、`API key`） |
+| gh | `gh --version` 與 `gh auth status --active --hostname github.com --json hosts` | 有 active 的帳號且 `state` 是 `success`。這一步會向 GitHub 確認 token 還有效，不花費用 |
+
+「已登入」的意思是**有設定憑證**，不是憑證有效：Claude 與 Codex 的檢查不打 API，key 錯了要到第一次 run 才知道（gh 例外，見上表）。
+
+**工具不碰憑證**：只解析需要的欄位，不回傳、不記錄工具的原始輸出（Codex 的輸出可能含有部分的 key）；環境變數只看有沒有設，不讀值；不加 `--show-token`；帳號的 email、組織、GitHub 帳號名稱也不回傳。不做登入流程，不儲存 API key 或 token。
+
+**Claude 的引導**：沒有登入時，`fix` 先列設定 `ANTHROPIC_API_KEY`（在啟動 `asv serve` 的同一個 shell 裡），訂閱登入的 `claude auth login` 列在後面。偵測到訂閱登入（`claude.ai` 或 `claude setup-token` 的 token）時照常可以用，`notice` 引用 Agent SDK 文件的條文原文，說明文件沒講清楚的地方（沿用使用者自己在本機的登入算不算「提供」、怎麼取得許可），由使用者自己判斷，並說明設了 `ANTHROPIC_API_KEY` 就會優先使用它。
+
+**什麼時候檢查**：daemon 啟動時檢查一次，每種工具一行寫進 log，能用的是 INFO，不能用的是 WARNING 並附上要執行的指令；沒有任何 agent 能用時再多一行 WARNING，指向設定頁。daemon 照常啟動。之後 `GET /setup` 與 `GET /agents` 回傳記下的結果，不會每次都重新檢查（gh 每次都要連網）；`POST /setup/check` 重新檢查並更新記下的結果。
+
+開任務的 API 不檢查 agent 能不能用：記下的結果可能已經過時（例如使用者剛在 terminal 登入）。真的不能用時，run 一開始就會以 `error` 結束。
+
 ## API
 
 | 端點 | 用途 |
@@ -511,7 +542,9 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | `GET /api/tasks/{id}/events` | 稽核紀錄，分頁 |
 | `GET /api/tasks/{id}/diff` | 任務的 branch 相對於基底分支的 diff |
 | `GET /api/usage?project_id=` | token 與花費彙總 |
-| `GET /api/agents` | 這個 daemon 能用的 agent 種類，以及各自是否回報花費；給開任務的表單用 |
+| `GET /api/agents` | 這個 daemon 有的 agent 種類、顯示名稱、最近一次檢查時能不能用、是否回報花費；給開任務的表單用 |
+| `GET /api/setup` | 每種 agent 與 gh 最近一次檢查的結果，見「Agent 與 gh 的檢查」 |
+| `POST /api/setup/check` | 重新檢查每種 agent 與 gh，回傳新的結果 |
 | `GET /api/stream` | SSE：狀態變更與 agent log |
 
 API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。所有端點都在 `/api` 底下；`/` 留給前端的檔案（見「前端」）。下文提到端點時省略 `/api`。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。

@@ -11,7 +11,7 @@ import signal
 import subprocess
 import tempfile
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -24,8 +24,22 @@ from agent_supervisor.adapters.base import (
     TurnResult,
 )
 from agent_supervisor.enums import EventType, ExitStatus
+from agent_supervisor.process import CommandTimeoutError, run_command
+from agent_supervisor.tool_status import (
+    AuthKind,
+    CommandRunner,
+    ToolMissingError,
+    ToolStatus,
+    read_version,
+    run_check,
+)
 
 DEFAULT_EXECUTABLE = ("codex",)
+INSTALL_COMMAND = "npm install -g @openai/codex"
+SIGN_IN_COMMANDS = (
+    "codex login",
+    "export CODEX_API_KEY=<your API key>  # or this; then start asv serve from this shell",
+)
 COMMAND_ITEM = "command_execution"
 ERROR_ITEM = "error"
 MESSAGE_KINDS = {"agent_message": "message", "reasoning": "reasoning"}
@@ -39,6 +53,8 @@ STDERR_TAIL_CHARS = 500
 
 class CodexAdapter:
     """Start one `codex exec` process per turn."""
+
+    display_name = "Codex"
 
     capabilities = AdapterCapabilities(
         can_resume_session=True,
@@ -58,10 +74,40 @@ class CodexAdapter:
         executable: Sequence[str] = DEFAULT_EXECUTABLE,
         scratch_dir: Path | None = None,
         interrupt_grace_seconds: float = INTERRUPT_GRACE_SECONDS,
+        command_runner: CommandRunner = run_command,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         self._executable = tuple(executable)
         self._scratch_dir = scratch_dir or Path(tempfile.gettempdir())
         self._interrupt_grace_seconds = interrupt_grace_seconds
+        self._run = command_runner
+        self._environ = os.environ if environ is None else environ
+
+    async def check(self) -> ToolStatus:
+        """Check the `codex` CLI and how it is signed in.
+
+        `codex login status` only reads the saved login; it does not call the API.
+        """
+        version, problem = await read_version(self._run, self._executable, fix=(INSTALL_COMMAND,))
+        if problem is not None:
+            return problem
+        if "CODEX_API_KEY" in self._environ:
+            # `codex exec` uses it over the saved login, but `codex login status` does not show it.
+            return ToolStatus(
+                installed=True, version=version, auth=AuthKind.API_KEY, auth_label="CODEX_API_KEY"
+            )
+        try:
+            result = await run_check(self._run, [*self._executable, "login", "status"])
+        except (ToolMissingError, CommandTimeoutError):
+            return ToolStatus(
+                installed=True, version=version, detail="could not read `codex login status`"
+            )
+        auth, label = codex_auth(result.returncode, result.stdout + result.stderr)
+        if auth is AuthKind.NONE:
+            return ToolStatus(
+                installed=True, version=version, detail="not signed in", fix=SIGN_IN_COMMANDS
+            )
+        return ToolStatus(installed=True, version=version, auth=auth, auth_label=label)
 
     async def run_turn(
         self,
@@ -327,3 +373,17 @@ def _descendants(root_pid: int) -> list[int]:
             found.append(child)
             pending.append(child)
     return found
+
+
+def codex_auth(returncode: int, output: str) -> tuple[AuthKind, str | None]:
+    """Map the result of `codex login status` to how Codex is signed in.
+
+    The output can contain part of a saved API key, so only fixed phrases are looked for.
+    """
+    if returncode != 0:
+        return AuthKind.NONE, None
+    if "ChatGPT" in output:
+        return AuthKind.SUBSCRIPTION, "ChatGPT"
+    if "API key" in output:
+        return AuthKind.API_KEY, "saved API key"
+    return AuthKind.OTHER, "codex login"
