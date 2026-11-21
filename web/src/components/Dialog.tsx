@@ -4,6 +4,8 @@ interface DialogProps {
   title: string
   submitLabel: string
   isBusy: boolean
+  /** False keeps the submit button disabled, e.g. while a required choice has no options. */
+  canSubmit?: boolean
   error: string | null
   onSubmit: () => void
   onClose: () => void
@@ -61,7 +63,11 @@ export function Dialog(props: DialogProps) {
           <button type="button" className="ghost" onClick={close} disabled={props.isBusy}>
             Cancel
           </button>
-          <button type="submit" className="primary" disabled={props.isBusy}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={props.isBusy || props.canSubmit === false}
+          >
             {props.isBusy ? 'Working…' : props.submitLabel}
           </button>
         </div>

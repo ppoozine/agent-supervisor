@@ -596,7 +596,9 @@ API 由常駐的 daemon 提供（`asv serve`），只綁 `127.0.0.1`，連接埠
 React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.md`。
 
 - **由誰提供**：`npm run build` 的產物在 `web/dist`，daemon 啟動時如果有這個目錄就把它掛在 `/`，開 `http://127.0.0.1:8765` 就是看板。沒有 build 過時 daemon 只提供 API。開發時跑 `npm run dev`（連接埠 5173），Vite 把 `/api` 轉給 daemon。
-- **兩個畫面**：看板（`#/`）與任務詳情頁（`#/tasks/{id}`），用網址的 hash 切換。
+- **三個畫面**：看板（`#/`）、任務詳情頁（`#/tasks/{id}`）與設定頁（`#/settings`，側欄最下方的連結），用網址的 hash 切換。
+- **設定頁**：列出每種 agent 與 gh 的狀態（`GET /setup`）：能不能用、版本、用什麼登入；不能用的寫原因與要在 terminal 執行的指令，有 `notice` 的另外顯示（Claude 用訂閱登入時的條文說明）。「Check again」送 `POST /setup/check`，完成後重新抓 agent 清單。見「Agent 與 gh 的檢查」。
+- **只能開能用的 agent**：開任務的表單只列 `usable` 的 agent，有不能用的就附上設定頁的連結；一個都不能用時表單送不出去，「New task」按鈕停用，看板上方顯示提示連到設定頁。
 - **不自己推導狀態**：卡片放哪一欄、顯示什麼標籤，一律用 API 回的 `column` 與 `label`；前端只決定標籤的顏色。Stop 能不能按只看 `has_open_run`。
 - **花費**：`cost_usd` 是 `null` 時顯示 token 數；有數字時前面加 `~` 表示估算值；`usage_is_complete` 為否時後面加 `+`，表示實際的數字比這個高。
 - **連線**：先連上 `/stream` 再抓資料。連線出錯時前端自己關掉，2 秒後重開（瀏覽器的 `EventSource` 在 daemon 沒開時不會自己重試）。每次連上都重新抓專案、agent、看板；開著的詳情頁從已經有的最後一筆事件之後補抓，用編號去掉重複的。

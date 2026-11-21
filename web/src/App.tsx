@@ -4,6 +4,7 @@ import { errorMessage, listAgents, listProjects, listTasks } from './api'
 import { AddProjectForm } from './components/AddProjectForm'
 import { Board } from './components/Board'
 import { NewTaskDialog } from './components/NewTaskDialog'
+import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { TaskPage } from './components/TaskPage'
 import { connectStream, type StreamStatus } from './stream'
@@ -17,20 +18,30 @@ const STATUS_TEXT: Record<StreamStatus, string> = {
   offline: 'Offline — reconnecting…',
 }
 
-/** Which task the URL points to; `#/tasks/12` is the detail page of task 12, anything else is the board. */
-function taskIdFromHash(hash: string): number | null {
+type Page = { kind: 'board' } | { kind: 'task'; taskId: number } | { kind: 'settings' }
+
+/** Which page the URL points to: `#/tasks/12` is task 12, `#/settings` the settings, anything else the board. */
+export function pageFromHash(hash: string): Page {
+  if (hash === '#/settings') return { kind: 'settings' }
   const match = /^#\/tasks\/(\d+)$/.exec(hash)
-  return match ? Number(match[1]) : null
+  return match ? { kind: 'task', taskId: Number(match[1]) } : { kind: 'board' }
 }
 
-function useOpenTaskId(): number | null {
-  const [taskId, setTaskId] = useState(() => taskIdFromHash(window.location.hash))
+function usePage(): Page {
+  const [page, setPage] = useState(() => pageFromHash(window.location.hash))
   useEffect(() => {
-    const update = (): void => setTaskId(taskIdFromHash(window.location.hash))
+    const update = (): void => setPage(pageFromHash(window.location.hash))
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
   }, [])
-  return taskId
+  return page
+}
+
+/** Why a new task cannot be opened right now, or null if it can. */
+function newTaskBlocker(projects: Project[], agents: Agent[]): string | null {
+  if (projects.length === 0) return 'Add a project first'
+  if (!agents.some((agent) => agent.usable)) return 'No agent can be used; see Settings'
+  return null
 }
 
 export function App() {
@@ -51,7 +62,8 @@ export function App() {
   // Only the most recently started load may update the screen; an earlier load that comes
   // back late is dropped.
   const latestLoad = useRef(0)
-  const openTaskId = useOpenTaskId()
+  const page = usePage()
+  const openTaskId = page.kind === 'task' ? page.taskId : null
 
   const reload = useCallback(async (): Promise<void> => {
     const arrived = new Map<number, Card>()
@@ -103,6 +115,9 @@ export function App() {
   }, [])
 
   const allCards = Object.values(cards)
+  const blocker = newTaskBlocker(projects, agents)
+  // Only once agents have loaded: an empty list while loading is not "none usable".
+  const hasNoUsableAgent = agents.length > 0 && !agents.some((agent) => agent.usable)
   const openCard = openTaskId === null ? undefined : cards[openTaskId]
 
   return (
@@ -111,12 +126,13 @@ export function App() {
         projects={projects}
         cards={allCards}
         openTaskId={openTaskId}
+        isSettingsOpen={page.kind === 'settings'}
         onAddProject={() => setIsAddingProject(true)}
       />
       <main className="main">
         <header className="topbar">
           <h1>
-            {openTaskId === null ? (
+            {page.kind === 'board' ? (
               'Board'
             ) : (
               <a className="back" href="#/">
@@ -128,8 +144,8 @@ export function App() {
           <button
             className="primary"
             onClick={() => setIsCreatingTask(true)}
-            disabled={projects.length === 0}
-            title={projects.length === 0 ? 'Add a project first' : undefined}
+            disabled={blocker !== null}
+            title={blocker ?? undefined}
           >
             + New task
           </button>
@@ -139,9 +155,14 @@ export function App() {
             {loadError}
           </div>
         )}
-        {openTaskId === null ? (
-          <Board cards={allCards} projects={projects} />
-        ) : (
+        {page.kind === 'board' && hasNoUsableAgent && (
+          <div className="alert" role="status">
+            No agent can be used yet. <a href="#/settings">See Settings</a> for what is missing.
+          </div>
+        )}
+        {page.kind === 'settings' && <SettingsPage onChecked={() => void reload()} />}
+        {page.kind === 'board' && <Board cards={allCards} projects={projects} />}
+        {openTaskId !== null && (
           <TaskPage
             key={openTaskId}
             taskId={openTaskId}

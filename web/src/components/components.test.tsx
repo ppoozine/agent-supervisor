@@ -3,11 +3,12 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import * as api from '../api'
 import { makeCard, makeDetail, makeEvent } from '../testing'
-import type { Project } from '../types'
+import type { Project, Setup, ToolStatus } from '../types'
 import { AddProjectForm } from './AddProjectForm'
 import { Board } from './Board'
 import { DiffTab } from './DiffTab'
 import { NewTaskDialog } from './NewTaskDialog'
+import { SettingsPage } from './SettingsPage'
 import { TaskCard } from './TaskCard'
 import { TaskPage } from './TaskPage'
 
@@ -21,6 +22,8 @@ vi.mock('../api', async (importOriginal) => ({
   stopTask: vi.fn(),
   archiveTask: vi.fn(),
   getDiff: vi.fn(),
+  getSetup: vi.fn(),
+  checkSetup: vi.fn(),
 }))
 
 const project: Project = {
@@ -32,8 +35,8 @@ const project: Project = {
   require_review: false,
 }
 const agents = [
-  { agent_type: 'claude_code', reports_cost: true },
-  { agent_type: 'codex', reports_cost: false },
+  { agent_type: 'claude_code', display_name: 'Claude Code', usable: true, reports_cost: true },
+  { agent_type: 'codex', display_name: 'Codex', usable: true, reports_cost: false },
 ]
 
 afterEach(() => {
@@ -353,3 +356,89 @@ test('a truncated diff says so', async () => {
   expect(await screen.findByText(/the rest is not shown/)).toBeTruthy()
 })
 
+
+test('the new task form offers only the agents that can be used', () => {
+  const someReady = [agents[0], { ...agents[1], usable: false }]
+  render(
+    <NewTaskDialog projects={[project]} agents={someReady} onCreated={vi.fn()} onClose={vi.fn()} />,
+  )
+
+  const options = within(screen.getByLabelText('Agent')).getAllByRole('option')
+  expect(options.map((option) => option.textContent)).toEqual(['Claude Code'])
+  expect(screen.getByRole('link', { name: 'See Settings' }).getAttribute('href')).toBe('#/settings')
+  expect(button('Start task').disabled).toBe(false)
+})
+
+test('the new task form cannot be sent when no agent can be used', () => {
+  const noneReady = agents.map((agent) => ({ ...agent, usable: false }))
+  render(
+    <NewTaskDialog projects={[project]} agents={noneReady} onCreated={vi.fn()} onClose={vi.fn()} />,
+  )
+
+  expect(screen.getByText(/No agent can be used yet/)).toBeTruthy()
+  expect(button('Start task').disabled).toBe(true)
+})
+
+const ready: ToolStatus = {
+  usable: true,
+  installed: true,
+  version: '2.1.325',
+  auth: 'subscription',
+  auth_label: 'claude.ai (max)',
+  detail: null,
+  fix: [],
+  notice: 'Claude Code is signed in with a Claude subscription.',
+}
+
+function makeSetup(codex: Partial<ToolStatus> = {}): Setup {
+  return {
+    checked_at: new Date().toISOString(),
+    agents: [
+      { agent_type: 'claude_code', display_name: 'Claude Code', ...ready },
+      {
+        agent_type: 'codex',
+        display_name: 'Codex',
+        ...ready,
+        usable: false,
+        installed: false,
+        version: null,
+        auth: 'none',
+        auth_label: null,
+        detail: 'not installed',
+        fix: ['npm install -g @openai/codex'],
+        notice: null,
+        ...codex,
+      },
+    ],
+    github: { ...ready, auth: 'account', auth_label: 'keyring', notice: null },
+  }
+}
+
+test('the settings page shows each tool, what to run for the ones not ready, and notices', async () => {
+  vi.mocked(api.getSetup).mockResolvedValue(makeSetup())
+  render(<SettingsPage onChecked={vi.fn()} />)
+
+  const claude = await screen.findByRole('region', { name: 'Claude Code' })
+  expect(claude.textContent).toContain('Ready')
+  expect(claude.textContent).toContain('Signed in with claude.ai (max)')
+  expect(claude.textContent).toContain('signed in with a Claude subscription')
+  const codex = screen.getByRole('region', { name: 'Codex' })
+  expect(codex.textContent).toContain('Not installed')
+  expect(within(codex).getByText('npm install -g @openai/codex')).toBeTruthy()
+  expect(screen.getByRole('region', { name: 'gh' }).textContent).toContain('Signed in with keyring')
+})
+
+test('checking again shows the new result and tells the page', async () => {
+  const checked = vi.fn()
+  vi.mocked(api.getSetup).mockResolvedValue(makeSetup())
+  vi.mocked(api.checkSetup).mockResolvedValue(
+    makeSetup({ usable: true, installed: true, auth: 'subscription', auth_label: 'ChatGPT', fix: [] }),
+  )
+  render(<SettingsPage onChecked={checked} />)
+  await screen.findByRole('region', { name: 'Codex' })
+
+  fireEvent.click(button('Check again'))
+
+  await waitFor(() => expect(checked).toHaveBeenCalled())
+  expect(screen.getByRole('region', { name: 'Codex' }).textContent).toContain('Signed in with ChatGPT')
+})

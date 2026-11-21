@@ -1,6 +1,15 @@
 // Every call to the daemon goes through here. Errors are always turned into ApiError, whose
 // message can be shown as is.
-import type { Agent, Card, EventPage, EventRow, Project, TaskDetail, TaskDiff } from './types'
+import type {
+  Agent,
+  Card,
+  EventPage,
+  EventRow,
+  Project,
+  Setup,
+  TaskDetail,
+  TaskDiff,
+} from './types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -56,6 +65,8 @@ export interface NewTask {
 export const listProjects = () => request<Project[]>('GET', '/projects')
 export const addProject = (project: NewProject) => request<Project>('POST', '/projects', project)
 export const listAgents = () => request<Agent[]>('GET', '/agents')
+export const getSetup = () => request<Setup>('GET', '/setup')
+export const checkSetup = () => request<Setup>('POST', '/setup/check')
 export const listTasks = () => request<Card[]>('GET', '/tasks')
 export const createTask = (task: NewTask) => request<TaskDetail>('POST', '/tasks', task)
 export const getTask = (taskId: number) => request<TaskDetail>('GET', `/tasks/${taskId}`)

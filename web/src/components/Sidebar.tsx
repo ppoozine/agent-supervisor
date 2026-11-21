@@ -7,11 +7,12 @@ interface SidebarProps {
   projects: Project[]
   cards: Card[]
   openTaskId: number | null
+  isSettingsOpen: boolean
   onAddProject: () => void
 }
 
 /** Left sidebar: the project list; expanding a project shows its tasks still on the board. */
-export function Sidebar({ projects, cards, openTaskId, onAddProject }: SidebarProps) {
+export function Sidebar({ projects, cards, openTaskId, isSettingsOpen, onAddProject }: SidebarProps) {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
   const toggle = (projectId: number): void =>
     setCollapsed((current) => {
@@ -55,6 +56,9 @@ export function Sidebar({ projects, cards, openTaskId, onAddProject }: SidebarPr
       <button className="ghost add-project" onClick={onAddProject}>
         + Add project
       </button>
+      <a className={`sidebar-settings${isSettingsOpen ? ' is-open' : ''}`} href="#/settings">
+        Settings
+      </a>
     </nav>
   )
 }

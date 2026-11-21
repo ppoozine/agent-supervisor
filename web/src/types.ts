@@ -9,9 +9,41 @@ export interface Project {
   require_review: boolean
 }
 
+/** An agent type the daemon has; `usable` is as of the daemon's last check. */
 export interface Agent {
   agent_type: string
+  display_name: string
+  usable: boolean
   reports_cost: boolean
+}
+
+/** Whether one tool (an agent or gh) can be used. Never contains a credential. */
+export interface ToolStatus {
+  usable: boolean
+  installed: boolean
+  version: string | null
+  /** api_key, subscription, cloud_provider, account, other or none. */
+  auth: string
+  /** How it is signed in, for people, e.g. "claude.ai (max)". */
+  auth_label: string | null
+  /** Why it cannot be used, when it cannot. */
+  detail: string | null
+  /** Commands to run in a terminal to make it usable. */
+  fix: string[]
+  /** Something to know even though it can be used. */
+  notice: string | null
+}
+
+export interface AgentStatus extends ToolStatus {
+  agent_type: string
+  display_name: string
+}
+
+/** The result of the daemon's last check of every agent and gh. */
+export interface Setup {
+  checked_at: string
+  agents: AgentStatus[]
+  github: ToolStatus
 }
 
 /** A card on the board. `column` and `label` are derived by the backend; the frontend only displays them. */
