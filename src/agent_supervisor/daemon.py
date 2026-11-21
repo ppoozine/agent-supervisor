@@ -23,6 +23,7 @@ from agent_supervisor.api.feed import ChangeFeed
 from agent_supervisor.config import Config
 from agent_supervisor.github import GitHub
 from agent_supervisor.notifier import Notifier
+from agent_supervisor.readiness import describe
 from agent_supervisor.recovery import (
     AlreadyRunningError,
     InstanceLock,
@@ -103,6 +104,7 @@ async def _serve_with_lock(
                 run_id,
             )
         supervisor = build_supervisor(conn, config, adapters, github, processes=processes)
+        await _log_readiness(supervisor)
         try:
             await _run_until_quit(supervisor, quit_requested, stop_requested)
         finally:
@@ -111,6 +113,26 @@ async def _serve_with_lock(
         await conn.close()
         lock.release()
     return EXIT_OK
+
+
+async def _log_readiness(supervisor: Supervisor) -> None:
+    """Check which agents and whether gh can be used, and log it. Never logs credentials."""
+    readiness = await supervisor.readiness.check()
+    for agent_type, status in readiness.agents.items():
+        name = supervisor.adapters[agent_type].display_name
+        level = logging.INFO if status.usable else logging.WARNING
+        logger.log(level, "%s (%s): %s", name, agent_type, describe(status))
+    logger.log(
+        logging.INFO if readiness.github.usable else logging.WARNING,
+        "gh: %s",
+        describe(readiness.github),
+    )
+    if not readiness.usable_agents:
+        logger.warning(
+            "no agent can be used; see http://%s:%s/#/settings for what is missing",
+            HOST,
+            supervisor.config.api_port,
+        )
 
 
 async def _run_until_quit(

@@ -2,15 +2,35 @@
 
 import json
 import re
+import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 from agent_supervisor.enums import CiState, MergeState, PrState, ReviewState
-from agent_supervisor.process import CommandResult, run_command
+from agent_supervisor.process import CommandResult, CommandTimeoutError, run_command
+from agent_supervisor.tool_status import (
+    AuthKind,
+    ToolMissingError,
+    ToolStatus,
+    read_version,
+    run_check,
+)
 
 PR_FIELDS = "number,state,headRefOid,url"
+HOST = "github.com"
+INSTALL_COMMAND = (
+    "brew install gh"
+    if sys.platform == "darwin"
+    else "# install gh: https://github.com/cli/cli#installation"
+)
+UPGRADE_COMMAND = (
+    "brew upgrade gh"
+    if sys.platform == "darwin"
+    else "# update gh: https://github.com/cli/cli#installation"
+)
+SIGN_IN_COMMAND = "gh auth login"
 STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews,mergeable"
 
 # Mapping of check results; for the rationale see the section on what ci_state means in
@@ -185,6 +205,28 @@ class GitHub:
             return failed_steps
         return await self._gh([*base, "--log"])
 
+    async def check_cli(self) -> ToolStatus:
+        """Check that `gh` is installed and signed in to github.com.
+
+        `gh auth status` asks GitHub whether the saved token still works, which is free. Its token
+        is never asked for (`--show-token`).
+        """
+        version, problem = await read_version(self._run, ["gh"], fix=(INSTALL_COMMAND,))
+        if problem is not None:
+            return problem
+        arguments = ["gh", "auth", "status", "--active", "--hostname", HOST, "--json", "hosts"]
+        try:
+            result = await run_check(self._run, arguments)
+            hosts = json.loads(result.stdout)["hosts"]
+        except (ToolMissingError, CommandTimeoutError, json.JSONDecodeError, KeyError, TypeError):
+            return ToolStatus(
+                installed=True,
+                version=version,
+                detail="could not read `gh auth status`; gh may be too old",
+                fix=(UPGRADE_COMMAND,),
+            )
+        return gh_auth_status(hosts, version)
+
     async def _gh(self, args: Sequence[str], *, input_text: str | None = None) -> str:
         try:
             result = await self._run(["gh", *args], cwd=None, input_text=input_text)
@@ -195,6 +237,29 @@ class GitHub:
             detail = (result.stderr or result.stdout).strip()
             raise GitHubError(f"gh {args[0]} {args[1]} failed: {detail}")
         return result.stdout
+
+
+def gh_auth_status(hosts: Any, version: str | None) -> ToolStatus:
+    """Map the `hosts` of `gh auth status --json hosts` to a status, leaving out the account."""
+    accounts = hosts.get(HOST) if isinstance(hosts, dict) else None
+    active = next((item for item in accounts or [] if item.get("active")), None)
+    if active is None:
+        return ToolStatus(
+            installed=True, version=version, detail="not signed in", fix=(SIGN_IN_COMMAND,)
+        )
+    if active.get("state") != "success":
+        return ToolStatus(
+            installed=True,
+            version=version,
+            detail="GitHub did not accept the saved credentials",
+            fix=(SIGN_IN_COMMAND,),
+        )
+    return ToolStatus(
+        installed=True,
+        version=version,
+        auth=AuthKind.ACCOUNT,
+        auth_label=str(active.get("tokenSource") or HOST),
+    )
 
 
 def parse_pull_request_status(data: dict[str, Any]) -> PullRequestStatus:

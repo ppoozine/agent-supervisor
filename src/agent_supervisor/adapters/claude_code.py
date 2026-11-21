@@ -5,14 +5,18 @@ All strings and parameters specific to Claude Code appear only in this file.
 """
 
 import asyncio
+import json
 import os
 import re
+import shutil
+import sys
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, suppress
 from pathlib import Path
 from typing import Any, Protocol
 
+import claude_agent_sdk
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
@@ -38,6 +42,15 @@ from agent_supervisor.adapters.base import (
     TurnResult,
 )
 from agent_supervisor.enums import EventType, ExitStatus
+from agent_supervisor.process import CommandTimeoutError, run_command
+from agent_supervisor.tool_status import (
+    AuthKind,
+    CommandRunner,
+    ToolMissingError,
+    ToolStatus,
+    read_version,
+    run_check,
+)
 
 COMMAND_TOOL = "Bash"
 FILE_WRITING_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
@@ -48,6 +61,24 @@ INPUT_TOKEN_KEYS = ("input_tokens", "cache_creation_input_tokens", "cache_read_i
 COMMAND_SEPARATORS = re.compile(r"&&|\|\||[;|\n]")
 MAX_OUTPUT_CHARS = 20_000
 INTERRUPT_TIMEOUT_SECONDS = 5.0
+
+INSTALL_COMMAND = "curl -fsSL https://claude.ai/install.sh | bash"
+SIGN_IN_COMMANDS = (
+    "export ANTHROPIC_API_KEY=<your API key>  # then start asv serve from this shell",
+    "claude auth login  # or sign in with a Claude subscription instead",
+)
+# Quoted from https://code.claude.com/docs/en/agent-sdk/overview (checked 2026-11-21).
+SUBSCRIPTION_NOTICE = (
+    "Claude Code is signed in with a Claude subscription. The Agent SDK documentation says:"
+    ' "Unless previously approved, Anthropic does not allow third party developers to offer'
+    " claude.ai login or rate limits for their products, including agents built on the Claude"
+    ' Agent SDK. Use the API key authentication methods described in the Quickstart instead."'
+    " It does not say whether a tool that reuses the login you made yourself on this computer"
+    " counts as offering it, or how to get approval. agent-supervisor never signs you in and"
+    " never stores credentials; whether this use is fine for you is your call. To use an API key"
+    " instead, set ANTHROPIC_API_KEY before starting asv serve; it takes precedence over the"
+    " subscription login."
+)
 
 
 class SdkClient(Protocol):
@@ -115,6 +146,8 @@ def _starts_with_command(segment: str, denied: str) -> bool:
 class ClaudeCodeAdapter:
     """Run one turn with the Claude Agent SDK."""
 
+    display_name = "Claude Code"
+
     capabilities = AdapterCapabilities(
         can_resume_session=True,
         can_limit_turns=True,
@@ -131,9 +164,44 @@ class ClaudeCodeAdapter:
         *,
         client_factory: ClientFactory | None = None,
         setting_sources: tuple[str, ...] = ("project",),
+        command_runner: CommandRunner = run_command,
+        cli_path: Path | None = None,
+        environ: Mapping[str, str] | None = None,
     ) -> None:
         self._client_factory: ClientFactory = client_factory or _default_client_factory
         self._setting_sources = setting_sources
+        self._run = command_runner
+        self._cli_path = cli_path
+        self._environ = os.environ if environ is None else environ
+
+    async def check(self) -> ToolStatus:
+        """Check the Claude Code CLI the SDK runs, and how it is signed in.
+
+        `claude auth status` reads the configured credentials without calling the API.
+        """
+        cli = self._cli_path or find_sdk_cli()
+        if cli is None:
+            return ToolStatus(installed=False, detail="not installed", fix=(INSTALL_COMMAND,))
+        version, problem = await read_version(self._run, [str(cli)], fix=(INSTALL_COMMAND,))
+        if problem is not None:
+            return problem
+        try:
+            result = await run_check(self._run, [str(cli), "auth", "status", "--json"])
+            # Signed out exits with 1 but still prints the JSON.
+            data = json.loads(result.stdout)
+        except (ToolMissingError, CommandTimeoutError, json.JSONDecodeError):
+            return ToolStatus(
+                installed=True, version=version, detail="could not read `claude auth status`"
+            )
+        auth, label = claude_auth(data, self._environ)
+        if auth is AuthKind.NONE:
+            return ToolStatus(
+                installed=True, version=version, detail="not signed in", fix=SIGN_IN_COMMANDS
+            )
+        notice = SUBSCRIPTION_NOTICE if auth is AuthKind.SUBSCRIPTION else None
+        return ToolStatus(
+            installed=True, version=version, auth=auth, auth_label=label, notice=notice
+        )
 
     async def run_turn(
         self,
@@ -192,6 +260,40 @@ class ClaudeCodeAdapter:
             finally:
                 if not is_finished:
                     await _interrupt_quietly(client)
+
+
+def find_sdk_cli() -> Path | None:
+    """The Claude Code CLI the SDK runs: the copy bundled with it, otherwise `claude` on PATH."""
+    name = "claude.exe" if sys.platform == "win32" else "claude"
+    bundled = Path(claude_agent_sdk.__file__).parent / "_bundled" / name
+    if bundled.is_file():
+        return bundled
+    found = shutil.which("claude")
+    return None if found is None else Path(found)
+
+
+def claude_auth(data: Mapping[str, Any], environ: Mapping[str, str]) -> tuple[AuthKind, str | None]:
+    """Map the output of `claude auth status --json` to how Claude Code is signed in.
+
+    Only the method and its source are read; the account's email and organization are left out.
+    """
+    if not data.get("loggedIn"):
+        return AuthKind.NONE, None
+    method = data.get("authMethod")
+    if method == "claude.ai":
+        plan = data.get("subscriptionType")
+        return AuthKind.SUBSCRIPTION, f"claude.ai ({plan})" if plan else "claude.ai"
+    if method == "api_key":
+        return AuthKind.API_KEY, str(data.get("apiKeySource") or "API key")
+    if method == "oauth_token":
+        # Both a gateway's ANTHROPIC_AUTH_TOKEN and a subscription's CLAUDE_CODE_OAUTH_TOKEN (from
+        # `claude setup-token`) report this; the gateway token takes precedence when both are set.
+        if "ANTHROPIC_AUTH_TOKEN" in environ:
+            return AuthKind.API_KEY, "ANTHROPIC_AUTH_TOKEN"
+        return AuthKind.SUBSCRIPTION, "CLAUDE_CODE_OAUTH_TOKEN"
+    if method == "third_party":
+        return AuthKind.CLOUD_PROVIDER, str(data.get("apiProvider") or "cloud provider")
+    return AuthKind.OTHER, str(method)
 
 
 def _default_client_factory(options: ClaudeAgentOptions) -> ClaudeSDKClient:

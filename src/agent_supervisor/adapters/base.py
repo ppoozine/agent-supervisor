@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from agent_supervisor.enums import EventType, ExitStatus
+from agent_supervisor.tool_status import ToolStatus
 
 
 class SandboxLevel(StrEnum):
@@ -78,7 +79,15 @@ class TurnResult:
 class AgentAdapter(Protocol):
     """Interface for controlling one kind of agent."""
 
+    display_name: str
     capabilities: AdapterCapabilities
+
+    async def check(self) -> ToolStatus:
+        """Whether this agent can be used: installed, its version, and how it is signed in.
+
+        Must not spend any usage or handle credentials; see `tool_status`.
+        """
+        ...
 
     def run_turn(
         self,

@@ -14,6 +14,9 @@ from agent_supervisor.adapters.base import (
     TurnResult,
 )
 from agent_supervisor.enums import EventType, ExitStatus
+from agent_supervisor.tool_status import AuthKind, ToolStatus
+
+READY = ToolStatus(installed=True, version="1.0.0", auth=AuthKind.API_KEY, auth_label="TEST_KEY")
 
 FULL_CAPABILITIES = AdapterCapabilities(
     can_resume_session=True,
@@ -82,8 +85,14 @@ class FakeAdapter:
 
     scripts: list[list[Any]]
     capabilities: AdapterCapabilities = FULL_CAPABILITIES
+    status: ToolStatus = field(default_factory=lambda: READY)
+    display_name: str = "Fake"
     calls: list[Call] = field(default_factory=list)
     closed_count: int = 0
+
+    async def check(self) -> ToolStatus:
+        """Report the status the test set."""
+        return self.status
 
     async def run_turn(
         self,

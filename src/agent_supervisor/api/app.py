@@ -216,13 +216,34 @@ def create_app(
             "next_after": events[-1].id if len(events) == limit else None,
         }
 
+    display_names = {
+        agent_type: adapter.display_name for agent_type, adapter in supervisor.adapters.items()
+    }
+
     @api.get("/agents")
     async def list_agents() -> list[dict[str, Any]]:
-        """Agent types this daemon can use, for the new-task form to choose from."""
+        """Agent types this daemon has, for the new-task form; `usable` is as of the last check."""
+        readiness = await supervisor.readiness.latest()
         return [
-            {"agent_type": agent_type, "reports_cost": supervisor.reports_cost(agent_type)}
+            {
+                "agent_type": agent_type,
+                "display_name": display_names[agent_type],
+                "usable": readiness.agents[agent_type].usable,
+                "reports_cost": supervisor.reports_cost(agent_type),
+            }
             for agent_type in supervisor.adapters
         ]
+
+    @api.get("/setup")
+    async def get_setup() -> dict[str, Any]:
+        """Whether each agent and gh can be used, as of the last check."""
+        return views.readiness_view(await supervisor.readiness.latest(), display_names)
+
+    @api.post("/setup/check")
+    async def check_setup() -> dict[str, Any]:
+        """Check every agent and gh again, e.g. after signing in from a terminal."""
+        readiness = await asyncio.shield(supervisor.readiness.check())
+        return views.readiness_view(readiness, display_names)
 
     @api.get("/usage")
     async def get_usage(project_id: int | None = None) -> dict[str, Any]:
