@@ -9,7 +9,7 @@ from starlette.exceptions import HTTPException
 
 from agent_supervisor import db
 from agent_supervisor.recovery import ProcessStillRunningError
-from agent_supervisor.runner import BudgetExhaustedError, NoActiveRunError, UnknownAgentError
+from agent_supervisor.runner import NoActiveRunError, UnknownAgentError
 
 NOT_FOUND, CONFLICT, INVALID, INTERNAL = 404, 409, 422, 500
 
@@ -33,7 +33,6 @@ ERROR_RESPONSES: dict[type[Exception], tuple[int, str]] = {
     db.NotFoundError: (NOT_FOUND, "not_found"),
     db.RunAlreadyActiveError: (CONFLICT, "run_already_active"),
     db.TaskNotRunnableError: (CONFLICT, "task_not_runnable"),
-    BudgetExhaustedError: (CONFLICT, "budget_exhausted"),
     NoActiveRunError: (CONFLICT, "no_active_run"),
     ProcessStillRunningError: (CONFLICT, "process_still_running"),
     ProjectExistsError: (CONFLICT, "project_exists"),

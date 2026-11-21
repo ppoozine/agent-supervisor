@@ -13,7 +13,6 @@ from agent_supervisor.adapters.base import PermissionPolicy, SandboxLevel
 from agent_supervisor.config import Config
 from agent_supervisor.enums import EventType, ExitStatus, RunTrigger
 from agent_supervisor.runner import (
-    BudgetExhaustedError,
     EventWriter,
     NoActiveRunError,
     Runner,
@@ -222,7 +221,7 @@ async def test_message_is_rejected_while_a_run_is_active(
     assert len(await db.list_runs(conn, run.task_id)) == 1
 
 
-async def test_limits_carry_max_turns_and_remaining_budget(
+async def test_limits_carry_max_turns_and_the_budget_of_the_latest_intervention(
     conn: aiosqlite.Connection, config: Config, tmp_path: Path
 ) -> None:
     adapter = FakeAdapter(
@@ -237,7 +236,8 @@ async def test_limits_carry_max_turns_and_remaining_budget(
 
     assert adapter.calls[0].limits.max_turns == 7
     assert adapter.calls[0].limits.max_budget_usd == pytest.approx(4.0)
-    assert adapter.calls[1].limits.max_budget_usd == pytest.approx(2.5)
+    # A message starts a new budget, so the second run gets the full limit again.
+    assert adapter.calls[1].limits.max_budget_usd == pytest.approx(4.0)
 
 
 async def test_limits_are_omitted_when_adapter_cannot_enforce_them(
@@ -253,30 +253,26 @@ async def test_limits_are_omitted_when_adapter_cannot_enforce_them(
     assert adapter.calls[0].limits.max_budget_usd is None
 
 
-async def test_message_is_rejected_when_cost_budget_is_exhausted(
-    conn: aiosqlite.Connection, config: Config, tmp_path: Path
+@pytest.mark.parametrize(
+    ("limits", "first_result"),
+    [
+        ({"task_cost_limit_usd": 2.0}, result(cost_usd=2.0)),
+        ({"task_token_limit": 1000}, result(tokens_in=900, tokens_out=100, cost_usd=None)),
+    ],
+    ids=["cost", "tokens"],
+)
+async def test_message_after_the_budget_is_used_up_starts_a_new_budget(
+    conn: aiosqlite.Connection, config: Config, limits: dict[str, float], first_result: object
 ) -> None:
-    adapter = FakeAdapter([[session_started(), result(cost_usd=2.0)]])
-    runner = make_runner(conn, replace(config, task_cost_limit_usd=2.0), adapter)
+    adapter = FakeAdapter([[session_started(), first_result], [result(cost_usd=0.5)]])
+    runner = make_runner(conn, replace(config, **limits), adapter)
     first = await runner.wait((await start(runner, conn)).id)
 
-    with pytest.raises(BudgetExhaustedError):
-        await runner.send_message(first.task_id, "more")
+    second = await runner.wait((await runner.send_message(first.task_id, "more")).id)
 
-    assert len(await db.list_runs(conn, first.task_id)) == 1
-
-
-async def test_message_is_rejected_when_token_budget_is_exhausted(
-    conn: aiosqlite.Connection, config: Config, tmp_path: Path
-) -> None:
-    adapter = FakeAdapter(
-        [[session_started(), result(tokens_in=900, tokens_out=100, cost_usd=None)]]
-    )
-    runner = make_runner(conn, replace(config, task_token_limit=1000), adapter)
-    first = await runner.wait((await start(runner, conn)).id)
-
-    with pytest.raises(BudgetExhaustedError):
-        await runner.send_message(first.task_id, "more")
+    assert second.exit_status == ExitStatus.SUCCESS
+    budget = adapter.calls[1].limits.max_budget_usd
+    assert budget == pytest.approx(limits.get("task_cost_limit_usd", config.task_cost_limit_usd))
 
 
 async def test_policy_from_config_is_passed_to_the_adapter(

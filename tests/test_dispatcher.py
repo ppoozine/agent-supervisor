@@ -211,6 +211,26 @@ async def test_rule_3_no_auto_fix_once_the_task_token_limit_is_reached(
     assert await loop.board() == status.BoardStatus(Column.NEEDS_YOU, "Over budget")
 
 
+async def test_rule_3_budget_counts_again_from_the_latest_user_message(
+    conn: aiosqlite.Connection, config: Config
+) -> None:
+    loop = Loop(conn, replace(config, task_cost_limit_usd=1.0))
+    await loop.start(cost_usd=1.5)
+    await loop.ci("failed")
+    assert await loop.dispatch() == []
+    loop.pushes.append("sha-2")
+    loop.adapter.scripts.append([result(cost_usd=0.25)])
+    await loop.runner.wait((await loop.runner.send_message(loop.task_id, "carry on")).id)
+    await loop.ci("failed")
+
+    run = await loop.fix(pushes="sha-3")
+
+    assert run.trigger == RunTrigger.CI_FAILURE
+    assert loop.adapter.calls[-1].limits.max_budget_usd == pytest.approx(0.75)
+    # The card still shows the whole task's cost: 1.5 + 0.25 + 0.5 for this fix.
+    assert (await db.get_task_usage(conn, loop.task_id)).cost_usd == pytest.approx(2.25)
+
+
 async def test_rule_4_fix_run_gets_the_remaining_budget_and_turn_limit(
     conn: aiosqlite.Connection, config: Config
 ) -> None:

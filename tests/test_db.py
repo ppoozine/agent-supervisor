@@ -216,6 +216,27 @@ async def test_task_usage_is_incomplete_when_a_finished_run_has_unknown_usage(
     assert usage.is_complete is False
 
 
+async def test_budget_usage_counts_from_the_latest_run_a_person_started(
+    conn: aiosqlite.Connection,
+) -> None:
+    task, initial = await make_task(conn)
+    await db.finish_run(conn, initial.id, ExitStatus.SUCCESS, tokens_in=10, cost_usd=1.0)
+    for trigger, cost in [
+        (RunTrigger.CI_FAILURE, 0.1),
+        (RunTrigger.USER_MESSAGE, 0.2),
+        (RunTrigger.CI_FAILURE, 0.3),
+    ]:
+        run = await db.create_run(conn, task.id, trigger, "x", source_head_sha="sha")
+        await db.finish_run(conn, run.id, ExitStatus.SUCCESS, tokens_in=10, cost_usd=cost)
+
+    budget = await db.get_budget_usage(conn, task.id)
+
+    # Only the message and the fix after it count; the whole task's usage is unchanged.
+    assert budget.cost_usd == pytest.approx(0.5)
+    assert budget.tokens == 20
+    assert (await db.get_task_usage(conn, task.id)).cost_usd == pytest.approx(1.6)
+
+
 async def test_last_usage_raw_returns_latest_recorded_usage(conn: aiosqlite.Connection) -> None:
     task, run = await make_task(conn)
     assert await db.get_last_usage_raw(conn, task.id) is None
