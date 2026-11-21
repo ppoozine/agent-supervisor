@@ -1,6 +1,6 @@
 [project]
 name = "agent-supervisor"
-version = "0.2.0"
+version = "0.3.0rc1"
 description = "Orchestration and audit layer for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.13"
