@@ -54,6 +54,8 @@ src/agent_supervisor/
   daemon.py          # 常駐的 daemon：啟動順序、訊號、背景輪詢、關閉
   stages.py          # run 的準備（建 worktree、抓 CI log、開始合併）與收尾（commit、push、開 PR）、封存
   process.py         # 執行外部指令的共用底層，逾時或取消時終止子程序
+  tool_status.py     # 檢查 agent 與 gh 能不能用的共用結果型別（不碰憑證、不花用量）
+  readiness.py       # 檢查每種 agent 與 gh，記下最近一次的結果
   worktree.py        # git worktree 與 branch 管理（所有 git 指令）
   github.py          # 所有 gh 呼叫：開 PR、查 PR / CI / review、抓 CI log；檢查結果換算成 ci_state
   ci_log.py          # 清理與截取 CI log、組出修復指示（純函式）

@@ -174,6 +174,21 @@
 2. `max_budget_usd` 的實際行為
 3. 被中止的 run 能不能在中斷後多讀一筆結果，把用量與花費記下來（SDK 中斷後仍會回報，目前的實作沒有讀）
 
+## 檢查能不能用（任務 15，2026-11-21 實測）
+
+- 【實測】SDK 先用它自己附帶的 CLI（`claude_agent_sdk/_bundled/claude`，本機是 2.1.325），沒有附帶時才找 PATH 上的 `claude`（`_internal/transport/subprocess_cli.py` 的 `_find_cli`）。所以 PATH 上有沒有 `claude`、是哪個版本，都不影響 adapter；檢查也要用同一個 CLI，不然結果和實際不一致。
+- 【實測】`claude auth status --json`（預設就是 JSON）約 0.3 秒，不呼叫 API。欄位：`loggedIn`、`authMethod`、`apiProvider`、`apiKeySource`、`subscriptionType`，以及 `email`、`orgId`、`orgName`（工具不讀這三個）。沒有登入時結束碼是 1，但照樣印出 JSON。
+- 【實測】`authMethod` 的值：
+  - 訂閱登入（`claude auth login`）→ `claude.ai`，附 `subscriptionType`（例如 `max`）
+  - `ANTHROPIC_API_KEY` → `api_key`，`apiKeySource` 為 `ANTHROPIC_API_KEY`
+  - `CLAUDE_CODE_OAUTH_TOKEN`（`claude setup-token` 產生的，用訂閱額度）→ `oauth_token`
+  - `ANTHROPIC_AUTH_TOKEN`（gateway 用的 bearer token）→ 也是 `oauth_token`，要看環境變數才分得出來；依文件的優先順序，兩個都有時用 `ANTHROPIC_AUTH_TOKEN`
+  - `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX` → `third_party`，`apiProvider` 為 `bedrock` / `vertex`
+  - 什麼都沒有 → `none`，`loggedIn` 為否
+- 【實測】只看有沒有設定憑證，不驗證：設一個假的 `ANTHROPIC_API_KEY` 也回 `loggedIn: true`。要驗證就得打 API，所以檢查不做；key 錯了要到第一次 run 才知道。
+- 【文件】Agent SDK 說明頁（`agent-sdk/overview`）「Get started」底下的原文："Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK. Use the API key authentication methods described in the Quickstart instead." 頁面沒有寫怎麼取得許可。設定頁的說明引用這段（決策第 140 筆）。
+- 【文件】驗證來源的優先順序（`authentication` 的「Authentication precedence」）：雲端供應商 → `ANTHROPIC_AUTH_TOKEN` → `ANTHROPIC_API_KEY` → `apiKeyHelper` → `CLAUDE_CODE_OAUTH_TOKEN` → `ant` CLI 的 profile → 訂閱登入。`ANTHROPIC_API_KEY` 在非互動模式下有設就一定會用，所以設了它就會優先於訂閱登入。
+
 ## 出處
 
 - 已安裝套件：`claude_agent_sdk/types.py`、`client.py`、`_internal/transport/subprocess_cli.py`（0.2.182）

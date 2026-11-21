@@ -303,6 +303,16 @@ Codex 用三個獨立的機制控制 agent 能做什麼：
 2. `process_marker` 用 `-o` 的檔名。
 3. 中止用 SIGINT；等不到結束時，先列出子孫程序再逐一強制終止，不能靠程序群組。
 
+## 檢查能不能用（任務 15，2026-11-21 實測，codex-cli 0.167.0）
+
+- 【實測】`codex login status` 不呼叫 API，輸出寫在 **stderr**：
+  - ChatGPT 登入 → `Logged in using ChatGPT`，結束碼 0
+  - 存了 API key（`codex login --with-api-key`）→ `API key configured - sk-…`（只遮住一部分，所以工具不回傳、不記錄原始輸出），結束碼 0
+  - 沒有登入 → `Not logged in`，結束碼 1
+- 【實測】`CODEX_API_KEY` 環境變數**不會**反映在 `codex login status`：設了它，沒有存登入時一樣回 `Not logged in`。但 `codex exec` 會用它（見上方「登入方式」），所以檢查先看這個變數有沒有設（不讀值），有就算 API key。
+- 【實測】`OPENAI_API_KEY` 也不會反映在 `login status`。文件沒寫 `codex exec` 會不會用它，工具不把它當成登入。
+- 【實測】存的 API key 只看有沒有設定，不驗證（`Authentication is checked when you send a request.`）。
+
 ## 出處
 
 - 本機：`codex --help`、`codex exec --help`、`codex exec resume --help`、`codex app-server --help`、`codex sandbox --help`、`codex execpolicy --help`、`codex execpolicy check --help`、`codex features list`、`codex app-server generate-json-schema`（0.167.0）
