@@ -35,15 +35,16 @@
 
 **目標**：介面從「只求可用」變成每天願意用的樣子，並且在一個任務裡就能看到 agent 的對話、自己在 worktree 裡動手。
 
-規劃見 `../history/plans/11-next-plan.md` 主題 1、4、5，任務單等規劃合併後再寫：
+規劃見 `../history/plans/11-next-plan.md` 主題 1、4、5，任務單見 `phase5-tasks.md`（任務 19 到 25）：
 
 1. 裝 Tailwind（獨立的小 PR；Codex 在 agsv 的 sandbox 裡可能不能連網）
-2. UI 需求文件：版面、每一頁的內容、Chat / Shell / 主 agent 的預留位置、design tokens
-3. UI 改版：用 agsv 開 Codex 的任務實作。第一張只做外觀（design tokens、看板、任務詳情頁），確認視覺後再補其他畫面
-4. Chat：把 Log 改成對話的樣子，資料仍來自 `events` 表；一則訊息仍然對應一次 run
+2. UI 需求文件與任務詳情頁的 HTML 草稿：版面、每一頁的內容、訊息來源的標示、design tokens、Shell 與主 agent 的預留位置
+3. Chat：把 Log 改成對話的時間軸，標出每一則是你、reviewer、自動還是 agent；資料仍來自 `events` 與 `runs`，一則訊息仍然對應一次 run
+4. 外觀改版：用 agsv 開 Codex 的任務實作，先看板與任務詳情頁，再其他畫面
 5. Shell：在任務的 worktree 開 PTY，前端用 xterm.js；永遠不控制 agent
+6. 驗收與發 `0.4`
 
-**完成標準**：在新介面開一個任務，從對話看懂 agent 做了什麼、追加一則訊息，在同一頁的 shell 跑一次測試，全程不需要離開這一頁；介面經過作者的視覺驗收。到這裡發 `0.4`。
+**完成標準**：在新介面開一個任務，從對話看懂 agent 做了什麼、每一則是誰說的、追加一則訊息，在同一頁的 shell 跑一次測試，全程不需要離開這一頁；介面經過作者的視覺驗收。到這裡發 `0.4`。
 
 **主要風險**
 - 內嵌 shell 等於透過 HTTP 執行任意指令 → WebSocket 檢查 `Origin` 與 `Host`，沿用 `api/guard.py` 的規則，並加測試。
