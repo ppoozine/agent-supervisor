@@ -94,6 +94,8 @@ conflict, then the CI failure.
   you continue after anything in **Needs you**. A message is never refused because of the budget:
   it resets the automatic attempt counters and starts a new budget. It is refused while a run is
   active, after archiving, and once the pull request is merged or closed.
+  Press **Cmd+Enter** (or **Ctrl+Enter**) to send; Enter alone adds a new line. The same shortcut
+  starts a task from the **New task** form's description.
 - **Stop**: ends the active run. The agent's process and everything it started are killed, and
   nothing is published; changes stay in the worktree. Stopped tasks are never retried automatically.
 - **Archive**: removes the worktree. Stop the active run first; archiving is refused while one is

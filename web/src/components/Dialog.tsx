@@ -7,6 +7,8 @@ interface DialogProps {
   /** False keeps the submit button disabled, e.g. while a required choice has no options. */
   canSubmit?: boolean
   error: string | null
+  /** Shown before the submit button when a field in the form submits on a keyboard shortcut. */
+  shortcutHint?: string
   onSubmit: () => void
   onClose: () => void
   children: ReactNode
@@ -60,6 +62,7 @@ export function Dialog(props: DialogProps) {
           </div>
         )}
         <div className="dialog-actions">
+          {props.shortcutHint && <kbd className="shortcut-hint">{props.shortcutHint}</kbd>}
           <button type="button" className="ghost" onClick={close} disabled={props.isBusy}>
             Cancel
           </button>
