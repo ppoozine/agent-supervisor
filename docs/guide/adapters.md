@@ -54,8 +54,8 @@ down. agent-supervisor then closes your stream, and your adapter must stop the a
 
 ## The interface
 
-Everything an adapter needs is in `agent_supervisor.adapters.base`, `agent_supervisor.enums`, and
-`agent_supervisor.tool_status`. An adapter is any object with these four members; it does not
+Everything an adapter needs is in `agent_supervisor.adapters.base`, `agent_supervisor.enums`,
+`agent_supervisor.tool_status`, and `agent_supervisor.process`; the imports below are all of it. An adapter is any object with these four members; it does not
 inherit from anything.
 
 ```python
@@ -68,9 +68,18 @@ from agent_supervisor.adapters.base import (
     AgentEvent,
     PermissionPolicy,
     RunLimits,
+    SandboxLevel,
     TurnResult,
 )
-from agent_supervisor.tool_status import ToolStatus
+from agent_supervisor.enums import EventType, ExitStatus
+from agent_supervisor.process import CommandTimeoutError, run_command
+from agent_supervisor.tool_status import (
+    AuthKind,
+    ToolMissingError,
+    ToolStatus,
+    read_version,
+    run_check,
+)
 
 
 class MyAdapter:
@@ -140,8 +149,10 @@ What `run_turn` yields:
 1. A `session_started` event, **first, before starting the agent process**. See
    [`session_started`](#session_started).
 2. Any number of events, in the order things happened.
-3. Exactly one `TurnResult`, last. agent-supervisor stops reading once it has the result; anything
-   yielded after it is ignored.
+3. Exactly one `TurnResult`, last. agent-supervisor stops reading once it has the result and
+   closes your generator right away; anything yielded after it is ignored. So wait for the agent
+   process to exit (with a timeout) and collect its exit code and stderr **before** yielding the
+   result.
 
 If the generator ends without yielding a `TurnResult`, the run ends as an error ("agent stream
 ended without a result"). If it raises an exception, the run ends as an error and the exception's
@@ -159,8 +170,9 @@ stopped in either case (use `try`/`finally`).
 | `tool_rules` | A free-form mapping. Each adapter decides what it understands. The default config holds `allowed_tools` (tool names) and `denied_commands` (command prefixes such as `git push` and `gh`). Ignore keys you do not understand. |
 
 Enforce what the agent lets you enforce, and when you block an action, yield a
-`permission_denied` event (see [Events](#events)). Declare honestly in `capabilities` what you
-cannot enforce; never pretend.
+`permission_denied` event (see [Events](#events)). What you cannot enforce, ignore, and say so in
+`capabilities` (`can_gate_tool_calls`, `can_restrict_network`); the user sees that, and the
+policy is not a reason to refuse the run. Never pretend to enforce something.
 
 This policy is basic protection, not a security boundary. agent-supervisor is meant for trusted
 repositories.
@@ -201,6 +213,8 @@ AgentEvent(EventType.SESSION_STARTED, {"session_id": None, "process_marker": mar
 - `session_id`: the session being continued, or `None` for a new session whose id is not known yet.
   When the agent reports the new id, yield another `session_started` with that id and the same
   marker. agent-supervisor saves the latest non-empty `session_id` and passes it to the next turn.
+  When resuming, the first event already carries the id; yield another one only if the agent
+  reports a different id (some agents start a new session when the old one cannot be resumed).
 
 ### `agent_message`
 
@@ -221,35 +235,69 @@ done, yield both events one after the other.
 
 ```python
 # A shell command
-AgentEvent(EventType.COMMAND, {
-    "phase": "started", "tool_use_id": "c1", "tool": "shell", "command": "pytest -q",
-})
-AgentEvent(EventType.COMMAND, {
-    "phase": "finished", "tool_use_id": "c1", "tool": "shell", "command": "pytest -q",
-    "output": "3 passed", "exit_code": 0, "is_error": False,
-})
+AgentEvent(
+    EventType.COMMAND,
+    {
+        "phase": "started",
+        "tool_use_id": "c1",
+        "tool": "shell",
+        "command": "pytest -q",
+    },
+)
+AgentEvent(
+    EventType.COMMAND,
+    {
+        "phase": "finished",
+        "tool_use_id": "c1",
+        "tool": "shell",
+        "command": "pytest -q",
+        "output": "3 passed",
+        "exit_code": 0,
+        "is_error": False,
+    },
+)
 
 # Any other tool
-AgentEvent(EventType.TOOL_CALL, {
-    "phase": "started", "tool_use_id": "t1", "tool": "edit_file", "input": {"path": "app.py"},
-})
-AgentEvent(EventType.TOOL_CALL, {
-    "phase": "finished", "tool_use_id": "t1", "tool": "edit_file", "is_error": False,
-})
+AgentEvent(
+    EventType.TOOL_CALL,
+    {
+        "phase": "started",
+        "tool_use_id": "t1",
+        "tool": "edit_file",
+        "input": {"path": "app.py"},
+    },
+)
+AgentEvent(
+    EventType.TOOL_CALL,
+    {
+        "phase": "finished",
+        "tool_use_id": "t1",
+        "tool": "edit_file",
+        "is_error": False,
+    },
+)
 ```
 
 The Log tab shows `$ <command>` for a started command, its `output` when it finishes (in red when
 `is_error` is true), and `<tool> <input>` for a started tool call. `input` can be a string or a
-dict. Use the agent's own id for `tool_use_id` if it has one; otherwise make one up.
+dict. Use the agent's own id for `tool_use_id` if it has one; otherwise make one up. `tool` is
+free text: use the agent's own tool names. Put `command` on the finished event too, even if the
+agent only reports it at the start; keep a map from `tool_use_id` to the command while the turn
+runs.
 
 Use `command` only for shell commands and `tool_call` for everything else.
 
 ### `permission_denied`
 
 ```python
-AgentEvent(EventType.PERMISSION_DENIED, {
-    "tool": "shell", "input": "git push --force", "reason": "command starts with 'git push'",
-})
+AgentEvent(
+    EventType.PERMISSION_DENIED,
+    {
+        "tool": "shell",
+        "input": "git push --force",
+        "reason": "command starts with 'git push'",
+    },
+)
 ```
 
 Yield it each time your adapter refuses an action because of `policy`, with the full input that
@@ -338,48 +386,59 @@ marker = f"my-agent-{uuid.uuid4().hex}"
 yield AgentEvent(EventType.SESSION_STARTED, {"session_id": session_id, "process_marker": marker})
 
 process = await asyncio.create_subprocess_exec(
-    "my-agent", "--tag", marker, ...,
+    "my-agent",
+    "--tag",
+    marker,
+    "--",
+    prompt,
     cwd=cwd,
-    stdin=asyncio.subprocess.PIPE,
+    stdin=asyncio.subprocess.DEVNULL,  # or PIPE: then write the prompt and close it
     stdout=asyncio.subprocess.PIPE,
     stderr=asyncio.subprocess.PIPE,
     start_new_session=True,  # its own process group
 )
 try:
-    ...  # read output, yield events, then yield the TurnResult
+    ...  # read output and yield events; wait for the process; then yield the TurnResult
 finally:
+    await stop(process)
+
+
+async def stop(process: asyncio.subprocess.Process, grace_seconds: float = 5.0) -> None:
+    """Ask the agent to stop, then kill whatever is left of its process group."""
     if process.returncode is None:
-        await stop(process)
-
-
-async def stop(process: asyncio.subprocess.Process) -> None:
-    """Ask the agent to stop, then kill its whole process group if it does not exit in time."""
-    with suppress(ProcessLookupError):
-        process.send_signal(signal.SIGINT)
-    try:
-        await asyncio.wait_for(process.wait(), 5)
-    except TimeoutError:
         with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        await process.wait()
+            process.send_signal(signal.SIGINT)
+        with suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), grace_seconds)
+    # Even once the agent itself has exited, children it started may still be running in its
+    # group: kill the whole group every time.
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    with suppress(TimeoutError):
+        await asyncio.wait_for(process.wait(), grace_seconds)
 ```
 
 Things to get right:
 
 - **Start the agent in its own process group** (`start_new_session=True`). Otherwise Ctrl-C in the
   daemon's terminal reaches the agent directly, and you cannot kill the agent's own children
-  together with it.
-- **Ask first, then force.** Many agent CLIs clean up on SIGINT. Give them a few seconds, then
-  SIGKILL the whole group.
+  together with it. The group id is then the agent's pid, which is what `os.killpg` takes.
+- **Ask first, then force the whole group.** Many agent CLIs clean up on SIGINT; give them a few
+  seconds. Use the signal your agent actually handles: if it ignores SIGINT, send SIGTERM instead,
+  or every Stop waits out the whole grace period. Then SIGKILL the group, even if the agent has
+  already exited, since its children may not have.
 - **Do not `await` anything that can hang forever in `finally`.** Bound every wait with a timeout.
 - **Read stderr while the agent runs** (e.g. in a separate `asyncio` task), or the agent blocks
   once the pipe buffer fills up.
+- **Do not leave stdin open and unused.** An agent that reads stdin waits for it forever. Use
+  `DEVNULL`, or write the prompt and close it.
 - **Do not catch `asyncio.CancelledError` or `GeneratorExit` and carry on.** Clean up and let them
   propagate.
 
-After a daemon crash, agent-supervisor finds leftover processes by `process_marker` and sends them
-SIGINT, then SIGKILL. That is a fallback for when your `finally` never ran; the normal path is your
-own cleanup.
+After a daemon crash, agent-supervisor finds leftover processes whose command line contains
+`process_marker` and sends them SIGINT, then SIGKILL. That is a fallback for when your `finally`
+never ran, and it reaches only processes with the marker on their command line: children without
+it are stopped only if the agent stops them itself on SIGINT. The normal path is your own cleanup.
 
 ## Reporting usage
 
@@ -392,17 +451,26 @@ it on the cards and the Usage page. So `TurnResult` must hold **this turn's** us
   latest `usage_raw` of the task back as `previous_usage`:
 
   ```python
-  def this_turn(total: int, session_id: str, previous_usage: dict | None) -> int:
+  def this_turn(totals: dict, session_id: str, previous_usage: dict | None) -> dict:
+      """Subtract each running total from its value at the end of the previous turn."""
       if previous_usage is None or previous_usage.get("session_id") != session_id:
-          return total  # a new session: everything so far is this turn
-      return max(total - previous_usage.get("total_tokens", 0), 0)
+          return totals  # a new session: everything so far is this turn
+      return {name: max(value - previous_usage.get(name, 0), 0) for name, value in totals.items()}
 
-  ...
-  usage_raw = {"session_id": session_id, "total_tokens": total}
+
+  totals = {"input_tokens": 1200, "output_tokens": 340, "cost_usd": 0.05}  # as the agent reports
+  turn = this_turn(totals, session_id, previous_usage)
+  usage_raw = {"session_id": session_id, **totals}
   ```
+
+  Subtract each total separately. Floating-point leftovers in `cost_usd` (e.g. `0.0100000002`) are
+  fine; there is no need to round.
 
   Compare the session id: `previous_usage` is the task's latest `usage_raw`, which may come from
   an earlier session (for example, when a session could not be resumed and a new one started).
+  A turn that was stopped has no result, so its `usage_raw` is not kept; if the agent had already
+  counted it, the next turn's difference includes it. That is correct: the usage is counted once,
+  one turn late.
 - **The agent reports nothing, or the turn ended before it did.** Use `None`. Never put `0` for
   "unknown": `0` means "free", and the task's limits would treat it as such. The board marks
   numbers that include unknown runs as incomplete.
@@ -420,12 +488,15 @@ installed and signed in. It runs once when the daemon starts and again when the 
 async def check(self) -> ToolStatus:
     version, problem = await read_version(run_command, ["my-agent"], fix=("pipx install my-agent",))
     if problem is not None:
-        return problem
+        return problem  # not installed, or `--version` failed or timed out
     if os.environ.get("MY_AGENT_API_KEY"):
         return ToolStatus(
-            installed=True, version=version, auth=AuthKind.API_KEY, auth_label="MY_AGENT_API_KEY",
+            installed=True,
+            version=version,
+            auth=AuthKind.API_KEY,
+            auth_label="MY_AGENT_API_KEY",
         )
-    return ToolStatus(
+    return ToolStatus(  # `auth` defaults to AuthKind.NONE: not usable
         installed=True,
         version=version,
         detail="not signed in",
@@ -439,11 +510,23 @@ async def check(self) -> ToolStatus:
 | --- | --- |
 | `installed` | Whether the agent can be run at all |
 | `version` | Its version, if known |
-| `auth` | How it is signed in: `AuthKind.API_KEY`, `SUBSCRIPTION`, `CLOUD_PROVIDER`, `OTHER`, or `NONE` (not signed in). The agent counts as usable when it is installed and `auth` is not `NONE`. |
+| `auth` | How it is signed in, an `AuthKind`; defaults to `NONE`. The agent counts as usable when it is installed and `auth` is not `NONE`. See below. |
 | `auth_label` | How it is signed in, for people, e.g. `"ChatGPT (plus)"` or `"MY_AGENT_API_KEY"` |
 | `detail` | Why it cannot be used, when it cannot |
 | `fix` | Commands the user can run in a terminal to fix it |
 | `notice` | Something worth knowing even though it is usable |
+
+`AuthKind` values for agents:
+
+| Value | Meaning |
+| --- | --- |
+| `API_KEY` | A key or token billed by usage, e.g. from an environment variable; also gateways |
+| `SUBSCRIPTION` | A personal plan's allowance, e.g. signed in with a ChatGPT or claude.ai account |
+| `CLOUD_PROVIDER` | A cloud provider's credentials, e.g. Amazon Bedrock or Google Vertex AI |
+| `OTHER` | Signed in some other way, or nothing is needed |
+| `NONE` | Not signed in |
+
+(`ACCOUNT` is for tools that are not agents, such as `gh`; adapters do not use it.)
 
 Rules:
 
@@ -458,21 +541,58 @@ Rules:
 - Configured is not the same as valid: you usually cannot tell whether a key works without using
   it. That is fine; a bad key shows up as an error in the first run.
 
-`agent_supervisor.tool_status` has helpers: `read_version(run, executable, fix=...)` runs
-`--version` with a timeout and returns either the version or a ready-made "not installed" status,
-and `parse_version(text)` finds a version number. `run` is `agent_supervisor.process.run_command`
-or any function with the same signature.
+Helpers, so you do not have to handle timeouts and missing executables yourself:
+
+- `read_version(run, executable, fix=...)` in `agent_supervisor.tool_status`: `executable` is the
+  list of arguments that starts the agent, e.g. `["my-agent"]` or `[sys.executable, "agent.py"]`;
+  `--version` is appended. Returns `(version, None)`, or `(None, status)` with a ready-made
+  "not installed" or "did not answer" status to return as is.
+- `run_check(run, args)` in `agent_supervisor.tool_status`: runs any other check command (e.g.
+  `["my-agent", "whoami"]`) with a 15-second timeout and returns a `CommandResult`
+  (`returncode`, `stdout`, `stderr`). Raises `ToolMissingError` when the executable cannot be run
+  and `CommandTimeoutError` (from `agent_supervisor.process`) when it times out; catch both.
+- `parse_version(text)`: the first version number in a text.
+- `run` is `agent_supervisor.process.run_command`, or any async function with the same
+  signature (handy in tests).
+
+```python
+try:
+    result = await run_check(run_command, ["my-agent", "whoami"])
+except (ToolMissingError, CommandTimeoutError):
+    return ToolStatus(installed=True, version=version, detail="`my-agent whoami` failed")
+if result.returncode != 0:
+    return ToolStatus(
+        installed=True, version=version, detail="not signed in", fix=("my-agent login",)
+    )
+```
 
 ## Packaging and loading
 
 agent-supervisor loads adapters through the `agent_supervisor.adapters`
 [entry point](https://packaging.python.org/en/latest/specifications/entry-points/) group. Declare
-one in your package's `pyproject.toml`:
+one in your package's `pyproject.toml`. A complete one, for a package laid out as
+`src/my_adapter/__init__.py`:
 
 ```toml
+[project]
+name = "my-agent-adapter"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = []  # not agent-supervisor; see below
+
 [project.entry-points."agent_supervisor.adapters"]
 my_agent = "my_adapter:MyAdapter"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+# Needed because the import name differs from the package name.
+module-name = "my_adapter"
 ```
+
+Any build backend works; this one is what `examples/example-adapter` uses.
 
 - The name (`my_agent`) is the agent type: it is stored with each task and used in the API. It
   must be lowercase letters, digits, and underscores, starting with a letter. Do not change it
@@ -507,7 +627,9 @@ Once loaded, it appears on the settings page and in the new-task form, with the 
 
 ## Testing
 
-Test `run_turn` directly; you do not need the daemon:
+Test `run_turn` directly; you do not need the daemon. The tests below are `async def` functions
+and need [pytest-asyncio](https://pytest-asyncio.readthedocs.io/) with `asyncio_mode = "auto"`
+under `[tool.pytest.ini_options]` (or mark each test with `@pytest.mark.asyncio`).
 
 ```python
 from contextlib import aclosing
@@ -539,10 +661,14 @@ Worth testing:
 
 - The first item is `session_started` with a marker, and the last is a `TurnResult`.
 - Resuming: run two turns, passing the first result's `session_id` to the second.
-- Stopping: take a couple of items, leave the `async with aclosing(...)` block, and check that no
-  process with the marker is left (`pgrep -f <marker>` finds nothing).
+- Stopping: make the agent slow (or give it a long command), read items until the agent is in the
+  middle of something (not just the first `session_started`, which comes before the process
+  starts), note its pid (`pgrep -f <marker>`), then leave the `async with aclosing(...)` block.
+  Afterwards nothing may be left in its process group: `pgrep -g <pid>` finds nothing. Checking
+  only `pgrep -f <marker>` misses children without the marker on their command line.
 - Usage: a second turn of the same session reports only its own usage.
-- `check()` without the agent installed or signed in.
+- Limits, if you declared them: running out gives `LIMIT_REACHED`.
+- `check()` with the agent signed in, not signed in, and not installed.
 
 `tests/test_example_adapter.py` in this repository does all of these for the example adapter,
 including running a whole task through agent-supervisor with a fake GitHub.
@@ -558,7 +684,8 @@ gone (`pgrep -f <marker>`, using the marker from the Events tab).
 - **A marker that is not unique**, such as the agent's name. Restart recovery would stop every
   matching process, including ones that belong to other tasks or are not agent-supervisor's.
 - **Not stopping the agent when the stream is closed**, or stopping only the top process and leaving
-  its children. Stop then leaves an agent editing the worktree in the background.
+  its children. Stop then leaves an agent editing the worktree in the background. Signal the whole
+  process group, and do it even when the agent itself exited quickly.
 - **Reporting session totals as this turn's usage.** Costs add up twice from the second turn on.
 - **Reporting `0` instead of `None`** for unknown usage. Limits stop working.
 - **Claiming a capability you cannot enforce**, e.g. `can_limit_budget=True` without actually
@@ -573,3 +700,5 @@ gone (`pgrep -f <marker>`, using the marker from the Events tab).
 - **Raising from `check()`.** The daemon does not start.
 - **Not reading stderr.** The agent hangs once the pipe is full, and the run only ends at its time
   limit.
+- **Yielding the result before the agent has exited.** The stream is closed right after the
+  result, so the exit code and the end of stderr are lost, and a still-running agent gets killed.
