@@ -34,7 +34,7 @@ SIGN_IN_COMMAND = "gh auth login"
 STATUS_FIELDS = "state,headRefOid,reviewDecision,statusCheckRollup,comments,reviews,mergeable"
 
 # Mapping of check results; for the rationale see the section on what ci_state means in
-# docs/02-mvp-spec.md.
+# docs/design/spec.md.
 # Values in neither set (still running, awaiting approval, stale, new values never seen before) are
 # treated as not finished.
 _PASSED_RESULTS = frozenset({"SUCCESS", "NEUTRAL", "SKIPPED"})

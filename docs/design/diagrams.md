@@ -1,8 +1,8 @@
-# 06 · 架構圖與流程圖
+# 架構圖與流程圖
 
-最後更新：2026-11-15
+最後更新：2026-11-22
 
-這份文件把 `02-mvp-spec.md` 的內容畫成圖，方便一眼看懂。**圖與規格不一致時以規格為準**，並回頭修正這裡的圖。
+這份文件把 `spec.md` 的內容畫成圖，方便一眼看懂。**圖與規格不一致時以規格為準**，並回頭修正這裡的圖。
 
 圖用 Mermaid 寫成，GitHub 上可以直接顯示；在編輯器裡看需要支援 Mermaid 的預覽功能。
 
@@ -21,7 +21,6 @@
 | 11 | Run 結束後的收尾 | commit、push、開 PR 的判斷 |
 | 12 | 中止與封存 | 按 Stop 與 Archive 會發生什麼 |
 | 13 | Daemon 啟動與復原 | 當機重啟後怎麼處理 |
-| 14 | 路線圖 | 各階段的先後 |
 
 ---
 
@@ -137,14 +136,14 @@ flowchart TD
 
     runner --> iface
 
-    iface --> claude["ClaudeCodeAdapter<br/>階段 1"]
-    iface --> codex["CodexAdapter<br/>階段 1.5"]
-    iface --> custom["自製 API agent<br/>階段 6"]
+    iface --> claude["ClaudeCodeAdapter"]
+    iface --> codex["CodexAdapter"]
+    iface --> custom["外部 adapter<br/>（entry point）"]
     iface --> fake["FakeAdapter<br/>測試用"]
 
     claude --> sdk["官方 Python Agent SDK"]
     codex --> codexcli["codex exec<br/>subprocess 讀 JSONL"]
-    custom --> modelapi["模型 API<br/>自己的 agent 迴圈"]
+    custom --> othercli["其他 agent<br/>（例如 examples/example-adapter）"]
 ```
 
 一輪對話的資料流：
@@ -333,7 +332,7 @@ flowchart TD
 
 不自動修復不代表卡片一定進 Needs you：CI 沒失敗的任務本來就不需要修。CI 失敗卻不能自動修的任務才會進 Needs you。
 
-PR 上的留言走另一組「留言回饋條件」（六項，見 `02-mvp-spec.md` 的「Review 留言回饋」），流程和下面第 9 節的 CI 自動修復迴圈相同，只是觸發的來源是留言、送給 agent 的內容是留言而不是 CI log。PR 有衝突時走「解衝突條件」（八項，見「Merge conflict」）。三種同時成立時的順序是留言、衝突、CI 失敗。
+PR 上的留言走另一組「留言回饋條件」（六項，見 `spec.md` 的「Review 留言回饋」），流程和下面第 9 節的 CI 自動修復迴圈相同，只是觸發的來源是留言、送給 agent 的內容是留言而不是 CI log。PR 有衝突時走「解衝突條件」（八項，見「Merge conflict」）。三種同時成立時的順序是留言、衝突、CI 失敗。
 
 ---
 
@@ -550,35 +549,3 @@ flowchart TD
 ```
 
 不自動重跑被中斷的 run，由我決定要不要送訊息讓它繼續。
-
----
-
-## 14. 路線圖
-
-```mermaid
-flowchart LR
-    p0["階段 0<br/>準備"] --> t0["任務 0<br/>Codex 介面調查"]
-    t0 --> p1["階段 1<br/>核心迴圈"]
-    p1 --> p15["階段 1.5<br/>Codex adapter"]
-    p15 --> p2["階段 2<br/>看板介面<br/>0.1 MVP"]
-    p2 --> check{"檢查點<br/>重新評估順序"}
-    check --> p3["階段 3<br/>回饋迴圈補齊<br/>0.2"]
-    p3 --> p4["階段 4<br/>開源準備<br/>0.3 公開"]
-    p4 --> check2{"檢查點<br/>依回饋排順序"}
-    check2 --> p5["階段 5<br/>endpoint agent<br/>0.4"]
-    p5 --> p6["階段 6<br/>補功能的廣度<br/>0.5"]
-    p6 --> p7["階段 7<br/>自動派工"]
-    p7 --> p8["階段 8<br/>治理"]
-    p8 --> p9["階段 9<br/>桌面版<br/>1.0"]
-```
-
-階段 4 之後的順序在 2026-11-20 重排過（`03-decisions.md` 第 149 筆）。
-
-階段 1 內部的三步：
-
-```mermaid
-flowchart LR
-    s1["任務 1<br/>Adapter + Runner<br/>權限、上限、復原"] --> s2["任務 2<br/>Worktree + 收尾<br/>commit、push、開 PR"]
-    s2 --> s3["任務 3<br/>Poller + Dispatcher<br/>CI 自動修復"]
-    s3 --> done(["不用人介入<br/>CI 從紅變綠"])
-```

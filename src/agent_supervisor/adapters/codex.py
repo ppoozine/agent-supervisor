@@ -1,6 +1,6 @@
 """Codex adapter: wraps the non-interactive `codex exec` in a subprocess and reads JSONL events.
 
-See `docs/codex-notes.md` for usage and what testing showed. All strings and parameters
+See `docs/design/codex-notes.md` for usage and what testing showed. All strings and parameters
 specific to Codex appear only in this file.
 """
 
