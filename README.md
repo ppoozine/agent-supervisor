@@ -50,3 +50,16 @@ Besides Python, the daemon calls these commands:
 - `git` and `gh` (logged in to GitHub)
 - `pgrep` and `ps` (on Linux they come from `procps`, which minimal images may lack)
 - Optional: `notify-send` on Linux for desktop notifications; macOS uses the built-in `osascript`
+
+## Extending
+
+- [Writing an adapter](docs/guide/adapters.md): connect another coding agent. Adapters are
+  ordinary Python packages; [`examples/example-adapter`](examples/example-adapter/) is a complete
+  one that needs no account.
+- [HTTP API](docs/guide/http-api.md): everything the board does, scripts can do too.
+
+## Stability
+
+agent-supervisor is at 0.x. Until 1.0, the adapter interface, the HTTP API, the config file, and
+the database schema may change in any minor release (0.3 to 0.4, and so on); the release notes list
+what changed. Pin the version you build on.
