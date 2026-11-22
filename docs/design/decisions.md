@@ -111,6 +111,7 @@
 - 訊息框與開任務的描述欄用 `Cmd+Enter` / `Ctrl+Enter` 送出，輸入法選字中不送出（178）。
 - 階段 5：UI 改版由 Codex 透過 agsv 實作，只改外觀，排在 Chat 之後；任務詳情頁加入 Chat 與 worktree 裡的 Shell，Shell 永遠不控制 agent（173、176、180）。
 - 任務詳情頁標出每一則內容的來源（你、reviewer、自動、agent、系統）與所屬的 run（180）。
+- 介面的需求以 `ui.md` 與 `ui-mockup.html` 為準：任務詳情頁用分割版（左 Chat、右 Diff／Shell／Events／Runs，窄視窗退回分頁）；深色與淺色主題都做，跟著系統切換（182）。
 
 ## 開源、安裝與發布
 
@@ -134,7 +135,6 @@
 **階段 5 之後**
 - 桌面殼用 Tauri 還是 Electron；要不要申請 Apple Developer 帳號（階段 7）
 - run 執行中送出的訊息要排隊還是維持拒絕；Shell 的指令要不要記進事件紀錄、一個任務能不能開多個 shell（階段 5）
-- 淺色主題要不要做（UI 需求文件）
 - 主 agent 開任務的方式、同時執行數上限的預設值（階段 6）
 - 什麼才算 `1.0`；多人使用與登入要不要做（階段 7 之後）
 - 看板內合併時，合併方式（merge / squash / rebase）要不要可選（階段 8）
