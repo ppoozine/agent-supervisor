@@ -627,6 +627,7 @@ React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.
 3. `uv build` 產出 wheel 與 sdist
 4. 確認 wheel 裡有前端的 `index.html`，並用 wheel 執行一次 `agsv --help`
 5. 用 `gh release create` 建立 Release 並附上兩個檔案；版本含 `a`、`b`、`rc`、`dev` 的標成 pre-release
+6. Release 的說明：自動產生的 PR 清單從上一個正式版本的 tag 算起（跳過 pre-release 的 tag，第一個版本則從頭算）；有 `.github/release-notes/<tag>.md` 時，它的內容放在清單上面，當成手寫的摘要（決策第 172 筆）
 
 **第一次執行**：不需要設定檔（沒有就用預設值），資料目錄（預設 `~/.agent-supervisor`）在 daemon 取得鎖與開資料庫時自動建立。啟動時 log 寫出看板的網址與資料目錄的位置。
 
