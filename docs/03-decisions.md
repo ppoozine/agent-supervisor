@@ -174,6 +174,7 @@
 | 166 | 範例 adapter 放在 `examples/example-adapter/`，是一個獨立的套件、預設不載入，內容是一支假的 agent CLI 加上包裝它的 adapter | 放進主套件並預設載入；寫成不啟動子程序的純 Python adapter | 用和第三方完全相同的方式載入，本身就示範了載入的方法。真實的 agent 幾乎都是 CLI，最容易寫錯的是程序的啟動、process marker 與中止，純 Python 的範例示範不到。預設載入會讓每個使用者的表單裡多一個沒有用的 agent。它不宣告依賴 agent-supervisor：PyPI 上同名的是另一個套件 |
 | 167 | 對外的英文文件放在 `docs/guide/`（adapter 指南、HTTP API），和中文的設計文件分開；HTTP API 的說明用手寫，`/api/docs` 保留當試打的工具。0.x 期間 adapter 介面、HTTP API、設定檔與資料庫 schema 都不承諾穩定，寫在 README 與兩份指南開頭 | 直接用 FastAPI 產生的文件；把每個端點改成 Pydantic 回應模型，讓產生的文件完整 | 實測產生的文件只有請求的 body 是對的：回應都是「任意物件」、沒有錯誤的形狀、SSE 被寫成 JSON。改成回應模型要動每個端點，範圍太大。分開放讓讀者一眼看出哪些是寫給使用者的 |
 | 168 | 每一項檢查（adapter 的 `check()` 與 gh）整體限時 30 秒，逾時或拋出例外就把那一項當成不能用、traceback 寫進 log，daemon 照常啟動 | 只在指南裡要求 `check()` 不能拋例外、要快 | adapter 可能來自別的套件（第 165 筆），不能假設它守規矩；原本一個 `check()` 出錯就讓 daemon 起不來、卡住就讓 daemon 卡在啟動，和「壞掉的 adapter 寫 log 後跳過」不一致。`detail` 只寫例外的型別，因為訊息可能含有工具的原始輸出 |
+| 169 | 任務 18 的對外文件：README 重寫，另加 `docs/guide/usage.md`（看板、設定檔、上限）與 `docs/guide/trust-model.md`（信任模型與已知限制）；`docs/README.md` 用英文說明中文的設計文件；各階段的任務單留在 repo 裡，說明它們是交給 AI 的工作指示；資安問題只收 GitHub 的 private vulnerability reporting；commit 作者欄位的 email 接受公開，不改寫 git 歷史 | 刪掉任務單（歷史裡仍看得到）；SECURITY.md 留 email；用 `git filter-repo` 換掉 email（所有 commit 的 hash 與已合併的 PR、tag 都會對不上） | 定位是「設計決策全部公開」，任務單本身就是開發紀錄；回報管道不需要公開個人資料；改寫歷史的代價大於 email 公開的風險 |
 
 ## 尚未決定
 
@@ -212,5 +213,6 @@
 - 通知只支援 macOS，點通知不會開啟看板，也不知道使用者是不是在系統設定裡把它關掉了。要不要加瀏覽器通知或其他平台
 - 合併按鈕（第 114 筆說有了 diff 檢視之後再評估）。評估結果：技術上只要 `gh pr merge` 加一個確認框；Approve 仍然做不出來（作者不能核准自己的 PR）。等我決定要不要做、合併的方式（merge / squash / rebase）要不要可選
 - Diff 只有已經 commit 的內容，run 還在跑的時候看不到 agent 改到一半的東西。要不要在 worktree 還在時把未 commit 的變更也算進來
+- PR 上的留言不分作者都會餵回 agent（只略過機器人）。repo 公開、陌生人可以留言時，任何人都能對 agent 下指令。要不要只餵回有寫入權限的人（REST 的 `author_association`）留的留言，或讓專案設定允許的作者。目前在 `docs/guide/trust-model.md` 寫明
 - 要不要向 Anthropic 詢問「工具沿用使用者本機的訂閱登入」需不需要許可（第 140 筆）。文件沒有寫申請的管道
 - OpenAI 的文件有一個講開源應用程式使用 ChatGPT 方案的章節，調查時頁面打不開，內容沒有讀到。可能是一套官方支援的做法，值得再找一次
