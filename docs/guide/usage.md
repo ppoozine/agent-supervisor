@@ -104,8 +104,9 @@ conflict, then the CI failure.
 ## Comments on the pull request
 
 New comments on the pull request are sent back to the agent automatically: plain comments, review
-summaries, and line comments. Comments from bots, empty review shells, and approvals are recorded but
-not sent. Several comments in a row are batched: the supervisor waits one polling interval after the
+summaries, and line comments, from the repo's owner, members of its organization, and collaborators.
+Comments from anyone else, from bots, empty review shells, and approvals are recorded in the task's
+events but not sent; see the [trust model](trust-model.md#untrusted-text-reaches-the-agent). Several comments in a row are batched: the supervisor waits one polling interval after the
 last new one.
 
 The supervisor does not reply to comments or resolve them. If the agent disagrees with a comment,

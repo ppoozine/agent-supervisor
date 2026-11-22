@@ -103,12 +103,14 @@ class FeedbackItem:
     """One PR comment. `github_id` is GitHub's node id; all three kinds share one ID space.
 
     `path` and `line` exist only on inline comments; `review_state` only on reviews.
+    `author_association` is GitHub's relation of the author to the repo, such as `OWNER` or `NONE`.
     """
 
     github_id: str
     kind: FeedbackKind
     author: str
     is_bot: bool
+    author_association: str
     body: str
     created_at: str
     url: str
@@ -298,6 +300,7 @@ def _to_feedback(item: dict[str, Any], kind: FeedbackKind) -> FeedbackItem:
         kind=kind,
         author=str(user.get("login") or "unknown"),
         is_bot=user.get("type") == "Bot",
+        author_association=str(item.get("author_association") or "NONE"),
         body=str(item.get("body") or ""),
         created_at=str(item.get("created_at") or item.get("submitted_at") or ""),
         url=str(item.get("html_url") or ""),

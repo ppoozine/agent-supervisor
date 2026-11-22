@@ -310,7 +310,7 @@ The `payload` depends on `type`:
 | `pushed` | agent-supervisor | `branch`, `head_sha`; `forced` and `replaced_sha` when the push overwrote a commit it had pushed before |
 | `pr_opened` | agent-supervisor | `number`, `url` |
 | `ci_status` | Polling | `pr_state`, `head_sha`, `ci_state`, `review_state`, `merge_state`, `pr_number`; written only when one of them changes |
-| `review_comment` | Polling | `github_id`, `kind` (`comment`, `review`, or `inline_comment`), `author`, `body`, `path`, `line`, `url`, `review_state`, `created_at`; `ignored` holds the reason when the comment is not passed to the agent |
+| `review_comment` | Polling | `github_id`, `kind` (`comment`, `review`, or `inline_comment`), `author`, `author_association` (GitHub's relation of the author to the repo, e.g. `OWNER`, `NONE`), `body`, `path`, `line`, `url`, `review_state`, `created_at`; `ignored` holds the reason when the comment is not passed to the agent: `bot`, `untrusted_author`, `empty`, or `not_a_change_request` |
 | `state_change` | agent-supervisor | `change` (`run_ended`), `exit_status`, `detail`, `usage_raw` |
 
 Payloads written by adapters may carry extra fields, and each agent fills them in its own way. The

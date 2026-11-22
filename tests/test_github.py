@@ -329,6 +329,7 @@ async def test_feedback_lists_comments_reviews_and_inline_comments_in_time_order
         {
             "node_id": "IC_1",
             "user": rest_user(),
+            "author_association": "OWNER",
             "body": "general",
             "created_at": "2026-11-19T10:00:03Z",
             "html_url": "u1",
@@ -346,6 +347,7 @@ async def test_feedback_lists_comments_reviews_and_inline_comments_in_time_order
             "id": 11,
             "node_id": "PRR_1",
             "user": rest_user(),
+            "author_association": "COLLABORATOR",
             "body": "",
             "state": "CHANGES_REQUESTED",
             "submitted_at": "2026-11-19T10:00:02Z",
@@ -389,6 +391,8 @@ async def test_feedback_lists_comments_reviews_and_inline_comments_in_time_order
     assert (items[0].path, items[0].line, items[0].review_state) == ("calc.py", 21, None)
     assert items[1].review_state == "CHANGES_REQUESTED"
     assert [item.is_bot for item in items] == [False, False, False, True]
+    # A missing association counts as no relation to the repo, so it is never trusted by accident.
+    assert [item.author_association for item in items] == ["NONE", "COLLABORATOR", "OWNER", "NONE"]
     assert [call[1:4] for call in gh.calls] == [["api", "--paginate", "--slurp"]] * 3
     assert [call[4] for call in gh.calls] == [
         "repos/owner/repo/issues/7/comments?per_page=100",
