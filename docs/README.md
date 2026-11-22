@@ -41,4 +41,5 @@ Start here. These describe the current version and are kept up to date.
 The project is developed with an AI coding agent (Claude Code). Each phase is split into task
 sheets that are handed to the agent one task at a time, with a plan agreed before any code. The
 sheets are deleted once their phase is done; the ones for phases 1 to 4 are in the
-[`v0.3.0` tag](https://github.com/ppoozine/agent-supervisor/tree/v0.3.0/docs).
+[`v0.3.0` tag](https://github.com/ppoozine/agent-supervisor/tree/v0.3.0/docs). The current one is
+[design/phase5-tasks.md](design/phase5-tasks.md).

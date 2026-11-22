@@ -108,7 +108,8 @@
 - 版面最初參考 Agent Orchestrator 的看板，只參考資訊的配置，不複製它的程式碼、圖示與視覺設計（170）。
 - 合併在 GitHub 上進行，看板內合併排在階段 8（114、174）。
 - 訊息框與開任務的描述欄用 `Cmd+Enter` / `Ctrl+Enter` 送出，輸入法選字中不送出（178）。
-- 階段 5：UI 改版由 Codex 透過 agsv 實作，先只改外觀；任務詳情頁加入 Chat 與 worktree 裡的 Shell，Shell 永遠不控制 agent（173、176）。
+- 階段 5：UI 改版由 Codex 透過 agsv 實作，只改外觀，排在 Chat 之後；任務詳情頁加入 Chat 與 worktree 裡的 Shell，Shell 永遠不控制 agent（173、176、180）。
+- 任務詳情頁標出每一則內容的來源（你、reviewer、自動、agent、系統）與所屬的 run（180）。
 
 ## 開源、安裝與發布
 
