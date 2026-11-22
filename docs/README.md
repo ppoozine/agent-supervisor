@@ -26,6 +26,7 @@ Start here. These describe the current version and are kept up to date.
 | [design/spec.md](design/spec.md) | The specification: database tables, the run lifecycle, the board, automatic fixes and their limits, review comments, merge conflicts, recovery, the API, the adapter interface |
 | [design/decisions.md](design/decisions.md) | Every decision still in effect, grouped by topic, plus open questions and known issues |
 | [design/diagrams.md](design/diagrams.md) | Architecture and flow diagrams (Mermaid) |
+| [design/ui.md](design/ui.md) | The interface: every screen, where each message comes from, colors and tokens; [design/ui-mockup.html](design/ui-mockup.html) is a static mockup of the task page |
 | [design/claude-sdk-notes.md](design/claude-sdk-notes.md) | Research and tests of the Claude Agent SDK: streaming, sessions, limits, permissions |
 | [design/codex-notes.md](design/codex-notes.md) | Research and tests of the Codex CLI: `codex exec`, its JSON events, sandbox, resuming |
 
