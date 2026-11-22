@@ -1,5 +1,6 @@
 """Checks of whether each agent and gh can be used. Commands are faked; nothing is spent."""
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable, Sequence
@@ -18,6 +19,7 @@ from agent_supervisor.adapters.codex import CodexAdapter
 from agent_supervisor.config import Config
 from agent_supervisor.github import GitHub
 from agent_supervisor.process import CommandResult, CommandTimeoutError
+from agent_supervisor.readiness import ReadinessChecker
 from agent_supervisor.supervisor import build_supervisor
 from agent_supervisor.tool_status import AuthKind, ToolStatus
 from tests.fake_adapter import FakeAdapter
@@ -322,3 +324,50 @@ async def test_startup_warns_when_no_agent_can_be_used(
     await log_checks(ToolStatus(installed=False, detail="not installed"))
 
     assert "no agent can be used; see http://127.0.0.1:8765/#/settings" in caplog.text
+
+
+class RaisingAdapter(FakeAdapter):
+    async def check(self) -> ToolStatus:
+        raise ValueError("secret-looking output sk-123")
+
+
+class HangingAdapter(FakeAdapter):
+    async def check(self) -> ToolStatus:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+
+async def test_a_check_that_raises_or_hangs_only_makes_that_agent_unusable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger="agent_supervisor.readiness")
+    adapters = {"fine": FakeAdapter([]), "raises": RaisingAdapter([]), "hangs": HangingAdapter([])}
+    checker = ReadinessChecker(adapters, FakeGitHub(), timeout_seconds=0.1)  # type: ignore[arg-type]
+
+    readiness = await checker.check()
+
+    assert readiness.usable_agents == ["fine"]
+    raised = readiness.agents["raises"]
+    assert raised.detail == "the check failed (ValueError); see the daemon's log"
+    assert "sk-123" not in str(raised)
+    assert readiness.agents["hangs"].detail == "the check did not finish in 0.1 seconds"
+    assert readiness.github.usable
+    assert "checking raises failed" in caplog.text
+    assert "checking hangs did not finish" in caplog.text
+
+
+async def test_the_daemon_still_starts_when_an_agent_check_raises(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger="agent_supervisor.daemon")
+    conn = await db.connect(tmp_path / "test.db")
+    await db.init_schema(conn)
+    adapters = {"fine": FakeAdapter([]), "raises": RaisingAdapter([])}
+    supervisor = build_supervisor(conn, Config(data_dir=tmp_path), adapters, FakeGitHub())  # type: ignore[arg-type]
+
+    try:
+        await daemon._log_readiness(supervisor)
+    finally:
+        await conn.close()
+
+    assert "Fake (raises): not usable: the check failed (ValueError)" in caplog.text

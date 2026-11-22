@@ -525,6 +525,8 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 
 **什麼時候檢查**：daemon 啟動時檢查一次，每種工具一行寫進 log，能用的是 INFO，不能用的是 WARNING 並附上要執行的指令；沒有任何 agent 能用時再多一行 WARNING，指向設定頁。daemon 照常啟動。之後 `GET /setup` 與 `GET /agents` 回傳記下的結果，不會每次都重新檢查（gh 每次都要連網）；`POST /setup/check` 重新檢查並更新記下的結果。
 
+**檢查本身出問題**（決策第 168 筆）：每一項檢查（含 gh）整體最多 30 秒。逾時或拋出例外時，那一項當成不能用（`installed` 為 false），`detail` 寫「檢查沒有在時限內完成」或「檢查失敗」加上例外的型別，不寫例外的訊息（可能含有工具的原始輸出）；例外的 traceback 寫進 daemon 的 log。其他工具照常檢查，daemon 照常啟動。
+
 開任務的 API 不檢查 agent 能不能用：記下的結果可能已經過時（例如使用者剛在 terminal 登入）。真的不能用時，run 一開始就會以 `error` 結束。
 
 ## API

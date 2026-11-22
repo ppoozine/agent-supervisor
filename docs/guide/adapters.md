@@ -535,9 +535,10 @@ Rules:
 - **Never return a credential**, not even part of one, and never return a tool's raw output, which
   can contain one. Name where the credential comes from instead ("the `MY_AGENT_API_KEY`
   environment variable").
-- **Be quick and never raise.** The daemon waits for every check before it starts serving, and an
-  exception from `check()` stops it from starting. Catch your errors and report them in `detail`;
-  give commands a timeout.
+- **Be quick and do not raise.** The daemon waits for every check before it starts serving. A
+  check that raises, or takes longer than 30 seconds, marks your agent as unusable with a vague
+  "the check failed" (the traceback goes to the daemon's log). Catch your errors and report them
+  in `detail`, where you can say what is wrong; give commands a timeout.
 - Configured is not the same as valid: you usually cannot tell whether a key works without using
   it. That is fine; a bad key shows up as an error in the first run.
 
@@ -697,7 +698,7 @@ gone (`pgrep -f <marker>`, using the marker from the Events tab).
 - **Blocking the event loop.** `run_turn` and `check` run inside the daemon's event loop; use
   `asyncio` subprocesses, or `asyncio.to_thread` for blocking calls. A blocking call freezes the
   board and every other task.
-- **Raising from `check()`.** The daemon does not start.
+- **Raising from `check()`.** Your agent shows as unusable with no useful reason.
 - **Not reading stderr.** The agent hangs once the pipe is full, and the run only ends at its time
   limit.
 - **Yielding the result before the agent has exited.** The stream is closed right after the
