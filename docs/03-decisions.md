@@ -177,6 +177,7 @@
 | 169 | 任務 18 的對外文件：README 重寫，另加 `docs/guide/usage.md`（看板、設定檔、上限）與 `docs/guide/trust-model.md`（信任模型與已知限制）；`docs/README.md` 用英文說明中文的設計文件；各階段的任務單留在 repo 裡，說明它們是交給 AI 的工作指示；資安問題只收 GitHub 的 private vulnerability reporting；commit 作者欄位的 email 接受公開，不改寫 git 歷史 | 刪掉任務單（歷史裡仍看得到）；SECURITY.md 留 email；用 `git filter-repo` 換掉 email（所有 commit 的 hash 與已合併的 PR、tag 都會對不上） | 定位是「設計決策全部公開」，任務單本身就是開發紀錄；回報管道不需要公開個人資料；改寫歷史的代價大於 email 公開的風險 |
 | 170 | 公開前的檢查（任務 18 PR B）：移除 `docs/assets/ui-reference.png`（Agent Orchestrator 的看板截圖），`05-ui-reference.md` 改放對方 repo 的連結；刪掉 GitHub 上已合併 PR 的遠端 branch；階段 1 沒勾的驗證項目在文件裡說明，不逐項重跑 | 保留截圖（已註明來源）；保留舊 branch；公開前重跑階段 1 的驗證清單 | 不散布別人產品的畫面；舊 branch 的內容都已在 `main`，留著只增加雜訊；階段 1 的功能之後一直在用、有自動測試，重跑的成本高於價值 |
 | 171 | PR 上的留言只有作者的 `author_association` 是 `OWNER`、`MEMBER`、`COLLABORATOR` 才餵回 agent；其他照樣記成 `review_comment` 事件，標上 `untrusted_author`；欄位缺少時當成 `NONE` | 不分作者都餵回；逐一向 GitHub 查留言者有沒有寫入權限；讓每個專案自己設定允許的作者 | repo 公開後任何人都能留言，等於能對用使用者身分執行的 agent 下指令。這三種關係不用多打 API，三種留言的 REST 回應都有；組織成員不一定有寫入權限，在信任模型裡寫明。逐一查權限每則留言多一次 API 呼叫，專案設定留到治理（階段 8） |
+| 172 | Release 的說明 = `.github/release-notes/<tag>.md` 的手寫摘要（有才放）+ GitHub 自動產生的 PR 清單，清單從上一個正式版本的 tag 算起 | 只用自動產生的清單；手寫 CHANGELOG.md | `v0.3.0rc1` 的自動說明把 #1 到 #33 全部列進去（之前沒有 Release，起點變成最早的 commit）；不相容的改動（指令改名、留言作者的限制）要有人寫出來，清單看不出來。一個人維護，先不另外維護 CHANGELOG |
 
 ## 尚未決定
 
