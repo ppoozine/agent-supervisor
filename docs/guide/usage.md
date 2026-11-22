@@ -11,7 +11,7 @@ stops the agents. For installing and the first task, see the [README](../../READ
   fix CI, address PR comments, resolve a merge conflict, or follow a message you sent. A task has at
   most one active run at a time.
 - Every run, agent message, tool call, permission denial, push, and PR comment is written to an
-  **event log** that is never edited. The task's page shows it in the **Log** and **Events** tabs.
+  **event log** that is never edited. The task's page shows it in the **Chat** and **Events** tabs.
 
 Worktrees live in `~/.agent-supervisor/worktrees/<project>/task-<id>`, on a branch named
 `asv/task-<id>-<title>`. They branch from the remote default branch (`origin/<branch>`) after a
@@ -88,6 +88,24 @@ automatically until you send a message.
 When several automatic actions could happen at once, the order is: PR comments, then the merge
 conflict, then the CI failure.
 
+### The Chat tab
+
+The task's page opens on **Chat**: the task as a conversation, split into runs. Each run starts
+with a line saying its number, why it started, how it ended, how long it took and what it cost,
+followed by what it was given and what the agent did. Every entry is marked with where it came
+from:
+
+| Entry | What it is |
+| --- | --- |
+| **You** (right, blue) | The task description or a message you sent |
+| **Automatic** (dashed, yellow) | Instructions agent-supervisor sent on its own: failing CI logs, a merge conflict, or PR comments. Folded; open it to see exactly what the agent was given |
+| **Reviewer** (purple edge) | A comment on the pull request, with the file and line for inline comments. Faded, with the reason, when it was not passed to the agent (a bot, an author who is not a collaborator, an approval, no text) |
+| **Agent** | What the agent said, and one line per command, tool call or thought; open a line to see its output. Failed commands are red; actions blocked by the policy are orange |
+| System lines (centered) | Pushes, the pull request, CI results, and runs that ended badly |
+
+The header shows the automatic rounds used since you last stepped in, against their limits:
+`fixes 1/3` (failed CI and merge conflicts together) and `comments 0/5`.
+
 ### Sending a message, Stop, and Archive
 
 - **Message** (on the task's page): starts a new run in the same session with your text. It is how
@@ -95,7 +113,8 @@ conflict, then the CI failure.
   it resets the automatic attempt counters and starts a new budget. It is refused while a run is
   active, after archiving, and once the pull request is merged or closed.
   Press **Cmd+Enter** (or **Ctrl+Enter**) to send; Enter alone adds a new line. The same shortcut
-  starts a task from the **New task** form's description.
+  starts a task from the **New task** form's description. While a run is active you can type a
+  draft, but Send stays disabled until the run ends; press Stop first to send at once.
 - **Stop**: ends the active run. The agent's process and everything it started are killed, and
   nothing is published; changes stay in the worktree. Stopped tasks are never retried automatically.
 - **Archive**: removes the worktree. Stop the active run first; archiving is refused while one is

@@ -122,7 +122,7 @@ Board                                             [+ New task]
 | `ci_failure` | `Automatic: CI failed` |
 | `merge_conflict` | `Automatic: merge conflict` |
 
-`exit_status`：`success` ✓、`error` ✗、`stopped` ■、`limit_reached` ⏱、`interrupted` ⚡；還在跑時顯示「running」與經過的時間。用量是 `null` 時不顯示金額。
+`exit_status`：`success` ✓、`error` ✗、`stopped` ■、`limit_reached` ⏱、`interrupted` ⚡；還在跑時顯示「running」。用量是 `null` 時不顯示金額。
 
 **每一則的來源**
 
@@ -133,9 +133,9 @@ Board                                             [+ New task]
 | **自動** | `trigger` 是 `ci_failure`、`merge_conflict`、`review_feedback` 的 run 的 `input_text` | 置中、整行寬的卡片，「自動」的顏色，前面是 ⚙；第一行寫原因（例如「CI failed on 3f2a9c1」），內容（含 CI log）預設收合 | `Automatic · sent by agent-supervisor` |
 | **Agent** | `agent_message`（`kind` 是 `message`） | 靠左，沒有底色的段落，前面是 agent 的縮寫圖章（例如 `CC`、`CX`） | `Agent · Claude Code` |
 | Agent 的動作 | `command`、`tool_call`、`agent_message`（`kind` 是 `reasoning`、`plan`） | 接在 Agent 底下的精簡列：`$ npm test`、`Edit src/app.py`、`Thinking…`；點開才看輸出或內容。失敗的指令標紅、被擋下的動作（`permission_denied`）標 Needs you 的顏色並寫原因 | — |
-| **系統** | `pushed`、`pr_opened`、`ci_status`、`state_change`、`session_started` | 置中的一行小字，前面一個符號：`↑ Pushed 3f2a9c1`、`⎇ Opened PR #12`、`✗ CI failed`、`■ Run stopped` | — |
+| **系統** | `pushed`、`pr_opened`、`ci_status`、`state_change`（只在 run 不是成功結束時；成功已經寫在分隔線上）| 置中的一行小字，前面一個符號：`↑ Pushed 3f2a9c1`、`⎇ Opened PR #12`、`✗ CI failed`、`■ Run stopped` | — |
 
-- **Reviewer 與自動的關係**：PR 上的留言先以 Reviewer 的卡片出現在它被看到的時間點（事件沒有 `run_id`，放在依時間的位置）；下一輪派工時開始的 `review_feedback` run，以「自動」卡片呈現 supervisor 實際送給 agent 的內容，第一行寫「Sent 2 comments to the agent」。
+- **Reviewer 與自動的關係**：PR 上的留言先以 Reviewer 的卡片出現在它被看到的時間點（事件沒有 `run_id`，放在依時間的位置）；下一輪派工時開始的 `review_feedback` run，以「自動」卡片呈現 supervisor 實際送給 agent 的內容，第一行寫「Sent new pull request comments to the agent」。
 - **沒送給 agent 的留言**（`ignored` 有值）：Reviewer 卡片變淡，加上一行說明，對應 `bot` → 「Not sent: posted by a bot」、`untrusted_author` → 「Not sent: the author is not a collaborator」、`empty` → 「Not sent: no text」、`not_a_change_request` → 「Not sent: approval」。
 - **預設收合**：自動卡片的內容（CI log 很長）、指令的輸出、工具呼叫的內容、agent 的推理。收合時顯示第一行與總行數。
 - **跟隨最新**：捲到底部時，新事件進來自動捲動；往上捲之後不自動捲，右下角出現「↓ New activity」按鈕（沿用現在 Log 的行為，加上按鈕）。
@@ -151,7 +151,7 @@ Board                                             [+ New task]
 ```
 
 - `Cmd/Ctrl+Enter` 送出，Enter 換行，輸入法選字中不送出（第 178 筆）。
-- run 執行中送出的處理（現在是拒絕，回 409）在任務 21 決定。決定前維持現狀：執行中時輸入框上方顯示「The agent is working. Stop it to send a message now.」，Send 停用。
+- run 執行中送出的處理（現在是拒絕，回 409）維持拒絕（決策第 183 筆）：執行中時輸入框上方顯示「The agent is working. Stop it to send a message now.」，Send 停用。
 - 任務已封存、PR 已合併或關閉時，輸入框換成一行說明，不能輸入。
 
 ### 右側面板（或其他分頁）

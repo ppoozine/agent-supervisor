@@ -37,7 +37,7 @@ run calls your adapter's `run_turn` once:
 
 1. agent-supervisor prepares the worktree and calls `run_turn(prompt=..., cwd=worktree, ...)`.
 2. Your adapter starts the agent and yields an `AgentEvent` for each thing the agent does. Each one
-   is written to the task's audit log and shown in the board's Log tab as it happens.
+   is written to the task's audit log and shown in the board's Chat tab as it happens.
 3. When the agent finishes, your adapter yields one `TurnResult`, as the last item.
 4. If the result says the turn succeeded, agent-supervisor commits whatever the agent left
    uncommitted in the worktree, pushes, and opens the pull request if there is none yet.
@@ -193,7 +193,7 @@ Adapters may yield these five types. The others (`pushed`, `pr_opened`, `ci_stat
 | `tool_call` | The agent uses any other tool (edits a file, searches, ...) | `phase`, `tool_use_id`, `tool`, `input`; on finish also `is_error` and any result |
 | `permission_denied` | Your adapter blocked an action because of the policy | `tool`, `input`, `reason` |
 
-The Log tab of the board reads the fields named above. The audit log (the Events tab) shows the
+The Chat tab of the board reads the fields named above. The audit log (the Events tab) shows the
 whole payload, so you can add more fields, e.g. the agent's raw message, to help with debugging.
 
 ### `session_started`
@@ -278,8 +278,9 @@ AgentEvent(
 )
 ```
 
-The Log tab shows `$ <command>` for a started command, its `output` when it finishes (in red when
-`is_error` is true), and `<tool> <input>` for a started tool call. `input` can be a string or a
+The Chat tab shows `$ <command>` for a command, with its `output` when it finishes (in red when
+`is_error` is true), and `<tool> <input>` for a tool call; the start and finish are paired by
+`tool_use_id`. `input` can be a string or a
 dict. Use the agent's own id for `tool_use_id` if it has one; otherwise make one up. `tool` is
 free text: use the agent's own tool names. Put `command` on the finished event too, even if the
 agent only reports it at the start; keep a map from `tool_use_id` to the command while the turn
@@ -675,7 +676,7 @@ Worth testing:
 including running a whole task through agent-supervisor with a fake GitHub.
 
 To try it on the board, start the daemon with your adapter installed, open a task on a throwaway
-repository, and watch the Log tab. Press Stop during a run and check that the agent process is
+repository, and watch the Chat tab. Press Stop during a run and check that the agent process is
 gone (`pgrep -f <marker>`, using the marker from the Events tab).
 
 ## Common mistakes

@@ -1,5 +1,5 @@
 // Format data as text for the screen. Pure functions only.
-import type { Card, EventRow, Project } from './types'
+import type { Card, EventRow, Project, Run } from './types'
 
 /** Cost or token count. Shows tokens when the agent does not report cost; cost is an estimate, prefixed with `~`. */
 export function formatUsage(card: Pick<Card, 'cost_usd' | 'tokens' | 'usage_is_complete'>): string {
@@ -28,6 +28,37 @@ export function timeAgo(timestamp: string, now: Date = new Date()): string {
 /** Hours, minutes and seconds in local time. */
 export function clockTime(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString('en-GB')
+}
+
+/** How long a run took, e.g. `2m 14s`; `running` while it has not ended. */
+export function runDuration(run: Pick<Run, 'started_at' | 'ended_at'>): string {
+  if (run.ended_at === null) return 'running'
+  const seconds = Math.round(
+    (new Date(run.ended_at).getTime() - new Date(run.started_at).getTime()) / 1000,
+  )
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+const EXIT_SYMBOLS: Record<string, string> = {
+  success: '✓',
+  error: '✗',
+  stopped: '■',
+  limit_reached: '⏱',
+  interrupted: '⚡',
+}
+
+/** A run's outcome with its symbol, e.g. `✓ success`; `running` while it has not ended. */
+export function runOutcome(run: Pick<Run, 'exit_status'>): string {
+  if (run.exit_status === null) return 'running'
+  const symbol = EXIT_SYMBOLS[run.exit_status]
+  return symbol ? `${symbol} ${run.exit_status.replace('_', ' ')}` : run.exit_status
+}
+
+/** A run's own usage: estimated cost, else tokens; empty when unknown. */
+export function runUsage(run: Pick<Run, 'cost_usd' | 'tokens_in' | 'tokens_out'>): string {
+  if (run.cost_usd !== null) return `~$${run.cost_usd.toFixed(2)}`
+  if (run.tokens_in === null && run.tokens_out === null) return ''
+  return `${formatCount((run.tokens_in ?? 0) + (run.tokens_out ?? 0))} tok`
 }
 
 export type Tone = 'blue' | 'orange' | 'red' | 'yellow' | 'green' | 'gray'
@@ -82,65 +113,4 @@ export function mergeEvents(existing: EventRow[], incoming: EventRow[]): EventRo
   const byId = new Map(existing.map((event) => [event.id, event]))
   for (const event of incoming) byId.set(event.id, event)
   return [...byId.values()].sort((first, second) => first.id - second.id)
-}
-
-/** One line of the Log tab. */
-export interface LogLine {
-  id: number
-  ts: string
-  kind: 'message' | 'reasoning' | 'command' | 'output' | 'tool' | 'denied' | 'system' | 'error'
-  text: string
-}
-
-const MAX_OUTPUT_CHARS = 2000
-
-function text(value: unknown): string {
-  if (typeof value === 'string') return value
-  return value === null || value === undefined ? '' : JSON.stringify(value)
-}
-
-function clip(value: string): string {
-  return value.length <= MAX_OUTPUT_CHARS ? value : `${value.slice(0, MAX_OUTPUT_CHARS)}\n…`
-}
-
-/** Turn an event into a line of the Log tab; null when there is nothing to show. */
-export function toLogLine(event: EventRow): LogLine | null {
-  const { payload } = event
-  const line = (kind: LogLine['kind'], content: string): LogLine | null =>
-    content.trim() === '' ? null : { id: event.id, ts: event.ts, kind, text: content }
-  switch (event.type) {
-    case 'agent_message':
-      return line(payload.kind === 'reasoning' ? 'reasoning' : 'message', text(payload.text))
-    case 'command':
-      if (payload.phase === 'started') return line('command', `$ ${text(payload.command)}`)
-      return line(payload.is_error ? 'error' : 'output', clip(text(payload.output)))
-    case 'tool_call':
-      if (payload.phase !== 'started') return null
-      return line('tool', `${text(payload.tool)} ${clip(text(payload.input ?? payload.item ?? ''))}`)
-    case 'permission_denied':
-      return line('denied', `denied: ${text(payload.tool)} ${clip(text(payload.input))}`)
-    case 'pushed':
-      return line('system', `pushed ${text(payload.branch)} @ ${text(payload.head_sha).slice(0, 8)}`)
-    case 'pr_opened':
-      return line('system', `opened PR #${text(payload.number)}`)
-    case 'ci_status':
-      return line(
-        'system',
-        `CI ${text(payload.ci_state)} · review ${text(payload.review_state)}` +
-          (payload.merge_state === 'conflicting' ? ' · merge conflict' : ''),
-      )
-    case 'review_comment': {
-      const where = payload.path ? ` on ${text(payload.path)}${payload.line ? `:${text(payload.line)}` : ''}` : ''
-      const skipped = payload.ignored ? ` (not sent to the agent: ${text(payload.ignored)})` : ''
-      const body = text(payload.body).trim() || `(${text(payload.review_state ?? 'no text')})`
-      return line('system', `comment by ${text(payload.author)}${where}${skipped}: ${clip(body)}`)
-    }
-    case 'state_change': {
-      const detail = payload.detail ? ` — ${text(payload.detail)}` : ''
-      const outcome = payload.exit_status ? ` (${text(payload.exit_status)})` : ''
-      return line('system', `${text(payload.change)}${outcome}${detail}`)
-    }
-    default:
-      return null
-  }
 }

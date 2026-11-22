@@ -64,6 +64,8 @@ export interface Card {
   merge_state: string
   ci_fix_attempts: number
   max_ci_fix_attempts: number
+  feedback_attempts: number
+  max_feedback_attempts: number
   /** `null` means this kind of agent does not report cost: the cost is unknown, not zero. */
   cost_usd: number | null
   tokens: number

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 
-import { formatUsage, mergeEvents, timeAgo, toLogLine } from './format'
+import { formatUsage, mergeEvents, runDuration, runOutcome, runUsage, timeAgo } from './format'
 import { makeCard, makeEvent } from './testing'
 
 test('cost is shown as an estimate', () => {
@@ -33,48 +33,21 @@ test('events fetched again after a reconnect are not duplicated', () => {
   expect(merged.map((event) => event.id)).toEqual([1, 2, 3])
 })
 
-test('agent messages with no text are left out of the log', () => {
-  expect(toLogLine(makeEvent(1, 'agent_message', { kind: 'reasoning', text: '' }))).toBeNull()
-  expect(toLogLine(makeEvent(2, 'agent_message', { kind: 'message', text: 'done' }))?.text).toBe(
-    'done',
-  )
-})
+test('a run shows how long it took, how it ended, and what it cost', () => {
+  const run = {
+    started_at: '2026-11-19T10:00:00+00:00',
+    ended_at: '2026-11-19T10:02:14+00:00',
+    exit_status: 'limit_reached',
+    cost_usd: null,
+    tokens_in: 1200,
+    tokens_out: 300,
+  }
 
-test('a command shows what was run and then its output', () => {
-  const started = toLogLine(makeEvent(1, 'command', { phase: 'started', command: 'pytest' }))
-  const failed = toLogLine(
-    makeEvent(2, 'command', { phase: 'finished', is_error: true, output: 'boom' }),
-  )
-
-  expect(started).toMatchObject({ kind: 'command', text: '$ pytest' })
-  expect(failed).toMatchObject({ kind: 'error', text: 'boom' })
-})
-
-test('a review comment shows who wrote it, where, and whether it was skipped', () => {
-  const inline = toLogLine(
-    makeEvent(1, 'review_comment', {
-      author: 'alice',
-      body: 'off by one',
-      path: 'calc.py',
-      line: 21,
-      ignored: null,
-    }),
-  )
-  const bot = toLogLine(
-    makeEvent(2, 'review_comment', { author: 'ci[bot]', body: 'coverage 90%', ignored: 'bot' }),
-  )
-
-  expect(inline?.text).toBe('comment by alice on calc.py:21: off by one')
-  expect(bot?.text).toBe('comment by ci[bot] (not sent to the agent: bot): coverage 90%')
-})
-
-test('a status change mentions a merge conflict only when there is one', () => {
-  const status = { ci_state: 'passed', review_state: 'none' }
-
-  expect(toLogLine(makeEvent(1, 'ci_status', { ...status, merge_state: 'clean' }))?.text).toBe(
-    'CI passed · review none',
-  )
-  expect(
-    toLogLine(makeEvent(2, 'ci_status', { ...status, merge_state: 'conflicting' }))?.text,
-  ).toBe('CI passed · review none · merge conflict')
+  expect(runDuration(run)).toBe('2m 14s')
+  expect(runOutcome(run)).toBe('⏱ limit reached')
+  expect(runUsage(run)).toBe('1.5k tok')
+  expect(runUsage({ ...run, cost_usd: 0.123 })).toBe('~$0.12')
+  expect(runUsage({ ...run, tokens_in: null, tokens_out: null })).toBe('')
+  expect(runDuration({ ...run, ended_at: null })).toBe('running')
+  expect(runOutcome({ exit_status: null })).toBe('running')
 })

@@ -19,6 +19,8 @@ export function makeCard(fields: Partial<Card> = {}): Card {
     merge_state: 'clean',
     ci_fix_attempts: 0,
     max_ci_fix_attempts: 3,
+    feedback_attempts: 0,
+    max_feedback_attempts: 5,
     cost_usd: 0.42,
     tokens: 12345,
     usage_is_complete: true,
