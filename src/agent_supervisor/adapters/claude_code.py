@@ -1,6 +1,6 @@
 """Claude Code adapter: controls Claude Code through the official Python Agent SDK.
 
-See `docs/claude-sdk-notes.md` for how the SDK is actually used and what testing showed.
+See `docs/design/claude-sdk-notes.md` for how the SDK is actually used and what testing showed.
 All strings and parameters specific to Claude Code appear only in this file.
 """
 

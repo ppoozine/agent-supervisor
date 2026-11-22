@@ -2,7 +2,7 @@
 
 最後更新：2026-11-15
 
-任務 1 的事前調查（見 `04-phase1-tasks.md`）。實作 `ClaudeCodeAdapter` 之前，先確認官方 Python Agent SDK 的實際用法。
+任務 1 的事前調查（當時的任務單已刪除，原文在 tag `v0.3.0`）。實作 `ClaudeCodeAdapter` 之前，先確認官方 Python Agent SDK 的實際用法。
 
 ## 調查範圍與可信度
 

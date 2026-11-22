@@ -9,8 +9,8 @@ new [adapter](docs/guide/adapters.md) published as your own package.
 - **Bugs**: open an issue with the version (`uv tool list` shows it), your OS, the agent, and what
   happened. The task's **Events** tab and the daemon's log usually show where it went wrong.
 - **Features**: open an issue first and describe the problem, before writing code. The
-  [roadmap](docs/01-roadmap.md) (in Chinese) has the planned order; some things are left out on
-  purpose, and the [decision log](docs/03-decisions.md) says why.
+  [roadmap](docs/design/roadmap.md) (in Chinese) has the planned order; some things are left out on
+  purpose, and the [design decisions](docs/design/decisions.md) say why.
 - **A new agent** does not need to be in this repo: adapters are ordinary Python packages found
   through an entry point. See [Writing an adapter](docs/guide/adapters.md).
 - **Security issues**: do not open an issue; see [SECURITY.md](SECURITY.md).

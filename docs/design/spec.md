@@ -1,46 +1,21 @@
-# 02 · MVP 規格
+# 規格
 
-最後更新：2026-11-20
+最後更新：2026-11-22
 
-這份文件從 MVP 的規格開始寫，之後各階段加入的行為也記在這裡，目前涵蓋到階段 3（`0.2`）。檔名沿用（`03-decisions.md` 第 138 筆）。
+目前的行為（`0.3`）以這份為準：資料表、run 的生命週期、看板、自動處理與上限、留言、衝突、復原、API、adapter 介面。各條規則的理由在 `../history/decision-log.md`，依主題的摘要在 `decisions.md`；之後的功能見 `roadmap.md`。
 
-## 目標與範圍
+**目前不做的**（各自排在 roadmap 的哪一階段見 `roadmap.md`）
 
-MVP 只證明一件事：一個任務從開單到 CI 綠燈，中間 CI 失敗能自動回到同一個 agent 修復，人只在例外時介入。
-
-**包含**
-
-- 加入一個本機 repo
-- 手動開任務（描述 + 送出），支援 Claude Code 與 Codex 兩種 agent（Codex 在階段 1.5 加入）
-- 每個任務自動建 worktree 與 branch
-- 啟動 agent session，log 即時串流到前端
-- agent 正常結束的每一次 run 之後由 supervisor push，第一次 push 後開 PR
-- 輪詢 GitHub 的 PR / CI 狀態，推導看板欄位
-- CI 失敗時抓 log 餵回同一個 session
-- 四欄看板與任務詳情頁
-- 每個任務的稽核紀錄與 token 花費（花費為估算值）
-- 無人看管時的基本權限政策（sandbox 等級、是否允許連網、工具與指令的限制，屬於基本防護）
-
-**階段 3 加入**
-
-- PR 上的留言自動餵回同一個 session（見「Review 留言回饋」）
-- PR 和基底分支有衝突時請 agent 解掉（見「Merge conflict」）
-- 卡片進 Needs you 時發系統通知（見「通知」）
-- 任務詳情頁的 Diff 分頁
-
-**不包含**
-
-- Orchestrator 自動拆任務
+- 主 agent 自動拆任務、同時執行數上限
 - 回覆 PR 上的留言、把留言標成已解決、在看板內合併 PR
 - 從 issue 自動建任務、webhook
-- 互動式的人工核准關卡（階段 8）
-- 直接打 endpoint 的 agent（階段 5）
+- 互動式的人工核准關卡、container sandbox
+- 直接打 endpoint 的 agent
 - 桌面安裝檔、多人與登入
-- Container sandbox
 
 ## 架構
 
-一個 Python daemon 跑在本機，React 前端由它 serve 在 `localhost`，MVP 不包桌面殼。
+一個 Python daemon 跑在本機，React 前端由它 serve 在 `localhost`。
 
 ```
 React 看板（瀏覽器）
@@ -173,7 +148,7 @@ Agent 的推理內容與計畫更新也記成 `agent_message`，在 `payload` �
 
 ## Run 的生命週期
 
-一個 run 從建立到結案會經過四段：**建立 → 準備 → agent 執行 → 收尾**。流程圖見 `06-diagrams.md`。
+一個 run 從建立到結案會經過四段：**建立 → 準備 → agent 執行 → 收尾**。流程圖見 `diagrams.md`。
 
 | 階段 | 做什麼 |
 | --- | --- |
@@ -435,7 +410,7 @@ Dispatcher 發現任務符合條件時，在同一個交易內重新檢查條件
 
 Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基本的限制。
 
-**信任前提**：在治理（階段 8）做完之前，只把這個工具用在自己信任的 repo 上。這裡的政策是基本防護，**不是安全邊界**。Agent 只要能執行測試或 shell，就有辦法透過它們間接做到清單外的事（例如讓測試程式去 push）。worktree 只隔離工作目錄，各 worktree 仍共用同一份 git 資料。真正的隔離要等階段 8 的 container sandbox。
+**信任前提**：在治理（階段 10）做完之前，只把這個工具用在自己信任的 repo 上。這裡的政策是基本防護，**不是安全邊界**。Agent 只要能執行測試或 shell，就有辦法透過它們間接做到清單外的事（例如讓測試程式去 push）。worktree 只隔離工作目錄，各 worktree 仍共用同一份 git 資料。真正的隔離要等階段 8 的 container sandbox。
 
 - `PermissionPolicy` 是通用的資料結構，包含三部分：
   - sandbox 等級：唯讀，或只能寫工作目錄
@@ -446,7 +421,7 @@ Agent 是在沒有人看著的情況下執行，所以階段 1 就要有最基�
 - Agent 不需要 push、開 PR 或呼叫 `gh`，這些由 supervisor 做，允許清單不含這些動作。
 - Runner 內不出現任何 agent 專屬的字串。
 
-互動式核准、路徑限制、依專案設定的政策留到階段 8。
+互動式核准、路徑限制、依專案設定的政策留到階段 10。
 
 ## Daemon 重啟後的復原
 
@@ -596,7 +571,7 @@ API 由常駐的 daemon 提供（`agsv serve`），只綁 `127.0.0.1`，連接�
 
 ## 前端
 
-React + Vite + TypeScript，放在 `web/`。畫面的範圍見 `05-ui-reference.md`。
+React + Vite + TypeScript，放在 `web/`。
 
 - **由誰提供**：`npm run build` 的產物放在套件目錄裡的 `src/agent_supervisor/web_dist`（git 不追蹤）。daemon 啟動時如果有這個目錄就把它掛在 `/`，開 `http://127.0.0.1:8765` 就是看板；開發時與安裝後找的是同一個位置。沒有時（從 git 安裝、或還沒 build 過）daemon 只提供 API，log 寫一行警告，`/` 顯示一頁說明怎麼取得看板。開發時跑 `npm run dev`（連接埠 5173），Vite 把 `/api` 轉給 daemon。
 - **三個畫面**：看板（`#/`）、任務詳情頁（`#/tasks/{id}`）與設定頁（`#/settings`，側欄最下方的連結），用網址的 hash 切換。
@@ -721,9 +696,9 @@ class AgentAdapter(Protocol):
 | --- | --- | --- |
 | Claude Code | 官方 Python Agent SDK（`claude-agent-sdk`） | 階段 1 |
 | Codex | 用 subprocess 包 `codex exec` 的非互動模式，逐行讀 JSONL 事件；調查與實測結果見 `codex-notes.md` | 階段 1.5 |
-| 直接打 endpoint 的 agent | 直接呼叫模型 API，自己寫 agent 迴圈 | 階段 5 |
+| 直接打 endpoint 的 agent | 直接呼叫模型 API，自己寫 agent 迴圈 | 階段 9 |
 
-Claude Code 選 SDK 而不是自己包 CLI 的理由見 `03-decisions.md` 第 16 筆；Codex 選包 CLI 而不是官方 SDK 的理由見第 48 筆。
+Claude Code 選 SDK 而不是自己包 CLI 的理由見 `../history/decision-log.md` 第 16 筆；Codex 選包 CLI 而不是官方 SDK 的理由見第 48 筆。
 
 Claude Code adapter 的做法與已知限制（實測，細節見 `claude-sdk-notes.md`）：
 
@@ -744,17 +719,6 @@ Codex adapter 的做法與已知限制（實測，細節見 `codex-notes.md`）�
 - 用量是整個 session 的累計值，adapter 用 `previous_usage` 相減成單輪。不回報花費，`cost_usd` 一律為 `NULL`。被中止的 run 拿不到用量。
 - 沒有輪數與花費上限，`can_limit_turns` 與 `can_limit_budget` 為否；只靠任務的 token 上限、修復次數與執行時間上限擋住。
 - 中止時送 SIGINT，Codex 會連同它啟動的子程序一起結束；等不到就強制終止它與所有子孫程序。
-- **無法逐次攔截指令**，`can_gate_tool_calls` 為否，政策裡「拒絕的指令」對 Codex 不生效，也不會有 `permission_denied` 事件。允許連網時 Codex 可以自己執行 `git push`（實測 `--dry-run` 成功）；它在 worktree 裡無法 commit，所以能推出去的只有 supervisor 已經 commit 的內容。這是已知限制，見 `03-decisions.md` 第 89 筆。
+- **無法逐次攔截指令**，`can_gate_tool_calls` 為否，政策裡「拒絕的指令」對 Codex 不生效，也不會有 `permission_denied` 事件。允許連網時 Codex 可以自己執行 `git push`（實測 `--dry-run` 成功）；它在 worktree 裡無法 commit，所以能推出去的只有 supervisor 已經 commit 的內容。這是已知限制，見 `../history/decision-log.md` 第 89 筆。
 - 有些被 sandbox 擋下的指令（例如 `git add`）不會出現在事件流裡，只在 agent 的文字訊息中提到，所以 Codex 任務的稽核紀錄不完整。
 - 指令執行寫成 `command` 事件；檔案變更、MCP 工具等其他項目寫成 `tool_call` 事件，內容原樣保留。種類是 `error` 的項目也寫成 `tool_call`，標示為失敗。
-
-## 開發順序
-
-1. Adapter + Runner：用 Claude Code adapter 跑起一個任務，事件寫進 `events`，含權限政策與重啟復原
-2. Worktree 管理 + run 收尾（commit、push、開 PR）
-3. Poller + Dispatcher：CI 失敗自動餵回，含防迴圈規則
-4. Codex adapter：用第二個實作驗證 adapter 介面
-5. FastAPI 端點 + SSE
-6. React 看板與任務詳情頁
-
-第 1 到 3 步是階段 1，第 4 步是階段 1.5，第 5、6 步是階段 2，見 `01-roadmap.md`。

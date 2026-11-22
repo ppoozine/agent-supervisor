@@ -1,6 +1,7 @@
 """Global settings: limits and the permission policy. Read from TOML; defaults if no file.
 
-All numeric defaults are provisional; see the "not yet decided" section of `docs/03-decisions.md`.
+All numeric defaults are provisional; see the "not yet decided" section of
+`docs/design/decisions.md`.
 """
 
 import tomllib
