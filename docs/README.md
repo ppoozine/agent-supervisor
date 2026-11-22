@@ -27,6 +27,7 @@ complete on their own. A machine translation is usually enough to follow them.
 | [05-ui-reference.md](05-ui-reference.md) | What the board shows and the reference it was modelled on |
 | [06-diagrams.md](06-diagrams.md) | Architecture and flow diagrams (Mermaid) |
 | [09-open-source-plan.md](09-open-source-plan.md) | The plan for making the project public: an inventory, positioning, language, platforms, naming, scope |
+| [11-next-plan.md](11-next-plan.md) | The plan after `0.3`: per-task Chat and Shell, the UI redesign, the main agent, the desktop app, and how Agent Orchestrator handles the same problems |
 | [claude-sdk-notes.md](claude-sdk-notes.md) | Research and tests of the Claude Agent SDK: streaming, sessions, limits, permissions |
 | [codex-notes.md](codex-notes.md) | Research and tests of the Codex CLI: `codex exec`, its JSON events, sandbox, resuming |
 

@@ -4,6 +4,8 @@
 
 階段 2 才會開始做介面。這份文件記錄我當初看到、想做成的樣子，以及 MVP 介面要有哪些東西。
 
+這份文件描述的是 MVP 到 `0.3` 的介面。階段 5 會改版，並加入 Chat 與 Shell（下面「不做」清單裡的內嵌 terminal 也在其中），規劃見 `11-next-plan.md`。
+
 ## 參考畫面
 
 當初參考的是開源專案 [Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator) 的看板截圖，是這個專案的起點。**只當作版面與資訊配置的參考**：我們自己實作，不複製它的程式碼、圖示與視覺設計。
