@@ -6,9 +6,9 @@
 
 ## 參考畫面
 
-![Agent Orchestrator 看板截圖](assets/ui-reference.png)
+當初參考的是開源專案 [Agent Orchestrator](https://github.com/OrchestratorInc/agent-orchestrator) 的看板截圖，是這個專案的起點。**只當作版面與資訊配置的參考**：我們自己實作，不複製它的程式碼、圖示與視覺設計。
 
-這是開源專案 Agent Orchestrator 的看板截圖，是這個專案的起點。**只當作版面與資訊配置的參考**：我們自己實作，不複製它的程式碼、圖示與視覺設計。
+截圖本身在公開 repo 之前移除了（決策第 170 筆），不散布別人產品的畫面；下面「從截圖讀到的版面」是當時讀到的內容，對方現在的介面可能已經不同。
 
 ## 從截圖讀到的版面
 

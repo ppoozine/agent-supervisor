@@ -38,4 +38,6 @@ instructions each phase was built from. The project was developed with an AI cod
 (Claude Code): each task in these sheets was handed to it as written, one at a time, with a plan
 agreed before any code and a list of what the author verified by hand afterwards. They are kept to
 show how the work was split up and checked, not as current documentation; where they disagree with
-the specification, the specification wins.
+the specification, the specification wins. Many of their "what I will verify" checkboxes were never
+ticked. The boxes were not kept up to date, so they do not show what was checked at the time; the
+features have been in use and reworked since, and the automated tests are the current record.

@@ -175,6 +175,7 @@
 | 167 | 對外的英文文件放在 `docs/guide/`（adapter 指南、HTTP API），和中文的設計文件分開；HTTP API 的說明用手寫，`/api/docs` 保留當試打的工具。0.x 期間 adapter 介面、HTTP API、設定檔與資料庫 schema 都不承諾穩定，寫在 README 與兩份指南開頭 | 直接用 FastAPI 產生的文件；把每個端點改成 Pydantic 回應模型，讓產生的文件完整 | 實測產生的文件只有請求的 body 是對的：回應都是「任意物件」、沒有錯誤的形狀、SSE 被寫成 JSON。改成回應模型要動每個端點，範圍太大。分開放讓讀者一眼看出哪些是寫給使用者的 |
 | 168 | 每一項檢查（adapter 的 `check()` 與 gh）整體限時 30 秒，逾時或拋出例外就把那一項當成不能用、traceback 寫進 log，daemon 照常啟動 | 只在指南裡要求 `check()` 不能拋例外、要快 | adapter 可能來自別的套件（第 165 筆），不能假設它守規矩；原本一個 `check()` 出錯就讓 daemon 起不來、卡住就讓 daemon 卡在啟動，和「壞掉的 adapter 寫 log 後跳過」不一致。`detail` 只寫例外的型別，因為訊息可能含有工具的原始輸出 |
 | 169 | 任務 18 的對外文件：README 重寫，另加 `docs/guide/usage.md`（看板、設定檔、上限）與 `docs/guide/trust-model.md`（信任模型與已知限制）；`docs/README.md` 用英文說明中文的設計文件；各階段的任務單留在 repo 裡，說明它們是交給 AI 的工作指示；資安問題只收 GitHub 的 private vulnerability reporting；commit 作者欄位的 email 接受公開，不改寫 git 歷史 | 刪掉任務單（歷史裡仍看得到）；SECURITY.md 留 email；用 `git filter-repo` 換掉 email（所有 commit 的 hash 與已合併的 PR、tag 都會對不上） | 定位是「設計決策全部公開」，任務單本身就是開發紀錄；回報管道不需要公開個人資料；改寫歷史的代價大於 email 公開的風險 |
+| 170 | 公開前的檢查（任務 18 PR B）：移除 `docs/assets/ui-reference.png`（Agent Orchestrator 的看板截圖），`05-ui-reference.md` 改放對方 repo 的連結；刪掉 GitHub 上已合併 PR 的遠端 branch；階段 1 沒勾的驗證項目在文件裡說明，不逐項重跑 | 保留截圖（已註明來源）；保留舊 branch；公開前重跑階段 1 的驗證清單 | 不散布別人產品的畫面；舊 branch 的內容都已在 `main`，留著只增加雜訊；階段 1 的功能之後一直在用、有自動測試，重跑的成本高於價值 |
 
 ## 尚未決定
 
