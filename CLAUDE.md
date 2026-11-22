@@ -44,6 +44,7 @@
 src/agent_supervisor/
   adapters/
     base.py          # AgentAdapter Protocol
+    loading.py       # 從 entry point（agent_supervisor.adapters）載入所有 adapter，含內建的兩個
     claude_code.py   # 用官方 Python Agent SDK 控制 Claude Code
     codex.py         # 用 subprocess 包 `codex exec` 控制 Codex
   enums.py           # 共用的列舉值：run 的觸發原因、結案結果、事件型別
@@ -74,6 +75,8 @@ src/agent_supervisor/
     guard.py         # 只接受對本機、從本機網頁發出的請求
 tests/
 docs/
+examples/
+  example-adapter/   # 範例 adapter：獨立的套件、預設不載入，包一支假的 agent CLI，不需要帳號
 web/                 # 前端：React + Vite
   src/
     api.ts           # 所有對 daemon 的呼叫與錯誤形狀
@@ -108,6 +111,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 
 ## Adapter 注意事項
 
+- Adapter 用 entry point 註冊（`pyproject.toml` 的 `agent_supervisor.adapters`），新增內建的 adapter 也一樣，不要寫死清單。
 - Claude Code adapter 使用官方 Python Agent SDK（`claude-agent-sdk`），不自己包 CLI。
 - **不要憑印象寫參數**。實作前先查官方文件，確認串流訊息、續接 session、中止、輪數與花費上限、權限控制的實際用法，把查到的結果記在 `docs/claude-sdk-notes.md`。Codex adapter 同樣先調查，記在 `docs/codex-notes.md`。
 - Adapter 要如實填寫 `capabilities`；做不到的事不要在 adapter 裡假裝做到。

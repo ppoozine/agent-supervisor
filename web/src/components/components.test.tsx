@@ -9,7 +9,7 @@ import { Board } from './Board'
 import { DiffTab } from './DiffTab'
 import { NewTaskDialog } from './NewTaskDialog'
 import { SettingsPage } from './SettingsPage'
-import { TaskCard } from './TaskCard'
+import { AgentNames, TaskCard } from './TaskCard'
 import { TaskPage } from './TaskPage'
 
 vi.mock('../api', async (importOriginal) => ({
@@ -441,4 +441,17 @@ test('checking again shows the new result and tells the page', async () => {
 
   await waitFor(() => expect(checked).toHaveBeenCalled())
   expect(screen.getByRole('region', { name: 'Codex' }).textContent).toContain('Signed in with ChatGPT')
+})
+
+
+test('a card names its agent as the daemon does, and an unknown agent by its type', () => {
+  render(
+    <AgentNames.Provider value={{ example: 'Example agent' }}>
+      <TaskCard card={makeCard({ agent_type: 'example' })} />
+      <TaskCard card={makeCard({ id: 8, agent_type: 'not_installed' })} />
+    </AgentNames.Provider>,
+  )
+
+  expect(screen.getByText('Example agent')).toBeTruthy()
+  expect(screen.getByText('not_installed')).toBeTruthy()
 })

@@ -7,7 +7,7 @@ import { Dialog } from './Dialog'
 import { DiffTab } from './DiffTab'
 import { EventsTab, LogTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
-import { agentName } from './TaskCard'
+import { useAgentName } from './TaskCard'
 
 interface TaskPageProps {
   taskId: number
@@ -27,6 +27,7 @@ type Tab = (typeof TABS)[number]
 /** Task detail page: header, the Log / Diff / Events / Runs tabs, follow-up messages, Stop and Archive. */
 export function TaskPage(props: TaskPageProps) {
   const { taskId, card, project, connectionCount, subscribeToEvents, onTaskChanged } = props
+  const agentName = useAgentName()
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [events, setEvents] = useState<EventRow[]>([])
   const [tab, setTab] = useState<Tab>('Log')

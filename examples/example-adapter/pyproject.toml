@@ -1,0 +1,20 @@
+[project]
+name = "agent-supervisor-example-adapter"
+version = "0.1.0"
+description = "A minimal agent-supervisor adapter around a fake agent CLI; needs no account"
+readme = "README.md"
+requires-python = ">=3.13"
+# agent-supervisor is not listed: it is not on PyPI, and a different package uses that name there.
+# Install this package next to it instead (see README.md).
+dependencies = []
+
+# This is what makes agent-supervisor find the adapter: the name is the agent type.
+[project.entry-points."agent_supervisor.adapters"]
+example = "example_adapter:ExampleAdapter"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "example_adapter"

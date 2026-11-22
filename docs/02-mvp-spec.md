@@ -704,6 +704,13 @@ class AgentAdapter(Protocol):
 - `AgentEvent` 是有型別的事件，對應 `events.type`，不直接把 agent 的原始輸出丟給 Runner。
 - `capabilities` 讓 Runner 知道這個 adapter 做不到什麼。`can_limit_turns` 或 `can_limit_budget` 為 `False` 時，對應的上限無法在執行中生效，只剩 Runner 的執行時間上限擋著。
 
+**Adapter 的載入**（決策第 165、166 筆）
+
+- Adapter 用 Python 的 entry point 註冊，group 是 `agent_supervisor.adapters`：名稱就是 agent 種類（`tasks.agent_type`，只能用小寫字母、數字與底線，開頭是字母），值是不帶參數就能呼叫、回傳 adapter 的東西（通常是 class）。內建的兩個也在這個專案的 `pyproject.toml` 用同樣的方式註冊，沒有寫死的清單。
+- 裝了宣告 entry point 的套件就是啟用：`uv tool install <wheel> --with <adapter 套件>`；從 repo 開發時用 `uv run --with-editable <路徑> agsv serve`。
+- 載入時檢查有 `display_name`（字串）、`capabilities`（`AdapterCapabilities`）、可以呼叫的 `run_turn` 與 `check`。載入失敗（import 出錯、少了上述任何一項、名稱不合規則）寫一行錯誤 log 後跳過，daemon 照常啟動。名稱重複時內建的優先，其餘依名稱排序，先載入的優先。
+- 範例 adapter 在 `examples/example-adapter/`：獨立的套件、預設不載入，包一支假的 agent CLI，不需要任何帳號就能讓任務走完整個流程（push 與開 PR 仍然需要 gh）。
+
 **各 adapter 的做法**
 
 | Adapter | 做法 | 何時做 |

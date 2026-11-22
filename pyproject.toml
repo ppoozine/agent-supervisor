@@ -14,6 +14,11 @@ dependencies = [
 [project.scripts]
 agsv = "agent_supervisor.cli:main"
 
+# Agent adapters register here; other packages add theirs the same way (docs/guide/adapters.md).
+[project.entry-points."agent_supervisor.adapters"]
+claude_code = "agent_supervisor.adapters.claude_code:ClaudeCodeAdapter"
+codex = "agent_supervisor.adapters.codex:CodexAdapter"
+
 [build-system]
 requires = ["uv_build>=0.12.19,<0.14.0"]
 build-backend = "uv_build"

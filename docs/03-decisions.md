@@ -170,6 +170,8 @@
 | 162 | 指令名稱定為 `agsv`，不保留 `asv` 別名；branch 前綴 `asv/task-` 與程序標記等內部識別字不改 | 維持 `asv`；保留 `asv` 當別名 | `asv` 和 Airspeed Velocity 的指令相同，兩個都裝時後裝的蓋掉先裝的（第 147 筆）；留著別名衝突就還在。內部識別字不是指令，改了會讓已經存在的 branch 與舊 run 的程序標記對不上 |
 | 163 | 前端 build 到套件目錄 `src/agent_supervisor/web_dist`（git 不追蹤），由打 tag 時的 CI 打包進套件檔、附在 GitHub Release；主要的安裝方式是 Release 的套件檔。`uv tool install git+…` 照樣能裝，但沒有看板，daemon 的 log 與 `/` 寫明怎麼取得 | 把 build 好的前端 commit 進 repo；換成 hatchling 加 build hook 在安裝時執行 npm | 實測 uv_build 會把 git 忽略的檔案一起打包，所以不需要 commit 產物；但它不會執行 npm，從 git 安裝時不管有沒有 Node.js 都沒有前端。commit 產物會讓每個改前端的 PR 都帶著含 hash 的檔名、容易衝突；安裝時跑 npm 要使用者有 Node.js 且要下載 node_modules。要追 main 的人通常本來就會 clone。開發時與安裝後都從同一個位置找前端，不再從原始碼的路徑往上找 |
 | 164 | Python 的下限維持 3.13 | 降到 3.11（實測 3.11、3.12 都能通過全部測試；依賴裡 FastAPI 要求 ≥3.11） | 文件寫的安裝方式都用 uv，uv 會自己下載需要的 Python，降低下限對使用者幾乎沒有好處；降了就得在 CI 多跑舊版本，也不能再用新的語法。要支援用 pip 安裝的人時再降 |
+| 165 | 外部的 adapter 用 Python 的 entry point（`agent_supervisor.adapters`）註冊，裝了就啟用；內建的兩個也改用同樣的方式註冊。載入失敗寫 log 後跳過，名稱重複時內建的優先 | 在設定檔寫 `module:Class`；只有外部的用 entry point、內建的維持寫死 | entry point 是 Python 外掛的標準做法，使用者本來就得把套件裝進同一個環境，裝進去就能找到，不必再多一份設定。內建的走同一條路，外部 adapter 就沒有比內建的少什麼，也證明這條路是通的。一個壞掉的外掛不該讓整個 daemon 起不來 |
+| 166 | 範例 adapter 放在 `examples/example-adapter/`，是一個獨立的套件、預設不載入，內容是一支假的 agent CLI 加上包裝它的 adapter | 放進主套件並預設載入；寫成不啟動子程序的純 Python adapter | 用和第三方完全相同的方式載入，本身就示範了載入的方法。真實的 agent 幾乎都是 CLI，最容易寫錯的是程序的啟動、process marker 與中止，純 Python 的範例示範不到。預設載入會讓每個使用者的表單裡多一個沒有用的 agent。它不宣告依賴 agent-supervisor：PyPI 上同名的是另一個套件 |
 
 ## 尚未決定
 
