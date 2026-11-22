@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import * as api from '../api'
@@ -49,6 +49,20 @@ function button(name: string): HTMLButtonElement {
 }
 
 const onTaskChanged = vi.fn()
+const run = {
+  id: 1,
+  task_id: 7,
+  trigger: 'initial',
+  input_text: null as string | null,
+  source_head_sha: null,
+  started_at: '2026-11-19T10:00:00+00:00',
+  ended_at: '2026-11-19T10:03:00+00:00' as string | null,
+  exit_status: 'success' as string | null,
+  tokens_in: 10,
+  tokens_out: 5,
+  cost_usd: null,
+}
+const idle = makeCard({ has_open_run: false, column: 'Needs you', label: 'Stopped' })
 
 function renderTaskPage(card = makeCard()) {
   vi.mocked(api.getTask).mockResolvedValue(makeDetail(card))
@@ -205,34 +219,34 @@ test('stop can only be pressed while a run is active', async () => {
   expect(button('Stop').disabled).toBe(true)
 })
 
-test('the task page shows the log and the pull request link', async () => {
+test('the task page shows the chat and the pull request link', async () => {
   renderTaskPage(makeCard({ pr_number: 12, pr_state: 'open' }))
 
   expect(await screen.findByText('working on it')).toBeTruthy()
-  expect(screen.getByText(/pushed asv\/task-7 @ abcdef12/)).toBeTruthy()
+  expect(screen.getByText(/Pushed abcdef12 to asv\/task-7/)).toBeTruthy()
   const link = screen.getByRole('link', { name: /PR #12/ }) as HTMLAnchorElement
   expect(link.href).toBe('https://github.com/owner/demo/pull/12')
 })
 
 test('a refused message shows the reason and keeps the text', async () => {
   vi.mocked(api.sendMessage).mockRejectedValue(
-    new api.ApiError(409, 'run_already_active', 'task 7 already has an active run'),
+    new api.ApiError(409, 'task_not_runnable', 'task 7 cannot run again'),
   )
-  renderTaskPage()
+  renderTaskPage(idle)
   await screen.findByText('working on it')
   const input = screen.getByLabelText('Message') as HTMLTextAreaElement
 
   fireEvent.change(input, { target: { value: 'also add tests' } })
   fireEvent.click(button('Send'))
 
-  expect((await screen.findByRole('alert')).textContent).toBe('task 7 already has an active run')
+  expect((await screen.findByRole('alert')).textContent).toBe('task 7 cannot run again')
   expect(api.sendMessage).toHaveBeenCalledWith(7, 'also add tests')
   expect(input.value).toBe('also add tests')
 })
 
 test('Cmd+Enter sends a message; plain Enter and composing text do not', async () => {
   vi.mocked(api.sendMessage).mockResolvedValue(makeDetail())
-  renderTaskPage()
+  renderTaskPage(idle)
   await screen.findByText('working on it')
   const input = screen.getByLabelText('Message') as HTMLTextAreaElement
 
@@ -248,7 +262,7 @@ test('Cmd+Enter sends a message; plain Enter and composing text do not', async (
 })
 
 test('Cmd+Enter does not send an empty message', async () => {
-  renderTaskPage()
+  renderTaskPage(idle)
   await screen.findByText('working on it')
   const input = screen.getByLabelText('Message')
 
@@ -256,6 +270,129 @@ test('Cmd+Enter does not send an empty message', async () => {
   fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
 
   expect(api.sendMessage).not.toHaveBeenCalled()
+})
+
+test('while the agent is working a message can be drafted but not sent', async () => {
+  renderTaskPage(makeCard({ has_open_run: true }))
+  await screen.findByText('working on it')
+  const input = screen.getByLabelText('Message') as HTMLTextAreaElement
+
+  fireEvent.change(input, { target: { value: 'next, add docs' } })
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+
+  expect(screen.getByText(/The agent is working/)).toBeTruthy()
+  expect(button('Send').disabled).toBe(true)
+  expect(api.sendMessage).not.toHaveBeenCalled()
+  expect(input.value).toBe('next, add docs')
+})
+
+test('an archived task or a merged PR takes no more messages; a closed PR still does', async () => {
+  renderTaskPage(makeCard({ has_open_run: false, archived_at: '2026-11-19T11:00:00+00:00' }))
+  await screen.findByText('working on it')
+  expect(screen.queryByLabelText('Message')).toBeNull()
+  expect(screen.getByText(/This task is archived/)).toBeTruthy()
+  cleanup()
+
+  renderTaskPage(makeCard({ has_open_run: false, pr_number: 12, pr_state: 'merged' }))
+  await screen.findByText('working on it')
+  expect(screen.getByText(/The pull request was merged/)).toBeTruthy()
+  cleanup()
+
+  // The PR may have been reopened on GitHub; the daemon checks when the message is sent.
+  renderTaskPage(makeCard({ has_open_run: false, pr_number: 12, pr_state: 'closed' }))
+  await screen.findByText('working on it')
+  expect(screen.getByLabelText('Message')).toBeTruthy()
+})
+
+test('the header shows automatic rounds against their limits', async () => {
+  renderTaskPage(makeCard({ ci_fix_attempts: 1, feedback_attempts: 2 }))
+  await screen.findByText('working on it')
+
+  expect(screen.getByText(/fixes 1\/3 · comments 2\/5/)).toBeTruthy()
+})
+
+test('the chat labels who each entry came from and keeps long content folded', async () => {
+  const detail = makeDetail({
+    runs: [
+      { ...run, id: 1, trigger: 'initial', input_text: 'add power(base, exponent)' },
+      {
+        ...run,
+        id: 2,
+        trigger: 'ci_failure',
+        input_text: 'CI failed\nlong log',
+        started_at: '2026-11-19T10:05:00+00:00',
+        ended_at: null,
+        exit_status: null,
+      },
+    ],
+  })
+  vi.mocked(api.getTask).mockResolvedValue(detail)
+  vi.mocked(api.listEventsAfter).mockResolvedValue([
+    { ...makeEvent(1, 'agent_message', { kind: 'message', text: 'done with it' }), ts: '2026-11-19T10:01:00+00:00' },
+    {
+      ...makeEvent(2, 'review_comment', { kind: 'comment', author: 'alice', body: 'rename it' }),
+      run_id: null,
+      ts: '2026-11-19T10:02:00+00:00',
+    },
+    {
+      ...makeEvent(3, 'command', { phase: 'started', tool_use_id: 't', command: 'pytest' }),
+      run_id: 2,
+      ts: '2026-11-19T10:06:00+00:00',
+    },
+  ])
+  const card = makeCard({ has_open_run: true })
+  render(
+    <AgentNames.Provider value={{ claude_code: 'Claude Code' }}>
+      <TaskPage
+        taskId={card.id}
+        card={card}
+        project={project}
+        connectionCount={1}
+        subscribeToEvents={() => () => undefined}
+        onTaskChanged={onTaskChanged}
+      />
+    </AgentNames.Provider>,
+  )
+  const chat = await screen.findByRole('log', { name: 'Chat' })
+  await within(chat).findByText('done with it')
+
+  const sources = [...chat.querySelectorAll('[data-source]')].map((element) =>
+    element.getAttribute('data-source'),
+  )
+  expect(sources).toEqual(['you', 'agent', 'reviewer', 'auto', 'agent', 'agent'])
+  expect(within(chat).getByText('add power(base, exponent)')).toBeTruthy()
+  expect(within(chat).getByText(/Run #2/).parentElement?.textContent).toContain('Automatic: CI failed')
+  const automatic = chat.querySelector('[data-source="auto"]') as HTMLDetailsElement
+  expect(automatic.tagName).toBe('DETAILS')
+  expect(automatic.open).toBe(false)
+  expect(within(chat).getByText('$ pytest')).toBeTruthy()
+  expect(within(chat).getByText('Working…')).toBeTruthy()
+  expect(within(chat).getAllByText('CC').length).toBeGreaterThan(0)
+})
+
+test('new events pushed while the page is open appear in the chat', async () => {
+  let push: (event: ReturnType<typeof makeEvent>) => void = () => undefined
+  const card = makeCard()
+  vi.mocked(api.getTask).mockResolvedValue(makeDetail(card))
+  vi.mocked(api.listEventsAfter).mockResolvedValue([])
+  render(
+    <TaskPage
+      taskId={card.id}
+      card={card}
+      project={project}
+      connectionCount={1}
+      subscribeToEvents={(listener) => {
+        push = listener
+        return () => undefined
+      }}
+      onTaskChanged={onTaskChanged}
+    />,
+  )
+  const chat = await screen.findByRole('log', { name: 'Chat' })
+
+  act(() => push(makeEvent(9, 'agent_message', { kind: 'message', text: 'live update' })))
+
+  expect(await within(chat).findByText('live update')).toBeTruthy()
 })
 
 test('events can be filtered by type', async () => {

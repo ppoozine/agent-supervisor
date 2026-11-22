@@ -156,6 +156,18 @@ async def test_new_task_answers_at_once_and_ends_up_in_review(api: Api) -> None:
     assert [(card["id"], card["column"]) for card in cards] == [(created["id"], "In review")]
 
 
+async def test_card_counts_automatic_comment_rounds_against_their_limit(api: Api) -> None:
+    created = await api.task([session_started(), result()])
+    await api.finished(created["id"])
+    await api.conn.execute("UPDATE tasks SET feedback_attempts = 2 WHERE id = ?", (created["id"],))
+    await api.conn.commit()
+
+    card = (await api.client.get(f"/api/tasks/{created['id']}")).json()
+
+    assert (card["feedback_attempts"], card["max_feedback_attempts"]) == (2, 5)
+    assert (created["feedback_attempts"], created["max_feedback_attempts"]) == (0, 5)
+
+
 async def test_tasks_can_be_listed_for_one_project(api: Api) -> None:
     created = await api.task([session_started(), result()])
     await api.finished(created["id"])

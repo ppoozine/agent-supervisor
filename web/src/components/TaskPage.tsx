@@ -6,7 +6,8 @@ import { currentSubmitShortcutLabel, submitOnShortcut } from '../keys'
 import type { Card, EventRow, Project, TaskDetail } from '../types'
 import { Dialog } from './Dialog'
 import { DiffTab } from './DiffTab'
-import { EventsTab, LogTab, RunsTab } from './TaskTabs'
+import { ChatTab } from './ChatTab'
+import { EventsTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
 import { useAgentName } from './TaskCard'
 
@@ -22,17 +23,17 @@ interface TaskPageProps {
   onTaskChanged: (task: TaskDetail) => void
 }
 
-const TABS = ['Log', 'Diff', 'Events', 'Runs'] as const
+const TABS = ['Chat', 'Diff', 'Events', 'Runs'] as const
 type Tab = (typeof TABS)[number]
 
-/** Task detail page: header, the Log / Diff / Events / Runs tabs, follow-up messages, Stop and Archive. */
+/** Task detail page: header, the Chat / Diff / Events / Runs tabs, follow-up messages, Stop and Archive. */
 export function TaskPage(props: TaskPageProps) {
   const { taskId, card, project, connectionCount, subscribeToEvents, onTaskChanged } = props
   const agentName = useAgentName()
   const shortcutLabel = currentSubmitShortcutLabel()
   const [detail,setDetail] = useState<TaskDetail | null>(null)
   const [events, setEvents] = useState<EventRow[]>([])
-  const [tab, setTab] = useState<Tab>('Log')
+  const [tab, setTab] = useState<Tab>('Chat')
   const [messageText, setMessageText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -110,6 +111,13 @@ export function TaskPage(props: TaskPageProps) {
   const prUrl = pullRequestUrl(project, current)
   const isArchived = current.archived_at !== null
   const hasOpenPullRequest = current.pr_number !== null && current.pr_state === 'open'
+  // A closed PR may have been reopened on GitHub, which the daemon checks when a message is sent,
+  // so only archived tasks and merged PRs rule out messages here.
+  const closedReason = isArchived
+    ? 'This task is archived, so it cannot run again.'
+    : current.pr_state === 'merged'
+      ? 'The pull request was merged, so this task cannot run again.'
+      : null
   const archive = async (): Promise<void> => {
     await perform('archive', () => archiveTask(taskId))
     setIsConfirmingArchive(false)
@@ -144,6 +152,10 @@ export function TaskPage(props: TaskPageProps) {
               {formatUsage(current)}
               {current.cost_usd !== null && ` · ${formatCount(current.tokens)} tok`}
               {` (in ${formatCount(detail.tokens_in)} / out ${formatCount(detail.tokens_out)})`}
+            </span>
+            <span className="muted" title="Automatic rounds used since you last stepped in">
+              fixes {current.ci_fix_attempts}/{current.max_ci_fix_attempts} · comments{' '}
+              {current.feedback_attempts}/{current.max_feedback_attempts}
             </span>
           </div>
         </div>
@@ -199,38 +211,47 @@ export function TaskPage(props: TaskPageProps) {
         ))}
       </div>
       <div className="tab-body">
-        {tab === 'Log' && <LogTab events={events} prompt={detail.prompt} />}
+        {tab === 'Chat' && (
+          <ChatTab runs={detail.runs} events={events} agentName={agentName(current.agent_type)} />
+        )}
         {tab === 'Diff' && (
           <DiffTab taskId={taskId} headSha={current.head_sha} connectionCount={connectionCount} />
         )}
         {tab === 'Events' && <EventsTab events={events} />}
         {tab === 'Runs' && <RunsTab runs={detail.runs} />}
       </div>
-      <form
-        className="composer"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void send()
-        }}
-      >
-        <textarea
-          value={messageText}
-          onChange={(event) => setMessageText(event.target.value)}
-          onKeyDown={submitOnShortcut}
-          placeholder="Send a follow-up to the same session…"
-          rows={2}
-          aria-label="Message"
-          aria-keyshortcuts="Meta+Enter Control+Enter"
-        />
-        <kbd className="shortcut-hint whitespace-nowrap">{shortcutLabel}</kbd>
-        <button
-          type="submit"
-          className="primary"
-          disabled={messageText.trim() === '' || busyAction !== null}
+      {closedReason !== null ? (
+        <p className="composer-closed muted">{closedReason}</p>
+      ) : (
+        <form
+          className="composer"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send()
+          }}
         >
-          {busyAction === 'send' ? 'Sending…' : 'Send'}
-        </button>
-      </form>
+          {current.has_open_run && (
+            <p className="composer-note muted">The agent is working. Stop it to send a message now.</p>
+          )}
+          <textarea
+            value={messageText}
+            onChange={(event) => setMessageText(event.target.value)}
+            onKeyDown={submitOnShortcut}
+            placeholder="Send a follow-up to the same session…"
+            rows={2}
+            aria-label="Message"
+            aria-keyshortcuts="Meta+Enter Control+Enter"
+          />
+          <kbd className="shortcut-hint whitespace-nowrap">{shortcutLabel}</kbd>
+          <button
+            type="submit"
+            className="primary"
+            disabled={messageText.trim() === '' || busyAction !== null || current.has_open_run}
+          >
+            {busyAction === 'send' ? 'Sending…' : 'Send'}
+          </button>
+        </form>
+      )}
     </div>
   )
 }

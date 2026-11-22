@@ -40,6 +40,8 @@ def card_view(
         "merge_state": task.merge_state,
         "ci_fix_attempts": task.ci_fix_attempts,
         "max_ci_fix_attempts": status.MAX_CI_FIX_ATTEMPTS,
+        "feedback_attempts": task.feedback_attempts,
+        "max_feedback_attempts": status.MAX_FEEDBACK_ATTEMPTS,
         "cost_usd": snapshot.usage.cost_usd if reports_cost else None,
         "tokens": snapshot.usage.tokens,
         "usage_is_complete": snapshot.usage.is_complete,

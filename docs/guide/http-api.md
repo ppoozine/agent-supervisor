@@ -140,6 +140,8 @@ fields. A card:
   "merge_state": "clean",
   "ci_fix_attempts": 0,
   "max_ci_fix_attempts": 3,
+  "feedback_attempts": 0,
+  "max_feedback_attempts": 5,
   "cost_usd": null,
   "tokens": 44,
   "usage_is_complete": true,
@@ -161,6 +163,7 @@ fields. A card:
 | `review_state` | `none`, `approved`, or `changes_requested` |
 | `merge_state` | `unknown`, `clean`, or `conflicting` (with the base branch) |
 | `ci_fix_attempts`, `max_ci_fix_attempts` | Automatic fixes used so far (failed CI and merge conflicts together) and the most allowed |
+| `feedback_attempts`, `max_feedback_attempts` | Rounds of PR comments passed to the agent automatically so far, and the most allowed |
 | `cost_usd` | Money spent since the last time a person stepped in (opening the task or sending a message); `null` if the agent does not report cost |
 | `tokens` | Tokens used over the same period |
 | `usage_is_complete` | False when some run's usage is unknown (e.g. it was stopped), so `cost_usd` and `tokens` are lower than the real figures |
