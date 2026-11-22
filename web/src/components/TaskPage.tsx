@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { archiveTask, errorMessage, getTask, listEventsAfter, sendMessage, stopTask } from '../api'
 import { formatCount, formatUsage, mergeEvents, pullRequestUrl } from '../format'
+import { currentSubmitShortcutLabel, submitOnShortcut } from '../keys'
 import type { Card, EventRow, Project, TaskDetail } from '../types'
 import { Dialog } from './Dialog'
 import { DiffTab } from './DiffTab'
@@ -28,7 +29,8 @@ type Tab = (typeof TABS)[number]
 export function TaskPage(props: TaskPageProps) {
   const { taskId, card, project, connectionCount, subscribeToEvents, onTaskChanged } = props
   const agentName = useAgentName()
-  const [detail, setDetail] = useState<TaskDetail | null>(null)
+  const shortcutLabel = currentSubmitShortcutLabel()
+  const [detail,setDetail] = useState<TaskDetail | null>(null)
   const [events, setEvents] = useState<EventRow[]>([])
   const [tab, setTab] = useState<Tab>('Log')
   const [messageText, setMessageText] = useState('')
@@ -214,10 +216,13 @@ export function TaskPage(props: TaskPageProps) {
         <textarea
           value={messageText}
           onChange={(event) => setMessageText(event.target.value)}
+          onKeyDown={submitOnShortcut}
           placeholder="Send a follow-up to the same session…"
           rows={2}
           aria-label="Message"
+          aria-keyshortcuts="Meta+Enter Control+Enter"
         />
+        <kbd className="shortcut-hint">{shortcutLabel}</kbd>
         <button
           type="submit"
           className="primary"

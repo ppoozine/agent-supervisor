@@ -124,6 +124,34 @@ test('a new task is sent with the chosen project and agent', async () => {
   })
 })
 
+test('Ctrl+Enter in the description starts the task', async () => {
+  const created = vi.fn()
+  vi.mocked(api.createTask).mockResolvedValue(makeDetail())
+  render(
+    <NewTaskDialog projects={[project]} agents={agents} onCreated={created} onClose={vi.fn()} />,
+  )
+  const description = screen.getByLabelText('Description')
+
+  fireEvent.change(description, { target: { value: 'add cube(x)' } })
+  fireEvent.keyDown(description, { key: 'Enter', ctrlKey: true })
+
+  await waitFor(() => expect(created).toHaveBeenCalled())
+  expect(api.createTask).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'add cube(x)' }))
+})
+
+test('the shortcut does not start a task while no agent can be used', () => {
+  const noneReady = agents.map((agent) => ({ ...agent, usable: false }))
+  render(
+    <NewTaskDialog projects={[project]} agents={noneReady} onCreated={vi.fn()} onClose={vi.fn()} />,
+  )
+  const description = screen.getByLabelText('Description')
+
+  fireEvent.change(description, { target: { value: 'do it' } })
+  fireEvent.keyDown(description, { key: 'Enter', metaKey: true })
+
+  expect(api.createTask).not.toHaveBeenCalled()
+})
+
 test('a refused task shows the reason and keeps the form open', async () => {
   const created = vi.fn()
   vi.mocked(api.createTask).mockRejectedValue(
@@ -200,6 +228,34 @@ test('a refused message shows the reason and keeps the text', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('task 7 already has an active run')
   expect(api.sendMessage).toHaveBeenCalledWith(7, 'also add tests')
   expect(input.value).toBe('also add tests')
+})
+
+test('Cmd+Enter sends a message; plain Enter and composing text do not', async () => {
+  vi.mocked(api.sendMessage).mockResolvedValue(makeDetail())
+  renderTaskPage()
+  await screen.findByText('working on it')
+  const input = screen.getByLabelText('Message') as HTMLTextAreaElement
+
+  fireEvent.change(input, { target: { value: 'also add tests' } })
+  fireEvent.keyDown(input, { key: 'Enter' })
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true, isComposing: true })
+  expect(api.sendMessage).not.toHaveBeenCalled()
+
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+
+  await waitFor(() => expect(api.sendMessage).toHaveBeenCalledWith(7, 'also add tests'))
+  await waitFor(() => expect(input.value).toBe(''))
+})
+
+test('Cmd+Enter does not send an empty message', async () => {
+  renderTaskPage()
+  await screen.findByText('working on it')
+  const input = screen.getByLabelText('Message')
+
+  fireEvent.change(input, { target: { value: '   ' } })
+  fireEvent.keyDown(input, { key: 'Enter', metaKey: true })
+
+  expect(api.sendMessage).not.toHaveBeenCalled()
 })
 
 test('events can be filtered by type', async () => {

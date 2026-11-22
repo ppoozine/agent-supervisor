@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { createTask, errorMessage } from '../api'
+import { currentSubmitShortcutLabel, submitOnShortcut } from '../keys'
 import type { Agent, Project, TaskDetail } from '../types'
 import { Dialog } from './Dialog'
 
@@ -50,6 +51,7 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
       isBusy={isBusy}
       canSubmit={usableAgents.length > 0}
       error={error}
+      shortcutHint={currentSubmitShortcutLabel()}
       onSubmit={() => void submit()}
       onClose={onClose}
     >
@@ -97,6 +99,8 @@ export function NewTaskDialog({ projects, agents, onCreated, onClose }: NewTaskD
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
+          onKeyDown={submitOnShortcut}
+          aria-keyshortcuts="Meta+Enter Control+Enter"
           rows={7}
           placeholder="What should the agent do?"
           required
