@@ -36,11 +36,12 @@ parts. Each agent enforces what it can, and what it cannot enforce is declared i
 | --- | --- | --- |
 | `allowed_tools` | Enforced: every tool call is checked before it runs; anything not on the list is denied and recorded as a `permission_denied` event. | Not enforced. `codex exec` cannot approve calls one by one. |
 | `denied_commands` | Enforced, but only as a prefix match on each part of a shell command (split on `;`, `&&`, `\|`, and so on). | Not enforced. Codex cannot block individual commands here. |
-| `sandbox_level` | Only partly: `read-only` denies the file-writing tools. Shell commands can still write anywhere. | Enforced by Codex's own sandbox. |
+| `sandbox_level` | `read-only` denies the file-writing tools and shell commands altogether. `workspace-write` limits only the file-writing tools to the worktree (see below). | Enforced by Codex's own sandbox. |
 | `allow_network` | **Not enforced.** Claude Code's sandbox settings had no effect in testing and the cause is not known, so shell commands have full network access. | Enforced by Codex's own sandbox. |
 
 Claude Code's file-writing tools may only write inside the worktree. Shell commands are not limited
-that way.
+that way. If you override `[permission.tool_rules]` in the config file, the whole table is replaced:
+leaving out `allowed_tools` allows every tool.
 
 Why this is not a boundary, even where it is enforced:
 

@@ -7,9 +7,8 @@ Please report security issues privately through GitHub:
 ([direct link](https://github.com/ppoozine/agent-supervisor/security/advisories/new)).
 Do not open a public issue for them.
 
-Include what you found, how to reproduce it, and what an attacker could do with it. This project is
-maintained by one person in their spare time: expect a first reply within a week. You will be told
-whether the report is accepted and, if it is, credited in the advisory unless you prefer not to be.
+Include what you found, how to reproduce it, and what an attacker could do with it. The project is
+maintained by one person, so a reply may take a few days.
 
 ## Supported versions
 

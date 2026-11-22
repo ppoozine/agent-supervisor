@@ -34,7 +34,8 @@ Every step is written to an append-only event log you can read on the task's pag
 - `pgrep` and `ps`. On Linux they come from `procps`, which minimal images may lack.
 - At least one agent:
   - **Claude Code**: nothing to install (the Python SDK bundles the CLI). Set `ANTHROPIC_API_KEY`
-    in the shell you start the daemon from, or sign in with `claude auth login`.
+    in the shell you start the daemon from. If you already use the Claude Code CLI and are signed
+    in there, that works too.
   - **Codex**: install the [Codex CLI](https://github.com/openai/codex) and run `codex login`, or
     set `CODEX_API_KEY`.
 - A GitHub repo cloned on your machine. Using it with a repo that has CI (for example GitHub
@@ -50,6 +51,9 @@ Install the package from the [latest release](https://github.com/ppoozine/agent-
 uv tool install https://github.com/ppoozine/agent-supervisor/releases/download/v0.3.0/agent_supervisor-0.3.0-py3-none-any.whl
 agsv --help
 ```
+
+If your shell says `agsv: command not found`, uv's tool directory is not on your `PATH` yet: run
+`uv tool update-shell` and open a new terminal.
 
 To upgrade, run the same command with the newer file and `--force`.
 
@@ -101,11 +105,11 @@ message to continue them after the next `agsv serve`.
 
 ## How it differs from similar tools
 
-Agent Orchestrator, Conductor, Vibe Kanban, Claude Squad and others also run coding agents in
-parallel worktrees, and several of them feed CI failures and review comments back to the agent.
-Many have far more features than this project: a desktop app, an embedded terminal and chat,
-merging from the app, a lead agent that splits work. If you want the most features, look at them
-first.
+Other tools also run coding agents in parallel, for example Agent Orchestrator, Conductor, Vibe
+Kanban, and Claude Squad. Agent Orchestrator already does the same core loop (a worktree per task,
+CI failures and review comments sent back to the agent, several agents) and has more features than
+this project, such as a desktop app, an embedded terminal and chat, merging from the app, and a lead
+agent that splits up work. If you want the most features, look at those first.
 
 What this project focuses on instead:
 
@@ -121,8 +125,8 @@ What this project focuses on instead:
 
 ## Status
 
-agent-supervisor is at 0.x and maintained by one person. It is used daily by its author on macOS;
-Linux is covered by CI. Known gaps that matter:
+agent-supervisor is at 0.x and maintained by one person. It is developed and tested mainly on
+macOS; Linux is covered by CI. Known gaps that matter:
 
 - No real isolation: agents run as you, on your machine. See the
   [trust model](docs/guide/trust-model.md) for what is and is not enforced.

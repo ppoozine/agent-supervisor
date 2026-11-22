@@ -62,10 +62,14 @@ time anything changes. A task is in exactly one place.
 | Limit reached | The run hit its turn, budget, or time limit. | Send a message to continue with a fresh budget. |
 | Interrupted | The daemon stopped or crashed during the run. | Send a message to continue. |
 | No changes | The agent finished without changing anything, so there is no pull request. | Send a message, or archive. |
-| Changes requested | There are PR comments that were not sent to the agent: the 5 automatic rounds are used up, or the last run did not end normally. | Send a message. |
-| Merge conflict | The conflict could not be resolved automatically: the 3 attempts are used up, the agent did not fix it, or the last run did not end normally. | Send a message, or resolve it yourself. |
-| CI failed | CI failed and will not be fixed automatically: the 3 attempts are used up, the agent produced no new commit, or the last run did not end normally. | Send a message, or fix it yourself. |
+| Changes requested | PR comments are waiting but will not be sent automatically: the 5 automatic rounds are used up, or the budget is. Also shown when a reviewer requested changes without a comment that could be sent. | Send a message. |
+| Merge conflict | The conflict will not be resolved automatically: the 3 attempts are used up, the budget is, or the agent already tried on this commit without fixing it. | Send a message, or resolve it yourself. |
+| CI failed | CI failed and will not be fixed automatically: the 3 attempts are used up, or the agent already tried on this commit without producing a new one. | Send a message, or fix it yourself. |
 | Over budget | CI failed and the task has used its cost or token budget. | Send a message; it starts a new budget. |
+
+The first four labels describe how the last run ended and take precedence: while the last run did
+not end normally, the card shows one of them whatever else is pending, and nothing runs
+automatically until you send a message.
 
 **In review**
 
@@ -182,7 +186,9 @@ allowed_tools = ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash", "
 denied_commands = ["git push", "gh", "sudo", "rm -rf /"]
 ```
 
-The defaults are the values shown. What each agent actually does with `[permission]` differs; see
+The defaults are the values shown. `[permission.tool_rules]` replaces the default table as a whole:
+if you set only `denied_commands`, `allowed_tools` is no longer limited and every tool is allowed.
+Copy both keys when you change either. What each agent actually does with `[permission]` differs; see
 the [trust model](trust-model.md#what-the-permission-policy-does) before relying on it.
 
 ## Projects
