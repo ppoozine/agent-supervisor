@@ -134,10 +134,9 @@ class ExampleAdapter:
             stderr = (await reading_stderr).decode(errors="replace")
             yield _result(current_session, returncode, tokens, stderr)
         finally:
-            # The stream is closed early when the run is stopped or times out: the agent must be
-            # gone before this returns.
-            if process.returncode is None:
-                await _stop(process, self._stop_grace_seconds)
+            # The stream is closed early when the run is stopped or times out: the agent and
+            # anything it started must be gone before this returns.
+            await _stop(process, self._stop_grace_seconds)
             reading_stderr.cancel()
 
 
@@ -211,12 +210,15 @@ def _result(
 
 
 async def _stop(process: asyncio.subprocess.Process, grace_seconds: float) -> None:
-    """Ask the agent to stop, then kill its whole process group if it does not exit in time."""
-    with suppress(ProcessLookupError):
-        process.send_signal(signal.SIGINT)
-    try:
-        await asyncio.wait_for(process.wait(), grace_seconds)
-    except TimeoutError:
+    """Ask the agent to stop, then kill whatever is left of its process group."""
+    if process.returncode is None:
         with suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL)
-        await process.wait()
+            process.send_signal(signal.SIGINT)
+        with suppress(TimeoutError):
+            await asyncio.wait_for(process.wait(), grace_seconds)
+    # Even once the agent itself has exited, children it started may still be running in its
+    # group: kill the whole group every time.
+    with suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    with suppress(TimeoutError):
+        await asyncio.wait_for(process.wait(), grace_seconds)

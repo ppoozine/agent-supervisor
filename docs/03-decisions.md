@@ -172,6 +172,7 @@
 | 164 | Python 的下限維持 3.13 | 降到 3.11（實測 3.11、3.12 都能通過全部測試；依賴裡 FastAPI 要求 ≥3.11） | 文件寫的安裝方式都用 uv，uv 會自己下載需要的 Python，降低下限對使用者幾乎沒有好處；降了就得在 CI 多跑舊版本，也不能再用新的語法。要支援用 pip 安裝的人時再降 |
 | 165 | 外部的 adapter 用 Python 的 entry point（`agent_supervisor.adapters`）註冊，裝了就啟用；內建的兩個也改用同樣的方式註冊。載入失敗寫 log 後跳過，名稱重複時內建的優先 | 在設定檔寫 `module:Class`；只有外部的用 entry point、內建的維持寫死 | entry point 是 Python 外掛的標準做法，使用者本來就得把套件裝進同一個環境，裝進去就能找到，不必再多一份設定。內建的走同一條路，外部 adapter 就沒有比內建的少什麼，也證明這條路是通的。一個壞掉的外掛不該讓整個 daemon 起不來 |
 | 166 | 範例 adapter 放在 `examples/example-adapter/`，是一個獨立的套件、預設不載入，內容是一支假的 agent CLI 加上包裝它的 adapter | 放進主套件並預設載入；寫成不啟動子程序的純 Python adapter | 用和第三方完全相同的方式載入，本身就示範了載入的方法。真實的 agent 幾乎都是 CLI，最容易寫錯的是程序的啟動、process marker 與中止，純 Python 的範例示範不到。預設載入會讓每個使用者的表單裡多一個沒有用的 agent。它不宣告依賴 agent-supervisor：PyPI 上同名的是另一個套件 |
+| 167 | 對外的英文文件放在 `docs/guide/`（adapter 指南、HTTP API），和中文的設計文件分開；HTTP API 的說明用手寫，`/api/docs` 保留當試打的工具。0.x 期間 adapter 介面、HTTP API、設定檔與資料庫 schema 都不承諾穩定，寫在 README 與兩份指南開頭 | 直接用 FastAPI 產生的文件；把每個端點改成 Pydantic 回應模型，讓產生的文件完整 | 實測產生的文件只有請求的 body 是對的：回應都是「任意物件」、沒有錯誤的形狀、SSE 被寫成 JSON。改成回應模型要動每個端點，範圍太大。分開放讓讀者一眼看出哪些是寫給使用者的 |
 
 ## 尚未決定
 

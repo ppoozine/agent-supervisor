@@ -5,6 +5,8 @@ every adapter: the marker comes first, and no process is left behind when a turn
 """
 
 import asyncio
+import subprocess
+import sys
 from collections.abc import AsyncIterator, Iterator
 from contextlib import aclosing
 from pathlib import Path
@@ -135,6 +137,32 @@ async def test_closing_the_stream_early_leaves_no_process_behind(
 
     # The same lookup the daemon uses after a restart to find leftover processes.
     assert await asyncio.to_thread(SystemProcessTable().find, marker) == []
+
+
+async def test_stopping_also_kills_children_the_agent_leaves_behind(example: Any) -> None:
+    from example_adapter.adapter import _stop
+
+    # An agent that exits at once on SIGINT but leaves a child running in its process group. The
+    # child must not hold the agent's stdout: waiting for the agent also waits for that pipe.
+    script = (
+        "import signal, subprocess, sys, time\n"
+        "signal.signal(signal.SIGINT, lambda *_: sys.exit(130))\n"
+        "subprocess.Popen(['sleep', '30'], stdout=subprocess.DEVNULL)\n"
+        "print('ready', flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    process = await asyncio.create_subprocess_exec(
+        sys.executable, "-c", script, stdout=asyncio.subprocess.PIPE, start_new_session=True
+    )
+    assert process.stdout is not None
+    await process.stdout.readline()
+
+    await _stop(process, 5.0)
+
+    left = await asyncio.to_thread(
+        subprocess.run, ["pgrep", "-g", str(process.pid)], capture_output=True, text=True
+    )
+    assert left.stdout == ""
 
 
 async def test_check_needs_no_account(example: Any) -> None:
