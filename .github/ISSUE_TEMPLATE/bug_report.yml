@@ -1,0 +1,52 @@
+name: Bug report
+description: Something does not work as the documentation says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issues do not go here; see SECURITY.md.
+        Before pasting logs or events, remove anything secret: agent output can contain keys and tokens.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a task with Codex on a repo whose CI ...
+        2. ...
+  - type: input
+    id: version
+    attributes:
+      label: agent-supervisor version
+      description: "`uv tool list` shows it."
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - WSL
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent and its version
+      placeholder: "Claude Code 2.x / Codex 0.x / my own adapter"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Daemon log and task events
+      description: The relevant lines from `agsv serve` and from the task's Events tab.
+      render: text
