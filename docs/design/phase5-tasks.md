@@ -20,7 +20,7 @@
 ## 任務 19 · 裝 Tailwind
 
 ```
-請先讀 CLAUDE.md 與 docs/README.md，再讀 docs/design/ 下的文件。
+請先讀 AGENTS.md 與 docs/README.md，再讀 docs/design/ 下的文件。
 
 在 web/ 裝好 Tailwind，讓之後的任務可以直接用（決策第 175 筆）。
 
@@ -34,7 +34,7 @@
    一個不影響外觀的工具 class），之後的任務會移除或沿用
 4. npm test、npm run build 都要過；build 的產物大小前後寫在
    PR 描述
-5. 更新 CLAUDE.md 不歸你，在 PR 描述提醒我前端規則要改
+5. 更新 AGENTS.md 不歸你，在 PR 描述提醒我前端規則要改
 
 不要做：改任何畫面、加元件庫、建 design tokens（那是任務 20、22）。
 ```
@@ -48,7 +48,7 @@
 ## 任務 20 · UI 需求文件
 
 ```
-請先讀 CLAUDE.md 與 docs/README.md，再讀 docs/design/ 下的文件
+請先讀 AGENTS.md 與 docs/README.md，再讀 docs/design/ 下的文件
 與 docs/history/plans/11-next-plan.md。
 
 寫 docs/design/ui.md：新介面的需求文件。任務 21 到 24 都照它做，
@@ -103,7 +103,7 @@
 ## 任務 21 · Chat：對話的時間軸
 
 ```
-請先讀 CLAUDE.md 與 docs/README.md，再讀 docs/design/ 下的文件，
+請先讀 AGENTS.md 與 docs/README.md，再讀 docs/design/ 下的文件，
 特別是 ui.md 的任務詳情頁與訊息來源。
 
 把任務詳情頁的 Log 分頁換成 ui.md 定義的 Chat 時間軸。
@@ -138,7 +138,7 @@
 由 Claude 在 agsv 開一張 Codex 的任務，指示如下。Codex 的 PR 由 agsv 開出，我看畫面後在 PR 上留言，agsv 會把留言餵回 Codex；Claude 做 code review。
 
 ```
-Read CLAUDE.md and docs/README.md, then docs/design/ui.md and the static
+Read AGENTS.md and docs/README.md, then docs/design/ui.md and the static
 mockup docs/design/ui-mockup.html.
 
 Restyle the board and the task detail page to match docs/design/ui.md
@@ -176,7 +176,7 @@ Agent Orchestrator's visual design.
 做法同任務 22。
 
 ```
-Read CLAUDE.md and docs/README.md, then docs/design/ui.md.
+Read AGENTS.md and docs/README.md, then docs/design/ui.md.
 
 Restyle the remaining screens to match docs/design/ui.md, using the
 design tokens already in the Tailwind configuration.
@@ -203,7 +203,7 @@ Do not: add component libraries, routing or data-fetching libraries.
 ## 任務 24 · Shell
 
 ```
-請先讀 CLAUDE.md 與 docs/README.md，再讀 docs/design/ 下的文件，
+請先讀 AGENTS.md 與 docs/README.md，再讀 docs/design/ 下的文件，
 以及 docs/history/plans/11-next-plan.md 主題 1。
 
 在任務詳情頁加上 Shell：在任務的 worktree 開一個 terminal，
@@ -244,7 +244,7 @@ Windows 支援。
 ## 任務 25 · 驗收與發 0.4
 
 ```
-請先讀 CLAUDE.md 與 docs/README.md，再讀 docs/design/ 下的文件。
+請先讀 AGENTS.md 與 docs/README.md，再讀 docs/design/ 下的文件。
 
 驗收階段 5，並準備發 0.4.0。
 

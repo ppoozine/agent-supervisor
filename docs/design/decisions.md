@@ -128,6 +128,7 @@
 ## 開發方式
 
 - 一次做一個任務，合併之後才開始下一個；每個任務先提計畫，確認後再動手（150）。
+- 給 agent 的專案指示只寫在 `AGENTS.md`，`CLAUDE.md` 匯入它；agent-supervisor 開在這個 repo 的任務，agent 不 commit、不 push（184）。
 - 階段的順序見 `roadmap.md`（174）。主 agent 拆完要人確認才派工（177）。
 - 文件分成 `design/`（現在的樣子）、`history/`（決策紀錄與規劃的過程）、`guide/`（對外的英文文件）；任務單在階段做完後刪掉，舊版在 git 的 tag 裡（179）。
 
