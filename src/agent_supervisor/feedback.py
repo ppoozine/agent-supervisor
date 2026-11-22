@@ -6,12 +6,18 @@ from agent_supervisor.github import FeedbackItem, FeedbackKind
 
 MAX_PROMPT_CHARS = 20_000
 _ACTIONABLE_REVIEW_STATES = frozenset({"COMMENTED", "CHANGES_REQUESTED"})
+# Authors whose comments reach the agent: the repo's owner, members of the organization that owns
+# it, and invited collaborators. Anyone else (for example anyone on a public repo) could otherwise
+# instruct an agent that runs with the user's access.
+TRUSTED_AUTHOR_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 
 
 def ignored_reason(item: FeedbackItem) -> str | None:
     """Why this PR comment is not fed back to the agent; None if it should be fed back."""
     if item.is_bot:
         return "bot"
+    if item.author_association not in TRUSTED_AUTHOR_ASSOCIATIONS:
+        return "untrusted_author"
     if item.kind is not FeedbackKind.REVIEW:
         return None
     if item.review_state not in _ACTIONABLE_REVIEW_STATES:
@@ -30,6 +36,7 @@ def to_payload(item: FeedbackItem) -> dict[str, Any]:
         "github_id": item.github_id,
         "kind": str(item.kind),
         "author": item.author,
+        "author_association": item.author_association,
         "body": item.body,
         "path": item.path,
         "line": item.line,

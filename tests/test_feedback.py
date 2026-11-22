@@ -12,6 +12,7 @@ def item(kind: FeedbackKind = FeedbackKind.COMMENT, **fields: object) -> Feedbac
         "kind": kind,
         "author": "alice",
         "is_bot": False,
+        "author_association": "OWNER",
         "body": "please rename this",
         "created_at": "2026-11-19T10:00:00Z",
         "url": "https://github.com/o/r/pull/7#issuecomment-1",
@@ -26,6 +27,28 @@ def item(kind: FeedbackKind = FeedbackKind.COMMENT, **fields: object) -> Feedbac
         pytest.param(item(), None, id="comment"),
         pytest.param(item(FeedbackKind.INLINE_COMMENT, path="a.py", line=3), None, id="inline"),
         pytest.param(item(is_bot=True), "bot", id="bot"),
+        pytest.param(item(author_association="MEMBER"), None, id="org-member"),
+        pytest.param(item(author_association="COLLABORATOR"), None, id="collaborator"),
+        pytest.param(item(author_association="NONE"), "untrusted_author", id="stranger"),
+        pytest.param(
+            item(author_association="CONTRIBUTOR"), "untrusted_author", id="past-contributor"
+        ),
+        pytest.param(
+            item(author_association="FIRST_TIME_CONTRIBUTOR"),
+            "untrusted_author",
+            id="first-time-contributor",
+        ),
+        pytest.param(
+            item(FeedbackKind.INLINE_COMMENT, path="a.py", line=3, author_association="NONE"),
+            "untrusted_author",
+            id="stranger-inline",
+        ),
+        pytest.param(
+            item(FeedbackKind.REVIEW, review_state="CHANGES_REQUESTED", author_association="NONE"),
+            "untrusted_author",
+            id="stranger-review",
+        ),
+        pytest.param(item(is_bot=True, author_association="NONE"), "bot", id="bot-first"),
         pytest.param(
             item(FeedbackKind.REVIEW, review_state="COMMENTED", body=""), "empty", id="shell"
         ),

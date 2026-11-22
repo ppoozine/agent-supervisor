@@ -309,12 +309,15 @@ async def test_check_reopened_reports_a_failed_query(scene: Scene) -> None:
         await scene.poller.check_reopened(task.id)
 
 
-def general_comment(github_id: str, *, is_bot: bool = False) -> FeedbackItem:
+def general_comment(
+    github_id: str, *, is_bot: bool = False, association: str = "OWNER"
+) -> FeedbackItem:
     return FeedbackItem(
         github_id=github_id,
         kind=FeedbackKind.COMMENT,
         author="ci[bot]" if is_bot else "alice",
         is_bot=is_bot,
+        author_association=association,
         body="please rename this",
         created_at="2026-11-19T10:00:00Z",
         url="u",
@@ -359,6 +362,23 @@ async def test_bot_comment_alone_is_not_new_feedback(scene: Scene) -> None:
     assert report.new_feedback == ()
     assert await db.list_pending_feedback(scene.conn, task.id) == []
     assert await db.list_feedback_ids(scene.conn, task.id) == {"IC_1"}
+
+
+async def test_a_comment_from_outside_the_repo_is_recorded_but_not_fed_back(scene: Scene) -> None:
+    task = await scene.task_with_pr()
+    scene.github.statuses[7] = pr_status("sha-1", CiState.PENDING, feedback_ids=("IC_1",))
+    scene.github.feedback[7] = [general_comment("IC_1", association="NONE")]
+
+    report = await scene.poller.poll_once()
+
+    assert report.new_feedback == ()
+    assert await db.list_pending_feedback(scene.conn, task.id) == []
+    assert await db.list_feedback_ids(scene.conn, task.id) == {"IC_1"}
+    events = await db.list_events(scene.conn, task.id)
+    recorded = [event.payload for event in events if event.type == "review_comment"]
+    assert [(p["author_association"], p["ignored"]) for p in recorded] == [
+        ("NONE", "untrusted_author")
+    ]
 
 
 async def test_comments_on_an_archived_task_are_not_fetched(scene: Scene) -> None:
