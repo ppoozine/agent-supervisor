@@ -6,7 +6,7 @@ Run several AI coding agents in parallel on your own machine, each in its own gi
 let them fix their own failing CI and review comments, with hard limits on how many times they
 retry and how much they spend. You only step in when a card lands in **Needs you**.
 
-![The board: tasks in Working, Needs you, In review and Ready to merge](docs/assets/board.png)
+![The board: one task per column, from Working to Ready to merge, with Claude Code and Codex tasks](docs/assets/board.png)
 
 How it works, in one task's life:
 
@@ -35,7 +35,8 @@ Every step is written to an append-only event log you can read on the task's pag
 - At least one agent:
   - **Claude Code**: nothing to install (the Python SDK bundles the CLI). Set `ANTHROPIC_API_KEY`
     in the shell you start the daemon from. If you already use the Claude Code CLI and are signed
-    in there, that works too.
+    in there with a Claude subscription, that works too, but read
+    [using a Claude subscription](docs/guide/trust-model.md#using-a-claude-subscription) first.
   - **Codex**: install the [Codex CLI](https://github.com/openai/codex) and run `codex login`, or
     set `CODEX_API_KEY`.
 - A GitHub repo cloned on your machine. Using it with a repo that has CI (for example GitHub
@@ -80,7 +81,10 @@ Other ways to install
    agsv serve
    ```
 
-2. Open <http://127.0.0.1:8765>, then **Settings** in the sidebar. It lists which agents you can
+   It checks your agents and `gh` first, so the first log line takes a few seconds. To use another
+   port or data directory, see [the config file](docs/guide/usage.md#the-config-file).
+
+2. Open <http://127.0.0.1:8765>, then **Settings** at the bottom of the sidebar. It lists which agents you can
    use, whether `gh` is ready, and the exact command to fix anything that is missing. After fixing
    something, press **Check again**. If you changed an environment variable, restart `agsv serve`
    from that shell instead.
@@ -88,9 +92,11 @@ Other ways to install
    default branch are read from `origin`. Leave "Require an approving review" off for now.
 4. **New task**: pick the project and an agent, and describe a small change, for example
    "Add a `--version` flag to the CLI and a test for it".
-5. Watch the card. It sits in **Working** while the agent runs; the task's page shows the agent's
-   messages and tool calls as they happen. When the run ends the supervisor pushes and opens a pull
-   request, and the card moves to **In review** while CI runs.
+5. Go back to the board (**← Board**, or the task in the sidebar) and watch the card. It sits in
+   **Working** while the agent runs; click it to see the agent's messages and tool calls as they
+   happen. When the run ends the supervisor pushes and opens a pull request, and the card moves to
+   **In review** with the label **CI running**. The label under the title always says what the card
+   is waiting for.
 6. When CI passes the card moves to **Ready to merge**. Review the diff on the task's **Diff** tab or
    on GitHub, and merge on GitHub. The card then leaves the board for **Archive**.
 
