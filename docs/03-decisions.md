@@ -1,6 +1,6 @@
 # 03 · 決策紀錄
 
-最後更新：2026-11-20
+最後更新：2026-11-22
 
 每個決定記下選了什麼、沒選什麼、為什麼。之後要推翻某個決定時，在下面新增一筆，不要直接改舊的。
 
@@ -178,9 +178,16 @@
 | 170 | 公開前的檢查（任務 18 PR B）：移除 `docs/assets/ui-reference.png`（Agent Orchestrator 的看板截圖），`05-ui-reference.md` 改放對方 repo 的連結；刪掉 GitHub 上已合併 PR 的遠端 branch；階段 1 沒勾的驗證項目在文件裡說明，不逐項重跑 | 保留截圖（已註明來源）；保留舊 branch；公開前重跑階段 1 的驗證清單 | 不散布別人產品的畫面；舊 branch 的內容都已在 `main`，留著只增加雜訊；階段 1 的功能之後一直在用、有自動測試，重跑的成本高於價值 |
 | 171 | PR 上的留言只有作者的 `author_association` 是 `OWNER`、`MEMBER`、`COLLABORATOR` 才餵回 agent；其他照樣記成 `review_comment` 事件，標上 `untrusted_author`；欄位缺少時當成 `NONE` | 不分作者都餵回；逐一向 GitHub 查留言者有沒有寫入權限；讓每個專案自己設定允許的作者 | repo 公開後任何人都能留言，等於能對用使用者身分執行的 agent 下指令。這三種關係不用多打 API，三種留言的 REST 回應都有；組織成員不一定有寫入權限，在信任模型裡寫明。逐一查權限每則留言多一次 API 呼叫，專案設定留到治理（階段 8） |
 | 172 | Release 的說明 = `.github/release-notes/<tag>.md` 的手寫摘要（有才放）+ GitHub 自動產生的 PR 清單，清單從上一個正式版本的 tag 算起 | 只用自動產生的清單；手寫 CHANGELOG.md | `v0.3.0rc1` 的自動說明把 #1 到 #33 全部列進去（之前沒有 Release，起點變成最早的 commit）；不相容的改動（指令改名、留言作者的限制）要有人寫出來，清單看不出來。一個人維護，先不另外維護 CHANGELOG |
+| 173 | 每個任務的 Terminal 與 Chat 選「兩種都要，給人用的為主」，分兩次做：階段 5 先做 Chat（現有的 SDK / `codex exec` session，改成對話的樣子）與開在 worktree 的 shell；shell 永遠不控制 agent，WebSocket 沿用 `api/guard.py` 檢查 `Origin` 與 `Host`。在 agent 本身的 TUI 裡操作的「接手模式」等 Chat 用過再決定，列在階段 8 | 只做 shell + Chat；只做 agent 的 TUI（Agent Orchestrator 的預設）；兩種一次做完 | 調查 Agent Orchestrator 的原始碼：它的 TUI 模式要模擬按鍵、解析畫面才能送訊息，花費要事後解析 transcript，執行中擋不了上限。我們的差別正是硬上限與稽核，TUI 模式會在那段期間放掉它們。Shell 與 Chat 先把 PTY、WebSocket、xterm.js 做好，接手模式之後可以沿用。規劃見 `11-next-plan.md` 主題 1 |
+| 174 | `0.3` 之後的順序：5 新介面（`0.4`）、6 主 agent 派工（`0.5`）、7 桌面版（`0.6`）、8 補功能的廣度、9 直接打 endpoint 的 agent、10 治理；`1.0` 不再綁在桌面版。原本的階段 6 拆開，同時執行數上限併進新的階段 6，其餘移到 8；原本階段 7 的 issue 觸發與 webhook 移到 8。推翻第 149 筆的順序 | 維持第 149 筆（先做 endpoint agent）；跳過 endpoint agent；桌面版和功能同時做 | `0.3` 當天才公開，還不知道有沒有人需要 adapter 的示範；介面、Chat、Shell、派工是自己使用時就會碰到的缺口。UI 改版先把 Chat、Shell、主 agent 的位置留好，免得改完再重排；主 agent 需要先有同時執行數上限（第 149 筆的理由不變）；桌面版只是外殼，功能定了再包。第 150 筆「一次做一個」不變 |
+| 175 | 前端加 Tailwind（只在建置時用），階段 5 加 xterm.js；仍然不裝路由與資料抓取的套件，元件庫要用時再提出。推翻第 109 筆中「不裝樣式套件」的部分 | 維持手寫 CSS 只加 design tokens；連元件庫（Radix、shadcn/ui）一起加 | 第 109 筆是為了「介面只求可用」定的，現在要認真改版，手寫 CSS 會拖慢速度；Tailwind 不增加執行時的依賴。畫面仍是單頁、資料仍靠 SSE，路由與資料抓取的理由不變 |
+| 176 | UI 改版用 agsv 開 Codex 的任務來做：先由 Claude 開 PR 裝好 Tailwind、寫 UI 需求文件並經作者確認；第一張任務只改外觀（design tokens、看板、任務詳情頁），不動資料流與 API；作者看畫面後在 PR 留言，由 agsv 餵回 Codex；Claude 做 code review | 作者直接在 Codex 裡做；先做不接 API 的靜態原型 | 順便在真的 repo 上驗證留言回饋的迴圈。先確認視覺再補其他畫面，有靜態原型的好處又不多一輪。Codex 在 agsv 的 sandbox 裡可能不能連網，所以套件先裝好 |
+| 177 | 主 agent 的方向：每個專案一個，拆完要人確認才派工，拆出來的任務走現有流程（各自的 worktree、上限、事件紀錄）；開任務的方式在階段 6 的任務單裡比較。桌面殼用 Tauri 還是 Electron、要不要申請 Apple Developer 帳號，在階段 7 決定 | 現在就定主 agent 的機制與桌面殼 | Agent Orchestrator 的主 agent 派工前不需要人確認，也沒找到同時執行數上限；先確認再派工是我們的差別，也是第 14 筆「最難的部分先做保守版」的延續。機制與桌面殼要到該階段才有足夠的資訊比較 |
+| 178 | 訊息框與開任務的描述欄用 `Cmd+Enter` 或 `Ctrl+Enter` 送出（兩者在所有平台都有效，只有提示文字依平台不同），只按 Enter 換行；輸入法選字中不送出；送出按鈕不能按時快捷鍵也無效（#35） | 只按 Enter 送出；依平台只接受其中一種 | Enter 送出會讓多行的任務描述很難寫；兩種都接受就不需要判斷平台。注音、拼音選字時的 Enter 不能當成送出。讓按鈕的狀態當唯一的規則，快捷鍵不會繞過它 |
 
 ## 尚未決定
 
+- 階段 5 之後各階段的待決事項（桌面殼、Apple Developer 帳號、訊息排隊、淺色主題、主 agent 開任務的方式、同時執行數的預設值、什麼算 `1.0`）列在 `11-next-plan.md`「尚未決定」
 - 是否公開 repo、用哪個授權（Apache-2.0 或 MIT）
 - 花費上限、token 上限、單一 run 最多輪數與執行時間上限的預設值。程式裡目前是暫定值：5 美元、2,000 萬 token、50 輪、30 分鐘
 - CI log 長度上限的預設值（暫定 20,000 個字元）與輪詢間隔（30 秒）
