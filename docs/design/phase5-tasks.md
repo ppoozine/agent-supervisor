@@ -146,6 +146,10 @@ and the mockup, using Tailwind and the design tokens defined there.
 
 Scope:
 1. Design tokens in the Tailwind configuration, as listed in ui.md
+   Tailwind is loaded without Preflight (see the top of web/src/styles.css,
+   decision 181). Turn Preflight on as part of this task, and replace the
+   hand-written CSS for these screens: rules outside a layer win over
+   Tailwind's classes, so leftover rules will override your utilities
 2. Board: sidebar, columns, cards, the Archive area
 3. Task detail page: header, tabs, the Chat timeline, Diff, Events,
    Runs, the message box

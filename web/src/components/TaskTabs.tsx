@@ -52,7 +52,7 @@ export function EventsTab({ events }: { events: EventRow[] }) {
 
   return (
     <div className="events">
-      <label className="filter">
+      <label className="events-filter">
         Type
         <select value={type} onChange={(event) => setType(event.target.value)}>
           <option value="">All ({events.length})</option>

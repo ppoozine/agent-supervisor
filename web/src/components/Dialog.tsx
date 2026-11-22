@@ -62,7 +62,7 @@ export function Dialog(props: DialogProps) {
           </div>
         )}
         <div className="dialog-actions">
-          {props.shortcutHint && <kbd className="shortcut-hint">{props.shortcutHint}</kbd>}
+          {props.shortcutHint && <kbd className="shortcut-hint whitespace-nowrap">{props.shortcutHint}</kbd>}
           <button type="button" className="ghost" onClick={close} disabled={props.isBusy}>
             Cancel
           </button>

@@ -1,3 +1,12 @@
+/*
+ * Tailwind without Preflight: its reset would change the hand-written styles below. Preflight is
+ * turned on when the screens are restyled with Tailwind (phase 5, task 22). Rules outside a layer
+ * win over layered ones, so until then a Tailwind class loses to a conflicting rule in this file.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities) source('..');
+
 :root {
   --bg: #0e1116;
   --panel: #151a21;
@@ -533,7 +542,6 @@ label.checkbox input {
 .shortcut-hint {
   color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
   align-self: center;
 }
 
@@ -646,14 +654,14 @@ label.checkbox input {
   width: 100%;
 }
 
-.filter {
+.events-filter {
   flex-direction: row;
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
 }
 
-.filter select {
+.events-filter select {
   width: auto;
 }
 

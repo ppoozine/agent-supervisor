@@ -222,7 +222,7 @@ export function TaskPage(props: TaskPageProps) {
           aria-label="Message"
           aria-keyshortcuts="Meta+Enter Control+Enter"
         />
-        <kbd className="shortcut-hint">{shortcutLabel}</kbd>
+        <kbd className="shortcut-hint whitespace-nowrap">{shortcutLabel}</kbd>
         <button
           type="submit"
           className="primary"
