@@ -336,6 +336,7 @@ Poller 把每一則留言寫成一筆 `review_comment` 事件，同一則只記�
 | 略過的原因 | 情況 |
 | --- | --- |
 | `bot` | 作者是機器人（REST 的 `user.type` 為 `Bot`） |
+| `untrusted_author` | 作者和 repo 沒有關係：REST 的 `author_association` 不是 `OWNER`、`MEMBER`、`COLLABORATOR`（例如公開 repo 上任何人都能留的 `NONE`、`CONTRIBUTOR`、`FIRST_TIME_CONTRIBUTOR`）。沒有這個欄位時當成 `NONE`（決策第 171 筆） |
 | `empty` | 內文是空的 `COMMENTED` review，只是用來裝逐行留言的空殼 |
 | `not_a_change_request` | 核准或已撤銷的 review。它底下的逐行留言是另外的項目，照常餵回 |
 

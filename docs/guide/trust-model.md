@@ -59,10 +59,13 @@ Why this is not a boundary, even where it is enforced:
 
 Several kinds of text that other people can write are sent to the agent as instructions:
 
-- **Comments on the pull request.** Every comment that is not from a bot is sent back to the agent:
-  plain comments, review summaries, and line comments, **from any author**. On a repo where people
-  you do not trust can comment on pull requests, for example a public one, anyone can tell your agent
-  what to do.
+- **Comments on the pull request.** Comments are sent back to the agent only when GitHub reports
+  their author as the repo's owner, a member of the organization that owns it, or a collaborator
+  (`author_association` of `OWNER`, `MEMBER`, or `COLLABORATOR`). Comments from anyone else, and from
+  bots, are recorded in the task's events but never sent. This keeps strangers on a public repo from
+  instructing your agent, but everyone in those three groups still can, including organization
+  members who cannot push to the repo. Comments from your own account count as yours, and the agent
+  uses that account too.
 - **CI logs.** The failing part of the log is sent when CI fails. Its content comes from the code
   and the tests in the repo.
 - **The repo's content**, as with any coding agent: files, instructions in `CLAUDE.md` or

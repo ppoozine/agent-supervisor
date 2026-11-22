@@ -176,6 +176,7 @@
 | 168 | 每一項檢查（adapter 的 `check()` 與 gh）整體限時 30 秒，逾時或拋出例外就把那一項當成不能用、traceback 寫進 log，daemon 照常啟動 | 只在指南裡要求 `check()` 不能拋例外、要快 | adapter 可能來自別的套件（第 165 筆），不能假設它守規矩；原本一個 `check()` 出錯就讓 daemon 起不來、卡住就讓 daemon 卡在啟動，和「壞掉的 adapter 寫 log 後跳過」不一致。`detail` 只寫例外的型別，因為訊息可能含有工具的原始輸出 |
 | 169 | 任務 18 的對外文件：README 重寫，另加 `docs/guide/usage.md`（看板、設定檔、上限）與 `docs/guide/trust-model.md`（信任模型與已知限制）；`docs/README.md` 用英文說明中文的設計文件；各階段的任務單留在 repo 裡，說明它們是交給 AI 的工作指示；資安問題只收 GitHub 的 private vulnerability reporting；commit 作者欄位的 email 接受公開，不改寫 git 歷史 | 刪掉任務單（歷史裡仍看得到）；SECURITY.md 留 email；用 `git filter-repo` 換掉 email（所有 commit 的 hash 與已合併的 PR、tag 都會對不上） | 定位是「設計決策全部公開」，任務單本身就是開發紀錄；回報管道不需要公開個人資料；改寫歷史的代價大於 email 公開的風險 |
 | 170 | 公開前的檢查（任務 18 PR B）：移除 `docs/assets/ui-reference.png`（Agent Orchestrator 的看板截圖），`05-ui-reference.md` 改放對方 repo 的連結；刪掉 GitHub 上已合併 PR 的遠端 branch；階段 1 沒勾的驗證項目在文件裡說明，不逐項重跑 | 保留截圖（已註明來源）；保留舊 branch；公開前重跑階段 1 的驗證清單 | 不散布別人產品的畫面；舊 branch 的內容都已在 `main`，留著只增加雜訊；階段 1 的功能之後一直在用、有自動測試，重跑的成本高於價值 |
+| 171 | PR 上的留言只有作者的 `author_association` 是 `OWNER`、`MEMBER`、`COLLABORATOR` 才餵回 agent；其他照樣記成 `review_comment` 事件，標上 `untrusted_author`；欄位缺少時當成 `NONE` | 不分作者都餵回；逐一向 GitHub 查留言者有沒有寫入權限；讓每個專案自己設定允許的作者 | repo 公開後任何人都能留言，等於能對用使用者身分執行的 agent 下指令。這三種關係不用多打 API，三種留言的 REST 回應都有；組織成員不一定有寫入權限，在信任模型裡寫明。逐一查權限每則留言多一次 API 呼叫，專案設定留到治理（階段 8） |
 
 ## 尚未決定
 
@@ -214,6 +215,5 @@
 - 通知只支援 macOS，點通知不會開啟看板，也不知道使用者是不是在系統設定裡把它關掉了。要不要加瀏覽器通知或其他平台
 - 合併按鈕（第 114 筆說有了 diff 檢視之後再評估）。評估結果：技術上只要 `gh pr merge` 加一個確認框；Approve 仍然做不出來（作者不能核准自己的 PR）。等我決定要不要做、合併的方式（merge / squash / rebase）要不要可選
 - Diff 只有已經 commit 的內容，run 還在跑的時候看不到 agent 改到一半的東西。要不要在 worktree 還在時把未 commit 的變更也算進來
-- PR 上的留言不分作者都會餵回 agent（只略過機器人）。repo 公開、陌生人可以留言時，任何人都能對 agent 下指令。要不要只餵回有寫入權限的人（REST 的 `author_association`）留的留言，或讓專案設定允許的作者。目前在 `docs/guide/trust-model.md` 寫明
 - 要不要向 Anthropic 詢問「工具沿用使用者本機的訂閱登入」需不需要許可（第 140 筆）。文件沒有寫申請的管道
 - OpenAI 的文件有一個講開源應用程式使用 ChatGPT 方案的章節，調查時頁面打不開，內容沒有讀到。可能是一套官方支援的做法，值得再找一次
