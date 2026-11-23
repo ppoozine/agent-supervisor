@@ -7,11 +7,13 @@ half-finished transaction.
 """
 
 import asyncio
+import contextlib
+import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, Header, Query
+from fastapi import FastAPI, Header, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,7 +28,10 @@ from agent_supervisor.api.errors import (
 from agent_supervisor.api.feed import ChangeFeed, stream_text
 from agent_supervisor.api.guard import LocalRequestsOnly
 from agent_supervisor.config import DEFAULT_CONFIG_PATH, absolute_path
+from agent_supervisor.shell import Closed, Lagged, ShellClosedError, ShellManager
 from agent_supervisor.supervisor import Supervisor
+
+TRY_AGAIN_LATER = 1013  # WebSocket close code
 
 DEFAULT_AGENT = "claude_code"
 TITLE_CHARS = 60
@@ -79,13 +84,15 @@ def create_app(
     is_closing: Callable[[], bool] = lambda: False,
     static_dir: Path | None = None,
     config_path: Path = DEFAULT_CONFIG_PATH,
+    shells: ShellManager | None = None,
 ) -> FastAPI:
     """Create the application.
 
     `is_closing` tells whether the daemon is shutting down; SSE connections rely on it to end.
     `static_dir` is the directory holding the built frontend files; if given it is mounted at
     `/`. The API is always under `/api`. `config_path` is the file the settings were read from,
-    shown on the settings page.
+    shown on the settings page. `shells` holds the task shells; the daemon passes its own so it can
+    close them on shutdown.
     """
     # The API is a separate application mounted at `/api`: when the path exists but the method
     # is wrong it answers 405 itself, instead of falling through to the static files as a 404.
@@ -95,6 +102,7 @@ def create_app(
     install_error_handlers(app)
     app.add_middleware(LocalRequestsOnly)
     conn, runner = supervisor.conn, supervisor.runner
+    shell_manager = shells if shells is not None else ShellManager()
 
     async def task_detail(task_id: int) -> dict[str, Any]:
         async with db.consistent_read(conn):
@@ -197,7 +205,11 @@ def create_app(
 
     @api.post("/tasks/{task_id}/archive")
     async def archive_task(task_id: int) -> dict[str, Any]:
-        """Archive the task and remove its worktree."""
+        """Archive the task and remove its worktree, ending its shell first."""
+        task = await db.get_task(conn, task_id)  # 404 before touching the shell
+        # Leave the shell alone when the runner is going to refuse (already archived, run active).
+        if task.archived_at is None and await db.get_open_run(conn, task_id) is None:
+            await asyncio.shield(shell_manager.close(task_id, "archived"))
         await asyncio.shield(runner.archive(task_id))
         return await task_detail(task_id)
 
@@ -260,6 +272,83 @@ def create_app(
         """Check every agent and gh again, e.g. after signing in from a terminal."""
         readiness = await asyncio.shield(supervisor.readiness.check())
         return views.readiness_view(readiness, display_names)
+
+    async def shell_directory(task_id: int) -> Path | None:
+        """The worktree a shell for this task runs in, or None if it cannot have one."""
+        task = await db.get_task(conn, task_id)
+        if task.archived_at is not None or task.worktree_path is None:
+            return None
+        path = Path(task.worktree_path)
+        return path if await asyncio.to_thread(path.is_dir) else None
+
+    @api.websocket("/tasks/{task_id}/shell")
+    async def shell_socket(
+        websocket: WebSocket, task_id: int, rows: int = 24, cols: int = 80
+    ) -> None:
+        """A terminal in the task's worktree: binary frames carry terminal data both ways."""
+        await websocket.accept()
+        try:
+            cwd = await shell_directory(task_id)
+        except db.NotFoundError:
+            cwd = None
+        if cwd is None:
+            unavailable = {"type": "closed", "reason": "unavailable", "exit_code": None}
+            await websocket.send_json(unavailable)
+            await websocket.close()
+            return
+        shell = await shell_manager.open(task_id, cwd, (rows, cols))
+        shell.resize(rows, cols)
+        # Read the scrollback and subscribe with no await in between: nothing is lost or repeated.
+        earlier = shell.scrollback
+        listener = shell.subscribe()
+
+        async def send_output() -> None:
+            await websocket.send_json({"type": "opened", "shell": shell.name, "cwd": str(cwd)})
+            if earlier:
+                await websocket.send_bytes(earlier)
+            while True:
+                item = await listener.get()
+                if isinstance(item, Lagged):
+                    # The page fell too far behind; it reconnects and gets the scrollback instead.
+                    await websocket.close(code=TRY_AGAIN_LATER)
+                    return
+                if isinstance(item, Closed):
+                    await websocket.send_json(
+                        {"type": "closed", "reason": item.reason, "exit_code": item.exit_code}
+                    )
+                    await websocket.close()
+                    return
+                await websocket.send_bytes(item)
+
+        async def receive_input() -> None:
+            while True:
+                message = await websocket.receive()
+                if message["type"] == "websocket.disconnect":
+                    return
+                if message.get("bytes") is not None:
+                    with contextlib.suppress(ShellClosedError):
+                        shell.write(message["bytes"])
+                elif message.get("text") is not None:
+                    control = json.loads(message["text"])
+                    if control.get("type") == "resize":
+                        shell.resize(int(control["rows"]), int(control["cols"]))
+
+        workers = {asyncio.create_task(send_output()), asyncio.create_task(receive_input())}
+        try:
+            await asyncio.wait(workers, return_when=asyncio.FIRST_COMPLETED)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            shell.unsubscribe(listener)
+            for worker in workers:
+                worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+
+    @api.post("/tasks/{task_id}/shell/restart")
+    async def restart_shell(task_id: int) -> dict[str, Any]:
+        """End the task's shell; the page reconnects and gets a new one."""
+        await db.get_task(conn, task_id)
+        return {"restarted": await asyncio.shield(shell_manager.close(task_id, "restarted"))}
 
     @api.get("/config")
     async def get_config() -> dict[str, Any]:

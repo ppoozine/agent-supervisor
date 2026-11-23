@@ -284,6 +284,30 @@ What the task's branch changes compared with the base branch:
 `diff` is `git diff` output, empty before the task has a branch. Diffs over 400,000 characters
 are cut at the last whole line and `is_truncated` is true.
 
+### `WS /api/tasks/{id}/shell`
+
+A terminal in the task's worktree, as a WebSocket. Only accepted from the board's own page: the
+`Origin` header must be present and the same address as `Host`; anything else gets HTTP 403 during
+the handshake. Optional query parameters `rows` and `cols` (default 24 and 80) set the terminal size.
+
+The task has one shell, started on the first connection and kept running after the socket closes;
+a later connection gets the same shell and first receives its recent output (up to 256 KB).
+
+- **Binary frames** carry terminal data both ways: keystrokes and pasted text to the shell, its
+  output back.
+- **Text frames** are JSON control messages. From the page:
+  `{"type": "resize", "rows": 30, "cols": 100}`. From the daemon, first
+  `{"type": "opened", "shell": "zsh", "cwd": "/…/worktrees/demo/task-7"}`, and when the shell ends
+  `{"type": "closed", "reason": "exited", "exit_code": 0}` before the daemon closes the socket.
+  `reason` is `exited` (the shell ended by itself), `restarted`, `archived`, `shutdown`, or
+  `unavailable` (the task is archived or has no worktree; sent right after connecting).
+
+### `POST /api/tasks/{id}/shell/restart`
+
+Ends the task's shell and what runs in it; connected pages get `closed` with `restarted`, and the
+next connection starts a new shell. Returns `{"restarted": true}`, or `false` if no shell was
+running.
+
 ## Events (the audit log)
 
 Everything that happens to a task is recorded as an event and never changed or deleted

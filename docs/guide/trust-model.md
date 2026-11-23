@@ -80,6 +80,16 @@ Combined with the section above, a prompt injection in any of these can run comm
   browser cannot call it, including through DNS rebinding.
 - **Any program running on your machine can call it**, and through it start agents in any registered
   repo. On a shared machine, other users can too.
+- **The task shell runs commands over this API.** Its WebSocket is only accepted from the board's own
+  page: `Origin` must be present and the same address as `Host`, so other websites and pages on
+  other local ports are refused (browsers do not apply the same-origin policy to WebSockets). A
+  program on your machine can still connect by sending those headers itself, as it can already
+  run commands directly. The shell runs as you, with your environment, in the task's worktree; it is
+  not sandboxed like the agent.
+- Ending a shell hangs up its terminal, which reaches the shell and the job in the foreground, and
+  after two seconds kills the shell's own process group. A program that ignores the hangup and runs
+  in a process group of its own (a background job started with `&`, or anything started with
+  `nohup`, `setsid` or as a daemon) is not tracked and can keep running.
 
 ## What is stored
 

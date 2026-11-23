@@ -178,7 +178,9 @@ web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comm
 - 工具列：連線狀態的圓點、shell 名稱（`zsh`）、worktree 的路徑（等寬字，太長時截斷）、「Clear」「Restart」兩個按鈕。
 - **agent 執行中**（`has_open_run`）時，工具列下面一條淡黃色的提醒：「The agent is working in this worktree. Files you change here end up in the same commit.」
 - 終端機的配色**跟著主題**：淺色主題是白底深字，深色主題是深底淺字；顏色從 tokens 轉成 xterm.js 的 theme。字型用 `--font-mono`。
-- 任務 24 之前只放說明「A terminal in this task's worktree. Coming in 0.4.」。worktree 不在（封存後）時顯示「The worktree was removed when the task was archived.」。
+- 按了 Shell 分頁才連線；右側面板記住的分頁是 Shell 時，先顯示說明與「Open shell」按鈕，按了才開（shell 離開頁面後還會跑，只是瀏覽任務不該開出一堆 shell）。之後切到別的分頁仍保持連線。重新整理或第二個視窗會接到同一個 shell，先顯示最近的輸出。
+- shell 結束時在終端機裡印一行淡色的說明（例如「Shell exited with code 0. Press Restart to start a new one.」）；別的視窗按了 Restart 時自動重新連線；連線斷掉時工具列顯示「Reconnecting…」並自動重連。
+- worktree 不在（封存後）時顯示「The worktree was removed when the task was archived.」。
 
 ### 右側面板：Events
 
@@ -314,7 +316,6 @@ Reviewer 泡泡的底色與邊框、diff 的行、各種淡底色用 `color-mix(
 
 | 東西 | 位置 | 這個階段的樣子 |
 | --- | --- | --- |
-| Shell | 右側面板的「Shell」 | 說明文字，任務 24 才做功能 |
 | 主 agent | 側欄每個專案底下的「✦ Plan with main agent」（草稿裡沒畫，沿用任務 22 的位置） | 淡色、不能按，滑過去顯示「Coming in 0.5」 |
 
 ## 需要新增的 API

@@ -519,6 +519,8 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | `POST /api/tasks/{id}/archive` | 封存並清掉 worktree；條件見「中止與封存」 |
 | `GET /api/tasks/{id}/events` | 稽核紀錄，分頁 |
 | `GET /api/tasks/{id}/diff` | 任務的 branch 相對於基底分支的 diff |
+| `WS /api/tasks/{id}/shell` | 任務 worktree 裡的 terminal；只接受看板自己的頁面（`Origin` 必須存在且和 `Host` 相同）。二進位 frame 是終端機的資料，文字 frame 是 JSON 控制訊息（`resize`、`opened`、`closed`），見 `docs/guide/http-api.md`（決策第 195、196 筆） |
+| `POST /api/tasks/{id}/shell/restart` | 結束任務的 shell 與裡面的程序；下一次連線開新的 |
 | `GET /api/usage?project_id=` | token 與花費彙總 |
 | `GET /api/agents` | 這個 daemon 有的 agent 種類、顯示名稱、最近一次檢查時能不能用、是否回報花費；給開任務的表單用 |
 | `GET /api/setup` | 每種 agent 與 gh 最近一次檢查的結果，見「Agent 與 gh 的檢查」 |
@@ -585,6 +587,7 @@ React + Vite + TypeScript，放在 `web/`。
 - **Log 分頁與 Events 分頁用同一份事件**：Log 把 agent 的訊息、指令與輸出、工具呼叫排成容易讀的樣子，Events 原樣列出並可依類型篩選。
 - **封存前的確認**：任務的 PR 還開著時，按 Archive 先跳出確認框說明後果，確認才送出。只做在介面上，API 與 CLI 不擋。
 - **錯誤**：API 回的 `message` 直接顯示在操作的旁邊。
+- **Shell 分頁**：在任務的 worktree 開一個 terminal（xterm.js），第一次打開分頁時才連線，之後切到別的分頁也不斷線。每個任務一個 shell，離開頁面後繼續跑，重新連線先收到最近的輸出；Restart、封存、daemon 停止、shell 自己結束時關掉。輸入不記進事件，shell 不經過 adapter、不寫進 agent 的 session（決策第 173、196 筆）。
 
 ## 安裝與發布
 

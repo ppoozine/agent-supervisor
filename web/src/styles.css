@@ -725,6 +725,40 @@
   .shell-placeholder {
     @apply m-4 rounded-md border border-dashed border-border p-6 text-center text-xs text-text-muted;
   }
+  .shell-host {
+    @apply flex h-full min-h-[360px] flex-col;
+  }
+  .shell-host[hidden] {
+    @apply hidden;
+  }
+  .shell {
+    @apply flex min-h-0 flex-1 flex-col;
+  }
+  .shell-toolbar {
+    @apply flex items-center gap-2 border-b border-border bg-surface px-5 py-2.5;
+  }
+  .shell-status {
+    @apply size-2 shrink-0 rounded-full bg-archived;
+  }
+  .shell-status.is-connected {
+    @apply bg-ready;
+  }
+  .shell-status.is-connecting,
+  .shell-status.is-lost {
+    @apply bg-in-review;
+  }
+  .shell-name {
+    @apply text-xs font-medium;
+  }
+  .shell-cwd {
+    @apply min-w-0 flex-1 truncate font-mono text-xs text-text-muted;
+  }
+  .shell-warning {
+    @apply mx-5 mt-3 mb-0 rounded-md border border-border bg-warning-bg px-3 py-2 text-xs leading-normal;
+  }
+  .shell-screen {
+    @apply m-5 min-h-0 flex-1 overflow-hidden rounded-md border border-border bg-surface p-2;
+  }
 
   /* ---- Dialogs ---- */
   .dialog {

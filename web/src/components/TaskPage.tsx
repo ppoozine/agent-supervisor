@@ -7,6 +7,7 @@ import type { Card, EventRow, Project, TaskDetail } from '../types'
 import { Dialog } from './Dialog'
 import { DiffTab } from './DiffTab'
 import { ChatTab } from './ChatTab'
+import { ShellTab } from './ShellTab'
 import { EventsTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
 import { Attempts, Checks, useAgentName } from './TaskCard'
@@ -55,6 +56,7 @@ export function TaskPage(props: TaskPageProps) {
   }, [])
   const selectTab = (name: Tab): void => {
     setTab(name)
+    if (name === 'Shell') setHasOpenedShell(true)
     if (name !== 'Chat') {
       setPanel(name)
       savePreference('task-panel', name)
@@ -66,6 +68,9 @@ export function TaskPage(props: TaskPageProps) {
       setPanelWidth(Math.max(30, Math.min(65, ((rect.right - clientX) / rect.width) * 100)))
   }
   const selected = wide ? panel : tab
+  // A shell keeps running after the page goes away, so it starts only when someone asks for it:
+  // clicking the tab, or "Open shell" when the tab was simply remembered from last time.
+  const [hasOpenedShell, setHasOpenedShell] = useState(false)
   const [messageText, setMessageText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -404,12 +409,26 @@ export function TaskPage(props: TaskPageProps) {
                 connectionCount={connectionCount}
               />
             )}
-            {selected === 'Shell' && (
-              <p className="shell-placeholder">
-                {isArchived
-                  ? 'The worktree was removed when the task was archived.'
-                  : "A terminal in this task's worktree. Coming in 0.4."}
-              </p>
+            {selected === 'Shell' && isArchived && (
+              <p className="shell-placeholder">The worktree was removed when the task was archived.</p>
+            )}
+            {selected === 'Shell' && !isArchived && !hasOpenedShell && (
+              <div className="shell-placeholder">
+                <p className="m-0 mb-3">A terminal in this task's worktree.</p>
+                <button className="btn" onClick={() => setHasOpenedShell(true)}>
+                  Open shell
+                </button>
+              </div>
+            )}
+            {/* Mounted the first time Shell is opened, then kept while hidden so it stays connected. */}
+            {!isArchived && hasOpenedShell && (
+              <div className="shell-host" hidden={selected !== 'Shell'}>
+                <ShellTab
+                  taskId={taskId}
+                  isAgentWorking={current.has_open_run}
+                  visible={selected === 'Shell'}
+                />
+              </div>
             )}
             {selected === 'Events' && <EventsTab events={events} runs={detail.runs} />}
             {selected === 'Runs' && (
