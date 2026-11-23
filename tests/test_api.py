@@ -858,3 +858,49 @@ async def test_card_carries_the_latest_commit_so_the_diff_tab_can_follow_it(api:
     finished = await api.finished(created["id"])
 
     assert finished["head_sha"] is not None
+
+
+async def test_config_shows_the_limits_and_policy_in_effect(api: Api) -> None:
+    response = await api.client.get("/api/config")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "config_path",
+        "limits",
+        "poll_interval_seconds",
+        "notify_needs_you",
+        "permission",
+    }
+    assert body["limits"] == {
+        "task_cost_limit_usd": 1.0,  # the fixture's config, not the default
+        "task_token_limit": 20_000_000,
+        "max_turns_per_run": 50,
+        "run_timeout_seconds": 1800.0,
+        "max_ci_fix_attempts": 3,
+        "max_feedback_attempts": 5,
+    }
+    assert body["poll_interval_seconds"] == 30.0
+    assert body["notify_needs_you"] is True
+    assert body["permission"]["sandbox_level"] == "workspace-write"
+    assert body["permission"]["allow_network"] is True
+    assert "git push" in body["permission"]["tool_rules"]["denied_commands"]
+    # Local details the page does not show stay out, such as where the data is kept.
+    assert str(api.supervisor.config.data_dir) not in response.text
+
+
+async def test_config_names_the_file_the_daemon_read(api: Api, tmp_path: Path) -> None:
+    config_file = tmp_path / "custom.toml"
+    app = create_app(api.supervisor, api.feed, config_path=config_file)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1:8765"
+    ) as client:
+        response = await client.get("/api/config")
+
+    assert response.json()["config_path"] == str(config_file)
+
+
+async def test_config_is_not_readable_from_another_site(api: Api) -> None:
+    response = await api.client.get("/api/config", headers={"Origin": "https://evil.example"})
+
+    assert error_of(response) == (403, "forbidden")

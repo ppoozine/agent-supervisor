@@ -9,6 +9,7 @@ import type {
   Setup,
   TaskDetail,
   TaskDiff,
+  ServerConfig,
   Usage,
 } from './types'
 
@@ -69,6 +70,7 @@ export const listAgents = () => request<Agent[]>('GET', '/agents')
 export const getSetup = () => request<Setup>('GET', '/setup')
 export const checkSetup = () => request<Setup>('POST', '/setup/check')
 export const getUsage = () => request<Usage>('GET', '/usage')
+export const getConfig = () => request<ServerConfig>('GET', '/config')
 export const listTasks = () => request<Card[]>('GET', '/tasks')
 export const createTask = (task: NewTask) => request<TaskDetail>('POST', '/tasks', task)
 export const getTask = (taskId: number) => request<TaskDetail>('GET', `/tasks/${taskId}`)

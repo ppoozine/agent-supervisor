@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 
 import * as api from '../api'
 import { makeCard, makeDetail, makeEvent } from '../testing'
-import type { Project, Setup, ToolStatus } from '../types'
+import type { Project, ServerConfig, Setup, ToolStatus } from '../types'
 import { AddProjectForm } from './AddProjectForm'
 import { Board } from './Board'
 import { DiffTab } from './DiffTab'
@@ -26,6 +26,8 @@ vi.mock('../api', async (importOriginal) => ({
   checkSetup: vi.fn(),
   // Never resolves: the settings tests are about the tools, not the usage totals.
   getUsage: vi.fn(() => new Promise(() => undefined)),
+  // Same for the limits, unless a test gives it a result.
+  getConfig: vi.fn(() => new Promise(() => undefined)),
 }))
 
 const project: Project = {
@@ -740,6 +742,52 @@ test('checking again shows the new result and tells the page', async () => {
   expect(screen.getByRole('region', { name: 'Codex' }).textContent).toContain(
     'Signed in with ChatGPT',
   )
+})
+
+const serverConfig: ServerConfig = {
+  config_path: '/home/me/.agent-supervisor/config.toml',
+  limits: {
+    task_cost_limit_usd: 5,
+    task_token_limit: 20_000_000,
+    max_turns_per_run: 50,
+    run_timeout_seconds: 1800,
+    max_ci_fix_attempts: 3,
+    max_feedback_attempts: 5,
+  },
+  poll_interval_seconds: 30,
+  notify_needs_you: true,
+  permission: {
+    sandbox_level: 'workspace-write',
+    allow_network: true,
+    tool_rules: { allowed_tools: ['Read', 'Bash'], denied_commands: ['git push', 'gh'] },
+  },
+}
+
+test('the settings page lists the limits in effect and the file to edit', async () => {
+  vi.mocked(api.getSetup).mockResolvedValue(makeSetup())
+  vi.mocked(api.getConfig).mockResolvedValueOnce(serverConfig)
+  render(<SettingsPage onChecked={vi.fn()} />)
+
+  const limits = await screen.findByLabelText('Limits and permissions')
+  const text = limits.textContent ?? ''
+  expect(text).toContain('Cost limit per task$5.00')
+  expect(text).toContain('Token limit per task20,000,000')
+  expect(text).toContain('Time per run30 min')
+  expect(text).toContain('Automatic fixes per taskfixed3')
+  expect(text).toContain('GitHub pollingevery 30 s')
+  expect(text).toContain('Denied commandsgit push, gh')
+  expect(screen.getByText('/home/me/.agent-supervisor/config.toml')).toBeTruthy()
+})
+
+test('when the limits cannot be read, only that section says so', async () => {
+  vi.mocked(api.getSetup).mockResolvedValue(makeSetup())
+  vi.mocked(api.getConfig).mockRejectedValueOnce(new Error('daemon went away'))
+  render(<SettingsPage onChecked={vi.fn()} />)
+
+  const alert = await screen.findByRole('alert')
+  expect(alert.textContent).toContain('daemon went away')
+  expect(alert.closest('section')?.id).toBe('settings-limits')
+  expect(await screen.findByRole('region', { name: 'Claude Code' })).toBeTruthy()
 })
 
 test('a card names its agent as the daemon does, and an unknown agent by its type', () => {

@@ -123,7 +123,9 @@ async def run(
     if args.command == "stop":
         return _stop_running_instance(config)
     if args.command == "serve":
-        return await daemon.serve(config, adapters, processes, github)
+        return await daemon.serve(
+            config, adapters, processes, github, config_path=Path(args.config)
+        )
     if args.command == "show":
         return await _show(config, args.task_id)
     if args.command == "list":

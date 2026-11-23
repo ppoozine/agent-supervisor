@@ -25,7 +25,7 @@ from agent_supervisor.api.errors import (
 )
 from agent_supervisor.api.feed import ChangeFeed, stream_text
 from agent_supervisor.api.guard import LocalRequestsOnly
-from agent_supervisor.config import absolute_path
+from agent_supervisor.config import DEFAULT_CONFIG_PATH, absolute_path
 from agent_supervisor.supervisor import Supervisor
 
 DEFAULT_AGENT = "claude_code"
@@ -78,12 +78,14 @@ def create_app(
     *,
     is_closing: Callable[[], bool] = lambda: False,
     static_dir: Path | None = None,
+    config_path: Path = DEFAULT_CONFIG_PATH,
 ) -> FastAPI:
     """Create the application.
 
     `is_closing` tells whether the daemon is shutting down; SSE connections rely on it to end.
     `static_dir` is the directory holding the built frontend files; if given it is mounted at
-    `/`. The API is always under `/api`.
+    `/`. The API is always under `/api`. `config_path` is the file the settings were read from,
+    shown on the settings page.
     """
     # The API is a separate application mounted at `/api`: when the path exists but the method
     # is wrong it answers 405 itself, instead of falling through to the static files as a 404.
@@ -258,6 +260,11 @@ def create_app(
         """Check every agent and gh again, e.g. after signing in from a terminal."""
         readiness = await asyncio.shield(supervisor.readiness.check())
         return views.readiness_view(readiness, display_names)
+
+    @api.get("/config")
+    async def get_config() -> dict[str, Any]:
+        """The limits and permission policy in effect. Read-only; edit the file and restart."""
+        return views.config_view(supervisor.config, config_path)
 
     @api.get("/usage")
     async def get_usage(project_id: int | None = None) -> dict[str, Any]:

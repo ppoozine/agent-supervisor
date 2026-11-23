@@ -130,3 +130,26 @@ export interface Usage {
   has_unknown_cost: boolean
   usage_is_complete: boolean
 }
+
+/** The limits and permission policy the daemon is running with (`GET /api/config`). Read-only. */
+export interface ServerConfig {
+  /** The file the daemon read them from; edit it and restart to change them. */
+  config_path: string
+  limits: {
+    task_cost_limit_usd: number
+    task_token_limit: number
+    max_turns_per_run: number
+    run_timeout_seconds: number
+    /** Constants in the daemon, not settings. */
+    max_ci_fix_attempts: number
+    max_feedback_attempts: number
+  }
+  poll_interval_seconds: number
+  notify_needs_you: boolean
+  permission: {
+    sandbox_level: string
+    allow_network: boolean
+    /** Each adapter reads these itself; the built-in ones use `allowed_tools` and `denied_commands`. */
+    tool_rules: Record<string, unknown>
+  }
+}

@@ -1,9 +1,11 @@
 """Turn database data into API response content. All pure functions."""
 
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from agent_supervisor import db, status
+from agent_supervisor.config import Config
 from agent_supervisor.readiness import Readiness
 from agent_supervisor.tool_status import ToolStatus
 
@@ -96,6 +98,33 @@ def tool_status_view(tool: ToolStatus) -> dict[str, Any]:
         "detail": tool.detail,
         "fix": list(tool.fix),
         "notice": tool.notice,
+    }
+
+
+def config_view(config: Config, config_path: Path) -> dict[str, Any]:
+    """The limits and permission policy in effect, for the settings page. Read-only.
+
+    Leaves out local details the page does not show (data directory, port, log size). The two
+    attempt limits are constants in `status.py`, not settings.
+    """
+    policy = config.permission
+    return {
+        "config_path": str(config_path),
+        "limits": {
+            "task_cost_limit_usd": config.task_cost_limit_usd,
+            "task_token_limit": config.task_token_limit,
+            "max_turns_per_run": config.max_turns_per_run,
+            "run_timeout_seconds": config.run_timeout_seconds,
+            "max_ci_fix_attempts": status.MAX_CI_FIX_ATTEMPTS,
+            "max_feedback_attempts": status.MAX_FEEDBACK_ATTEMPTS,
+        },
+        "poll_interval_seconds": config.poll_interval_seconds,
+        "notify_needs_you": config.notify_needs_you,
+        "permission": {
+            "sandbox_level": policy.sandbox_level.value,
+            "allow_network": policy.allow_network,
+            "tool_rules": dict(policy.tool_rules),
+        },
     }
 
 

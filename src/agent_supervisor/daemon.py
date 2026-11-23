@@ -20,7 +20,7 @@ from agent_supervisor import db
 from agent_supervisor.adapters.base import AgentAdapter
 from agent_supervisor.api.app import create_app
 from agent_supervisor.api.feed import ChangeFeed
-from agent_supervisor.config import Config
+from agent_supervisor.config import DEFAULT_CONFIG_PATH, Config
 from agent_supervisor.github import GitHub
 from agent_supervisor.notifier import Notifier
 from agent_supervisor.readiness import describe
@@ -54,8 +54,13 @@ async def serve(
     adapters: Mapping[str, AgentAdapter],
     processes: ProcessTable,
     github: GitHub,
+    *,
+    config_path: Path = DEFAULT_CONFIG_PATH,
 ) -> int:
-    """Start the daemon and run until an exit signal arrives; return the exit code."""
+    """Start the daemon and run until an exit signal arrives; return the exit code.
+
+    `config_path` is where `config` was read from; the settings page shows it.
+    """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     quit_requested = asyncio.Event()
     stop_requested = asyncio.Event()
@@ -72,7 +77,13 @@ async def serve(
         loop.add_signal_handler(signal_number, handler)
     try:
         return await _serve_with_lock(
-            config, adapters, processes, github, quit_requested, stop_requested
+            config,
+            adapters,
+            processes,
+            github,
+            quit_requested,
+            stop_requested,
+            config_path=config_path,
         )
     finally:
         for signal_number in handlers:
@@ -86,6 +97,8 @@ async def _serve_with_lock(
     github: GitHub,
     quit_requested: asyncio.Event,
     stop_requested: asyncio.Event,
+    *,
+    config_path: Path,
 ) -> int:
     try:
         lock = InstanceLock.acquire(config.lock_path)
@@ -107,7 +120,9 @@ async def _serve_with_lock(
         supervisor = build_supervisor(conn, config, adapters, github, processes=processes)
         await _log_readiness(supervisor)
         try:
-            await _run_until_quit(supervisor, quit_requested, stop_requested)
+            await _run_until_quit(
+                supervisor, quit_requested, stop_requested, config_path=config_path
+            )
         finally:
             await supervisor.runner.shutdown()
     finally:
@@ -137,7 +152,11 @@ async def _log_readiness(supervisor: Supervisor) -> None:
 
 
 async def _run_until_quit(
-    supervisor: Supervisor, quit_requested: asyncio.Event, stop_requested: asyncio.Event
+    supervisor: Supervisor,
+    quit_requested: asyncio.Event,
+    stop_requested: asyncio.Event,
+    *,
+    config_path: Path,
 ) -> None:
     config = supervisor.config
     web_dist = WEB_DIST if (WEB_DIST / "index.html").is_file() else None
@@ -158,6 +177,7 @@ async def _run_until_quit(
                 feed,
                 is_closing=quit_requested.is_set,
                 static_dir=web_dist,
+                config_path=config_path,
             ),
             host=HOST,
             port=config.api_port,

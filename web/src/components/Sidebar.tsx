@@ -13,6 +13,7 @@ export const SETTINGS_SECTIONS = [
   ['settings-github', 'GitHub'],
   ['settings-projects', 'Projects'],
   ['settings-usage', 'Usage'],
+  ['settings-limits', 'Limits and permissions'],
 ] as const
 
 interface SidebarProps {

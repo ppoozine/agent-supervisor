@@ -1,5 +1,5 @@
 // Format data as text for the screen. Pure functions only.
-import type { Card, EventRow, Project, Run } from './types'
+import type { Card, EventRow, Project, Run, ServerConfig } from './types'
 
 /** Cost or token count. Shows tokens when the agent does not report cost; cost is an estimate, prefixed with `~`. */
 export function formatUsage(card: Pick<Card, 'cost_usd' | 'tokens' | 'usage_is_complete'>): string {
@@ -163,4 +163,46 @@ export function totalRunTime(runs: Pick<Run, 'started_at' | 'ended_at'>[]): stri
   if (rounded < 60) return `${rounded}s`
   if (rounded < 3600) return `${Math.floor(rounded / 60)}m ${rounded % 60}s`
   return `${Math.floor(rounded / 3600)}h ${Math.floor((rounded % 3600) / 60)}m`
+}
+
+/** One line of the settings page's limits list. `fixed` marks a value that is not a setting. */
+export interface SettingRow {
+  label: string
+  value: string
+  fixed?: boolean
+  mono?: boolean
+}
+
+/** A length of time in the largest unit that divides it: `30 s`, `30 min`, `1.5 h`. */
+export function formatSeconds(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`
+  if (seconds < 3600) return `${+(seconds / 60).toFixed(1)} min`
+  return `${+(seconds / 3600).toFixed(1)} h`
+}
+
+function wordList(value: unknown): string | null {
+  if (!Array.isArray(value)) return null
+  return value.length === 0 ? 'none' : value.join(', ')
+}
+
+/** The limits and permission policy as label and value pairs, in the order the page lists them. */
+export function settingRows(config: ServerConfig): SettingRow[] {
+  const { limits, permission } = config
+  const rows: SettingRow[] = [
+    { label: 'Cost limit per task', value: `$${limits.task_cost_limit_usd.toFixed(2)}` },
+    { label: 'Token limit per task', value: limits.task_token_limit.toLocaleString('en-US') },
+    { label: 'Turns per run', value: String(limits.max_turns_per_run) },
+    { label: 'Time per run', value: formatSeconds(limits.run_timeout_seconds) },
+    { label: 'Automatic fixes per task', value: String(limits.max_ci_fix_attempts), fixed: true },
+    { label: 'Comment rounds per task', value: String(limits.max_feedback_attempts), fixed: true },
+    { label: 'GitHub polling', value: `every ${formatSeconds(config.poll_interval_seconds)}` },
+    { label: 'Notify when a task needs you', value: config.notify_needs_you ? 'on' : 'off' },
+    { label: 'Sandbox', value: permission.sandbox_level, mono: true },
+    { label: 'Network for agents', value: permission.allow_network ? 'allowed' : 'not allowed' },
+  ]
+  const allowed = wordList(permission.tool_rules.allowed_tools)
+  if (allowed !== null) rows.push({ label: 'Allowed tools', value: allowed, mono: true })
+  const denied = wordList(permission.tool_rules.denied_commands)
+  if (denied !== null) rows.push({ label: 'Denied commands', value: denied, mono: true })
+  return rows
 }

@@ -22,6 +22,7 @@ stream. This page is the reference for those.
 - [Events (the audit log)](#events-the-audit-log)
 - [Agents and setup](#agents-and-setup)
 - [Usage](#usage)
+- [Settings](#settings)
 - [The live stream (SSE)](#the-live-stream-sse)
 
 ## Access
@@ -425,6 +426,42 @@ Token and cost totals, per task and overall. `?project_id=1` limits them to one 
 A task's `cost_usd` and `usage_is_complete` cover the period since a person last stepped in, as on
 the card; `tokens_in` and `tokens_out` cover all its runs. The overall `cost_usd` only adds up
 tasks that report cost; `has_unknown_cost` is true when some tasks do not.
+
+## Settings
+
+### `GET /api/config`
+
+The limits and permission policy the daemon is running with. Read-only: to change them, create or
+edit the file named in `config_path` (it may not exist yet; the defaults apply) and restart
+`agsv serve`.
+
+```json
+{
+  "config_path": "/Users/you/.agent-supervisor/config.toml",
+  "limits": {
+    "task_cost_limit_usd": 5.0,
+    "task_token_limit": 20000000,
+    "max_turns_per_run": 50,
+    "run_timeout_seconds": 1800.0,
+    "max_ci_fix_attempts": 3,
+    "max_feedback_attempts": 5
+  },
+  "poll_interval_seconds": 30.0,
+  "notify_needs_you": true,
+  "permission": {
+    "sandbox_level": "workspace-write",
+    "allow_network": true,
+    "tool_rules": {
+      "allowed_tools": ["Read", "Glob", "Grep", "Write", "Edit", "MultiEdit", "Bash", "TodoWrite"],
+      "denied_commands": ["git push", "gh", "sudo", "rm -rf /"]
+    }
+  }
+}
+```
+
+`max_ci_fix_attempts` and `max_feedback_attempts` are built in, not settings. `tool_rules` is passed
+to the adapters as is; each adapter reads the keys it knows. Other settings in the file, such as the
+data directory and the port, are not included.
 
 ## The live stream (SSE)
 

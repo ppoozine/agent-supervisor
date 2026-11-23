@@ -523,6 +523,7 @@ Stop 只能用在已經存在的 run 上。CI 失敗後、Dispatcher 還沒建�
 | `GET /api/agents` | 這個 daemon 有的 agent 種類、顯示名稱、最近一次檢查時能不能用、是否回報花費；給開任務的表單用 |
 | `GET /api/setup` | 每種 agent 與 gh 最近一次檢查的結果，見「Agent 與 gh 的檢查」 |
 | `POST /api/setup/check` | 重新檢查每種 agent 與 gh，回傳新的結果 |
+| `GET /api/config` | 目前生效的上限、輪詢間隔、通知、權限政策，以及 daemon 讀的設定檔路徑；唯讀，給設定頁用（決策第 194 筆） |
 | `GET /api/stream` | SSE：狀態變更與 agent log |
 
 API 由常駐的 daemon 提供（`agsv serve`），只綁 `127.0.0.1`，連接埠由設定檔的 `api_port` 決定（預設 8765）。所有端點都在 `/api` 底下；`/` 留給前端的檔案（見「前端」）。下文提到端點時省略 `/api`。沒有登入，也沒有 CORS 設定。每個請求的 `Host` 必須是本機的名稱（`127.0.0.1`、`localhost`、`::1`），有 `Origin` 的話必須是本機上的網頁（連接埠不限），否則拒絕；這是為了擋掉使用者瀏覽器裡其他網頁發出的請求。
