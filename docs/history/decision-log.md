@@ -192,6 +192,7 @@
 | 182 | 新介面以 `docs/design/ui.md` 與 `ui-mockup.html` 為準。任務詳情頁用分割版：左邊固定是 Chat，右邊的面板放 Diff、Shell、Events、Runs，窄視窗（小於 1100px）退回分頁版；這次就做淺色主題，跟著系統的 `prefers-color-scheme` 切換，不做手動切換；卡片新增 `feedback_attempts`、`max_feedback_attempts` 兩個欄位（任務 21） | 分頁版；淺色主題留到之後；手動切換主題 | 看 agent 的對話時常常要同時看 diff 或在 shell 裡確認，分頁版要一直切換。token 從一開始就有兩套，淺色主題的成本只是多一組數值；之後再補要逐一改寫死的顏色。手動切換多一個要記住的設定，跟著系統已經足夠。頁首要顯示留言處理的次數，資料庫有、API 沒有 |
 | 183 | run 執行中送出的訊息維持拒絕（409），不做排隊；介面上允許先打草稿，Send 停用並說明「Stop it to send a message now」，run 結束後就能送。任務已封存或 PR 已合併時輸入框換成說明；PR 已關閉時仍可送（可能已在 GitHub 上重新開啟，第 155 筆）。Chat 的 run 編號是任務內的順序（Run #1、#2），Runs 分頁一致 | 排隊，run 結束後依序各開一次 run；PR 關閉時也停用輸入框 | 排隊要新增佇列、讓派工器接手，還要為 Stop、出錯、預算、daemon 重啟各定規則，而且碰到設計規則 4「Stop、中斷之後不自動開新的 run」：佇列裡的訊息算不算人介入、重啟後要不要繼續送。這是另一個任務的份量，真的需要時排進階段 8。草稿加上清楚的說明已經解決「訊息會不見」與「不知道為什麼送不出去」 |
 | 184 | 專案給 agent 的指示放在 `AGENTS.md`（Codex 直接讀這個檔名），`CLAUDE.md` 只用 `@AGENTS.md` 匯入它；內容同時更新到階段 5 與新的文件結構。任務單裡的指示改成先讀 `AGENTS.md`。由 agent-supervisor 開在這個 repo 的任務，agent 只改檔案、不 commit 不 push | 只更新 `CLAUDE.md`；兩份檔案各寫一份；用符號連結 | 任務 22、23 要交給 Codex，Codex 讀的是 `AGENTS.md`，原本它看不到任何專案指示。兩份各寫一份一定會不同步；符號連結在 Windows 與部分工具上不可靠。實測 Claude Code（`claude -p`）與 Codex（`codex exec`）都說得出目前的階段與任務單。原本的 `CLAUDE.md` 還停在階段 4，文件路徑已經失效，前端規則還寫著不裝樣式套件，交給 agent 會和任務 22 衝突 |
+| 185 | 任務 22 開啟 Tailwind Preflight；看板與任務詳情的樣式改用 `@theme` tokens、utilities 與 components layer，深淺色跟隨系統。設定頁與對話框的舊樣式集中在 `web/src/legacy.css` 的 components layer，限定作用範圍並保留原深色外觀，等任務 23 再改版 | 同時改所有畫面；留下未分層的全域 CSS | 任務 22 不含設定頁與對話框；限定舊樣式的作用範圍，可以避免 Preflight 重設它們，也避免舊規則蓋過新版面的 Tailwind utilities。資料流、API 與第 183 筆的送訊息規則不變 |
 
 ## 尚未決定
 

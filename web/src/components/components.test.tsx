@@ -42,6 +42,8 @@ const agents = [
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
+  localStorage.clear()
 })
 
 function button(name: string): HTMLButtonElement {
@@ -328,7 +330,10 @@ test('the chat labels who each entry came from and keeps long content folded', a
   })
   vi.mocked(api.getTask).mockResolvedValue(detail)
   vi.mocked(api.listEventsAfter).mockResolvedValue([
-    { ...makeEvent(1, 'agent_message', { kind: 'message', text: 'done with it' }), ts: '2026-11-19T10:01:00+00:00' },
+    {
+      ...makeEvent(1, 'agent_message', { kind: 'message', text: 'done with it' }),
+      ts: '2026-11-19T10:01:00+00:00',
+    },
     {
       ...makeEvent(2, 'review_comment', { kind: 'comment', author: 'alice', body: 'rename it' }),
       run_id: null,
@@ -361,7 +366,9 @@ test('the chat labels who each entry came from and keeps long content folded', a
   )
   expect(sources).toEqual(['you', 'agent', 'reviewer', 'auto', 'agent', 'agent'])
   expect(within(chat).getByText('add power(base, exponent)')).toBeTruthy()
-  expect(within(chat).getByText(/Run #2/).parentElement?.textContent).toContain('Automatic: CI failed')
+  expect(within(chat).getByText(/Run #2/).parentElement?.textContent).toContain(
+    'Automatic: CI failed',
+  )
   const automatic = chat.querySelector('[data-source="auto"]') as HTMLDetailsElement
   expect(automatic.tagName).toBe('DETAILS')
   expect(automatic.open).toBe(false)
@@ -549,7 +556,6 @@ test('a truncated diff says so', async () => {
   expect(await screen.findByText(/the rest is not shown/)).toBeTruthy()
 })
 
-
 test('the new task form offers only the agents that can be used', () => {
   const someReady = [agents[0], { ...agents[1], usable: false }]
   render(
@@ -625,7 +631,13 @@ test('checking again shows the new result and tells the page', async () => {
   const checked = vi.fn()
   vi.mocked(api.getSetup).mockResolvedValue(makeSetup())
   vi.mocked(api.checkSetup).mockResolvedValue(
-    makeSetup({ usable: true, installed: true, auth: 'subscription', auth_label: 'ChatGPT', fix: [] }),
+    makeSetup({
+      usable: true,
+      installed: true,
+      auth: 'subscription',
+      auth_label: 'ChatGPT',
+      fix: [],
+    }),
   )
   render(<SettingsPage onChecked={checked} />)
   await screen.findByRole('region', { name: 'Codex' })
@@ -633,9 +645,10 @@ test('checking again shows the new result and tells the page', async () => {
   fireEvent.click(button('Check again'))
 
   await waitFor(() => expect(checked).toHaveBeenCalled())
-  expect(screen.getByRole('region', { name: 'Codex' }).textContent).toContain('Signed in with ChatGPT')
+  expect(screen.getByRole('region', { name: 'Codex' }).textContent).toContain(
+    'Signed in with ChatGPT',
+  )
 })
-
 
 test('a card names its agent as the daemon does, and an unknown agent by its type', () => {
   render(
@@ -647,4 +660,188 @@ test('a card names its agent as the daemon does, and an unknown agent by its typ
 
   expect(screen.getByText('Example agent')).toBeTruthy()
   expect(screen.getByText('not_installed')).toBeTruthy()
+})
+
+test('the sidebar remembers its compact state and keeps primary actions available', async () => {
+  const { Sidebar } = await import('./Sidebar')
+  const newTask = vi.fn()
+  const addProject = vi.fn()
+  const props = {
+    projects: [project],
+    cards: [makeCard()],
+    openTaskId: 7,
+    isSettingsOpen: false,
+    onNewTask: newTask,
+    onAddProject: addProject,
+    newTaskBlocker: null,
+  }
+  const view = render(<Sidebar {...props} />)
+  fireEvent.click(button('Collapse sidebar'))
+  expect(localStorage.getItem('agsv.sidebar-collapsed')).toBe('true')
+  fireEvent.click(button('+ New task'))
+  fireEvent.click(button('+ Add project'))
+  expect(newTask).toHaveBeenCalledOnce()
+  expect(addProject).toHaveBeenCalledOnce()
+  view.unmount()
+  render(<Sidebar {...props} />)
+  expect(button('Expand sidebar')).toBeTruthy()
+  fireEvent.click(button('Expand sidebar'))
+  expect(screen.getByText('Add a power function')).toBeTruthy()
+  expect(button('✦ Plan with main agent').disabled).toBe(true)
+})
+
+test('branch copy reports success and clipboard failures without changing the task', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  renderTaskPage()
+  await screen.findByText('working on it')
+  fireEvent.click(button('Copy branch name'))
+  expect(await screen.findByText('Branch copied')).toBeTruthy()
+  expect(writeText).toHaveBeenCalledWith('asv/task-7-add-power')
+  writeText.mockRejectedValue(new Error('denied'))
+  fireEvent.click(button('Copy branch name'))
+  expect(await screen.findByText('Could not copy branch name')).toBeTruthy()
+  expect(onTaskChanged).not.toHaveBeenCalled()
+})
+
+test('wide layout remembers the detail panel and supports keyboard resizing', async () => {
+  localStorage.setItem('agsv.task-panel', 'Events')
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  renderTaskPage()
+  await screen.findByText('working on it')
+  expect(screen.getByRole('tab', { name: 'Events' }).getAttribute('aria-selected')).toBe('true')
+  expect(screen.getByRole('log', { name: 'Chat' })).toBeTruthy()
+  const separator = screen.getByRole('separator', { name: 'Resize detail panel' })
+  fireEvent.keyDown(separator, { key: 'ArrowLeft' })
+  expect(separator.getAttribute('aria-valuenow')).toBe('44')
+  for (let index = 0; index < 30; index++) fireEvent.keyDown(separator, { key: 'ArrowRight' })
+  expect(separator.getAttribute('aria-valuenow')).toBe('30')
+  fireEvent.click(screen.getByRole('tab', { name: 'Shell' }))
+  expect(localStorage.getItem('agsv.task-panel')).toBe('Shell')
+  expect(screen.getByText(/A terminal in this task's worktree/)).toBeTruthy()
+})
+
+test('Runs jumps to its Chat divider and can jump to the same run again', async () => {
+  vi.mocked(api.getTask).mockResolvedValue(makeDetail({ runs: [run] }))
+  vi.mocked(api.listEventsAfter).mockResolvedValue([])
+  render(
+    <TaskPage
+      taskId={7}
+      card={idle}
+      project={project}
+      connectionCount={1}
+      subscribeToEvents={() => () => undefined}
+      onTaskChanged={vi.fn()}
+    />,
+  )
+  await screen.findByRole('log', { name: 'Chat' })
+  for (let repeat = 0; repeat < 2; repeat++) {
+    fireEvent.click(screen.getByRole('tab', { name: /Runs/ }))
+    fireEvent.click(button('Go to Run #1'))
+    expect(screen.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
+    expect(document.activeElement?.getAttribute('data-run')).toBe('1')
+  }
+})
+
+test('the narrow layout opens on Chat even with a saved panel and keeps a message draft', async () => {
+  localStorage.setItem('agsv.task-panel', 'Events')
+  renderTaskPage(idle)
+  await screen.findByText('working on it')
+  expect(screen.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
+  fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'keep this draft' } })
+  fireEvent.click(screen.getByRole('tab', { name: 'Events' }))
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat' }))
+  expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe('keep this draft')
+})
+
+test('storage failures do not prevent switching panels or collapsing the sidebar', async () => {
+  const { Sidebar } = await import('./Sidebar')
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('blocked')
+  })
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('blocked')
+  })
+  render(
+    <Sidebar
+      projects={[project]}
+      cards={[]}
+      openTaskId={null}
+      isSettingsOpen={false}
+      onNewTask={vi.fn()}
+      onAddProject={vi.fn()}
+      newTaskBlocker={null}
+    />,
+  )
+  fireEvent.click(button('Collapse sidebar'))
+  expect(button('Expand sidebar')).toBeTruthy()
+  cleanup()
+  renderTaskPage()
+  await screen.findByText('working on it')
+  fireEvent.click(screen.getByRole('tab', { name: 'Shell' }))
+  expect(screen.getByText(/Coming in 0.4/)).toBeTruthy()
+})
+
+test('an archived task explains why its shell is unavailable', async () => {
+  renderTaskPage(makeCard({ archived_at: '2026-11-19T11:00:00Z' }))
+  await screen.findByText('working on it')
+  fireEvent.click(screen.getByRole('tab', { name: 'Shell' }))
+  expect(screen.getByText('The worktree was removed when the task was archived.')).toBeTruthy()
+})
+
+test('a diff file can be folded without losing its summary', async () => {
+  vi.mocked(api.getDiff).mockResolvedValue(diffOf(ONE_FILE))
+  render(<DiffTab taskId={7} headSha="sha-1" connectionCount={1} />)
+  const file = await screen.findByRole('region', { name: 'calc.py' })
+  const details = file.querySelector('details')!
+  expect(details.open).toBe(true)
+  fireEvent.click(file.querySelector('summary')!)
+  expect(details.open).toBe(false)
+  expect(within(file).getByText('+1')).toBeTruthy()
+})
+
+test('switching window widths preserves the selected detail panel and chat draft', async () => {
+  let matches = true
+  let update = (): void => undefined
+  vi.stubGlobal('matchMedia', () => ({
+    get matches() {
+      return matches
+    },
+    addEventListener: (_: string, callback: () => void) => {
+      update = callback
+    },
+    removeEventListener: vi.fn(),
+  }))
+  localStorage.setItem('agsv.task-panel', 'Events')
+  renderTaskPage(idle)
+  await screen.findByText('working on it')
+  fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'draft across resize' } })
+  act(() => {
+    matches = false
+    update()
+  })
+  expect(screen.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
+  fireEvent.click(screen.getByRole('tab', { name: 'Shell' }))
+  act(() => {
+    matches = true
+    update()
+  })
+  expect(screen.queryByRole('tab', { name: 'Chat' })).toBeNull()
+  expect(screen.getByRole('tab', { name: 'Shell' }).getAttribute('aria-selected')).toBe('true')
+  expect((screen.getByLabelText('Message') as HTMLTextAreaElement).value).toBe(
+    'draft across resize',
+  )
+})
+
+test('returning to Chat follows the latest content after its hidden pane had no height', async () => {
+  renderTaskPage()
+  const chat = await screen.findByRole('log', { name: 'Chat' })
+  fireEvent.click(screen.getByRole('tab', { name: 'Events' }))
+  Object.defineProperty(chat, 'scrollHeight', { configurable: true, value: 1200 })
+  fireEvent.click(screen.getByRole('tab', { name: 'Chat' }))
+  expect(chat.scrollTop).toBe(1200)
 })

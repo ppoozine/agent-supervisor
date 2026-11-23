@@ -40,7 +40,7 @@ export function EventsTab({ events }: { events: EventRow[] }) {
               <td>{clockTime(event.ts)}</td>
               <td>{event.run_id ?? '–'}</td>
               <td>
-                <code>{event.type}</code>
+                <code className={eventColor(event.type)}>{event.type}</code>
               </td>
               <td>
                 <pre>{JSON.stringify(event.payload)}</pre>
@@ -54,7 +54,13 @@ export function EventsTab({ events }: { events: EventRow[] }) {
 }
 
 /** Each run's trigger, timing, outcome and usage. */
-export function RunsTab({ runs }: { runs: Run[] }) {
+export function RunsTab({
+  runs,
+  onSelectRun,
+}: {
+  runs: Run[]
+  onSelectRun?: (number: number) => void
+}) {
   return (
     <table className="runs">
       <thead>
@@ -72,8 +78,19 @@ export function RunsTab({ runs }: { runs: Run[] }) {
         {runs.map((run, index) => {
           const { reason, source } = runReason(run.trigger)
           return (
-            <tr key={run.id}>
-              <td>#{index + 1}</td>
+            <tr key={run.id} onClick={() => onSelectRun?.(index + 1)}>
+              <td>
+                <button
+                  className="text-accent"
+                  aria-label={`Go to Run #${index + 1}`}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onSelectRun?.(index + 1)
+                  }}
+                >
+                  #{index + 1}
+                </button>
+              </td>
               <td>
                 <span className={`source-${source}`}>{reason}</span>
                 {run.trigger === 'user_message' && run.input_text && (
@@ -94,4 +111,11 @@ export function RunsTab({ runs }: { runs: Run[] }) {
       </tbody>
     </table>
   )
+}
+
+function eventColor(type: string): string {
+  if (type === 'review_comment') return 'text-source-reviewer'
+  if (type === 'permission_denied') return 'text-needs-you'
+  if (['agent_message', 'command', 'tool_call'].includes(type)) return 'text-source-agent'
+  return 'text-source-system'
 }

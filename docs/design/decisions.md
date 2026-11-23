@@ -1,6 +1,6 @@
 # 現行的設計決定
 
-最後更新：2026-11-22
+最後更新：2026-11-23
 
 目前仍然有效的決定，依主題整理，每條一兩句。括號裡是 `../history/decision-log.md` 的編號，想知道當時考慮過什麼、為什麼沒選其他方案，去那裡查。被推翻的決定不列在這裡。
 
@@ -14,7 +14,7 @@
 - 加欄位時在啟動時用 `PRAGMA table_info` 檢查並補上；讀任務時略過不認得的欄位（127、133）。
 - GitHub 的狀態用輪詢（30 秒），不用 webhook（7）。
 - 前端 React + Vite + TypeScript，樣式用 Tailwind；不裝路由與資料抓取的套件，元件庫要用時再提出；Shell 會加 xterm.js（109、175）。
-- Tailwind 4.3 經 `@tailwindcss/vite` 接上；外觀改版（任務 22）之前不載入 Preflight。手寫的 CSS 不在 layer 裡、會蓋過 Tailwind 的 class，改版時要換掉或放進 layer（181）。
+- Tailwind 4.3 經 `@tailwindcss/vite` 接上；任務 22 已開啟 Preflight，看板與詳情以 `@theme` tokens、utilities 與 components layer 改版。設定頁與對話框的舊樣式限定在 `legacy.css`，暫保留原深色外觀，任務 23 再改（181、185）。
 - daemon 在 `/` 提供 build 好的前端（`src/agent_supervisor/web_dist`），API 都在 `/api` 底下；開發時 Vite 把 `/api` 轉給 daemon（110、111、163）。
 - 支援 macOS 與 Linux，不支援 Windows（144）。
 - 模組的分工：列舉值在 `enums.py`、重啟復原在 `recovery.py`、準備與收尾在 `stages.py`、外部指令的底層在 `process.py`、檢查結果的歸類在 `github.py`、log 的截取在 `ci_log.py`（60、70、80）。

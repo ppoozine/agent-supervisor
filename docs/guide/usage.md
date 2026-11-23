@@ -42,6 +42,12 @@ time anything changes. A task is in exactly one place.
 | **Ready to merge** | CI passed, no conflicts, and (if the project requires it) a review approved. Merge on GitHub. |
 | **Archive** | Below the board: the pull request was merged or closed, or you archived the task. |
 
+The sidebar lists active tasks by project. Its colored dots match the board columns; a pulsing
+dot means a run is active. Use the collapse button to switch between the 240px sidebar and a
+56px icon rail; the browser remembers that choice. Archive starts collapsed and opens as a list
+of task titles, outcomes, and dates. The board and task page follow your system's light or dark
+theme. Settings and dialogs retain their existing appearance until their separate restyle.
+
 ### Labels
 
 **Working**
@@ -87,6 +93,18 @@ automatically until you send a message.
 
 When several automatic actions could happen at once, the order is: PR comments, then the merge
 conflict, then the CI failure.
+
+### The task page
+
+On windows at least 1100px wide, Chat stays on the left and Diff, Shell, Events, and Runs occupy
+the right panel. Drag the divider to resize it, or focus it and press Left or Right. Narrower
+windows show one tab at a time, starting with Chat. The browser remembers the last detail panel
+selected. The branch copy button copies the full branch name; the header also shows CI, review,
+conflicts, and usage.
+
+Diff includes a file list and totals; each file can be folded. Events retains its type filter and
+colors event types by source. Select a run in Runs to jump to its divider in Chat. Shell is a
+placeholder for 0.4; it does not open a terminal yet.
 
 ### The Chat tab
 
