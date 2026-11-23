@@ -12,6 +12,11 @@ import { SettingsPage } from './SettingsPage'
 import { AgentNames, TaskCard } from './TaskCard'
 import { TaskPage } from './TaskPage'
 
+// jsdom cannot render a terminal; ShellTab has its own tests with a fake one.
+vi.mock('./ShellTab', () => ({
+  ShellTab: ({ taskId }: { taskId: number }) => <div>Shell for task {taskId}</div>,
+}))
+
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof api>()),
   addProject: vi.fn(),
@@ -861,7 +866,23 @@ test('wide layout remembers the detail panel and supports keyboard resizing', as
   expect(separator.getAttribute('aria-valuenow')).toBe('30')
   fireEvent.click(screen.getByRole('tab', { name: 'Shell' }))
   expect(localStorage.getItem('agsv.task-panel')).toBe('Shell')
-  expect(screen.getByText(/A terminal in this task's worktree/)).toBeTruthy()
+  expect(await screen.findByText('Shell for task 7')).toBeTruthy()
+})
+
+test('a Shell tab remembered from last time does not start a shell until asked', async () => {
+  localStorage.setItem('agsv.task-panel', 'Shell')
+  // The detail panel, and the tab it remembers, belong to the wide layout.
+  vi.stubGlobal('matchMedia', () => ({
+    matches: true,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
+  renderTaskPage()
+  await screen.findByText('working on it')
+
+  expect(screen.queryByText('Shell for task 7')).toBeNull()
+  fireEvent.click(button('Open shell'))
+  expect(await screen.findByText('Shell for task 7')).toBeTruthy()
 })
 
 test('Runs jumps to its Chat divider and can jump to the same run again', async () => {
@@ -921,7 +942,7 @@ test('storage failures do not prevent switching panels or collapsing the sidebar
   renderTaskPage()
   await screen.findByText('working on it')
   fireEvent.click(screen.getByRole('tab', { name: 'Shell' }))
-  expect(screen.getByText(/Coming in 0.4/)).toBeTruthy()
+  expect(await screen.findByText('Shell for task 7')).toBeTruthy()
 })
 
 test('an archived task explains why its shell is unavailable', async () => {

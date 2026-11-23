@@ -25,7 +25,7 @@
 
 ## 目前階段
 
-階段 5（新介面），版本 `0.3.x`，做完發 `0.4`。階段 0 到 4 已完成（`v0.3.0`，repo 已公開）。現在依 `docs/design/phase5-tasks.md` 做任務 19 到 25：任務 19 到 23b 已完成（任務 22 由 Codex、任務 23 由 Claude Code 透過 agsv 執行）；任務 24、25 在對話裡直接做。**一次做一個，合併之後才開始下一個**（決策第 150 筆）；每個任務先提計畫，我確認後再動手（由 agent-supervisor 開的任務例外，見「開發慣例」）。不要提前做階段 6 之後的功能，也不要做任務單「不要做」清單裡的功能。進入新階段時我會更新這一段。
+階段 5（新介面），版本 `0.3.x`，做完發 `0.4`。階段 0 到 4 已完成（`v0.3.0`，repo 已公開）。現在依 `docs/design/phase5-tasks.md` 做任務 19 到 25：任務 19 到 24 已完成（任務 22 由 Codex、任務 23 由 Claude Code 透過 agsv 執行）；剩下任務 25（驗收與發 0.4），在對話裡直接做。**一次做一個，合併之後才開始下一個**（決策第 150 筆）；每個任務先提計畫，我確認後再動手（由 agent-supervisor 開的任務例外，見「開發慣例」）。不要提前做階段 6 之後的功能，也不要做任務單「不要做」清單裡的功能。進入新階段時我會更新這一段。
 
 ## 技術選型
 
@@ -38,7 +38,7 @@
 - 前端：React + Vite + TypeScript，放在 `web/`，測試用 vitest
   - 樣式用 Tailwind 4（`@tailwindcss/vite`），Preflight 已開啟（任務 22）。手寫的 CSS 一律放進 layer：不在 layer 裡的規則會蓋過 Tailwind 的 class（決策第 181、185 筆）
   - 視覺方向是 `docs/design/ui.md` 的方向 A（第 186 筆）；顏色一律經過那裡的 token，深色與淺色都要有，元件裡不寫死色碼（第 182 筆）。字型不從網路載入
-  - Shell（任務 24）會加 xterm.js
+  - Shell 用 xterm.js（`@xterm/xterm`、`@xterm/addon-fit`），只在打開 Shell 分頁時載入（決策第 195 筆）
   - 不裝路由、資料抓取的套件；元件庫、圖示庫要用之前先問我（第 175 筆）
 
 ## 專案結構
@@ -70,12 +70,13 @@ src/agent_supervisor/
   db.py              # schema 與查詢
   config.py
   notifier.py        # 卡片進 Needs you 時發系統通知（macOS 用 osascript，Linux 用 notify-send）
+  shell.py           # 任務 worktree 裡的 terminal：pty、每個任務一個、結束時清掉程序（決策第 195 到 197 筆）
   api/
     app.py           # `/api` 底下的 REST 端點與 GET /api/stream；有 web_dist 時掛在 /，沒有時 / 說明怎麼取得
     feed.py          # 偵測資料庫的變化並推送給 SSE 連線
     views.py         # 把資料轉成回應內容（純函式）
     errors.py        # 錯誤回應的形狀與對應
-    guard.py         # 只接受對本機、從本機網頁發出的請求
+    guard.py         # 只接受對本機、從本機網頁發出的請求；shell 的 WebSocket 只接受看板自己的頁面
 tests/
 docs/
   design/            # 現在的樣子（見上面的表）
@@ -91,8 +92,9 @@ web/                 # 前端：React + Vite + Tailwind
     timeline.ts      # 把 run 與事件排成 Chat 的時間軸、標出來源（純函式）
     diff.ts          # 把 git 的 diff 拆成檔案與行（純函式）
     keys.ts          # Cmd/Ctrl+Enter 送出
+    shell.ts         # Shell 分頁的 WebSocket 連線與訊息
     App.tsx          # 版面、資料的載入與推送
-    components/      # 看板、卡片、表單、任務詳情頁（ChatTab、DiffTab、TaskTabs）
+    components/      # 看板、卡片、表單、任務詳情頁（ChatTab、DiffTab、ShellTab、TaskTabs）
 ```
 
 import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名的知名套件。

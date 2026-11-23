@@ -131,7 +131,16 @@ Diff includes a file list and totals; each file can be folded. Events lists the 
 filters by source (Agent, You, Reviewer, Automatic, System), by event type and by run; click a row
 to see its full payload and copy it as JSON. Runs shows the task's tokens, the agent's total time
 and the automatic rounds used, then one card per run; select a card to jump to that run in Chat.
-Shell is a placeholder for 0.4; it does not open a terminal yet.
+
+**Shell** is a terminal in the task's worktree, for running tests, looking at files or fixing
+something by hand. It starts when you click the tab (or **Open shell**, when the page reopens on the
+Shell tab) and runs your login shell (`$SHELL`).
+Each task has one shell: it keeps running when you switch tabs or leave the page, and a second
+window shows the same shell with its recent output. **Clear** empties the screen; **Restart** ends
+the shell and everything running in it, then starts a new one. The shell also ends when the task is
+archived or `agsv serve` stops. While the agent is running, a note reminds you that it works in the
+same worktree: files you change end up in the agent's commit. What you type is not recorded in the
+task's events, and the shell never talks to the agent.
 
 ### The Chat tab
 

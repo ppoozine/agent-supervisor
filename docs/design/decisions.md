@@ -115,6 +115,7 @@
 - 介面的需求以 `ui.md` 與 `mockups/`（每個畫面的 HTML 與截圖）為準：任務詳情頁用分割版（左 Chat、右 Diff／Shell／Events／Runs，窄視窗退回分頁）；深色與淺色主題都做，跟著系統切換（182）。
 - 視覺方向是 A · Calm：中性色為主、只有一個靛藍強調色、細邊框不用陰影；字型用 Inter 與 JetBrains Mono，但不從網路載入（186）。
 - Chat 左右分邊：你的訊息靠右，agent 與 reviewer 靠左，系統與自動的事件置中（187）。
+- Shell：WebSocket 加 xterm.js，新增 `websockets` 與 `@xterm/xterm`、`@xterm/addon-fit`（195）。每個任務一個 shell，離開頁面後繼續跑、重連時送最近的輸出；Restart、封存、daemon 停止時關掉；輸入不記進事件（196）。WebSocket 只接受看板自己的頁面（`Origin` 存在且等於 `Host`），Vite proxy 只改寫 dev server 自己頁面的連線；用 `os.login_tty` 的啟動器讓 shell 有控制終端機（197）。
 - Archive 是獨立的畫面（`#/archive`，表格、依結果篩選、搜尋）；看板與 Archive 共用專案篩選，記在 `localStorage`。側欄在看板列出各專案進行中的任務，在 Archive 只列專案（188）。
 - 設定頁只能看不能改：Agents、GitHub、Projects、Usage、Limits and permissions（189）。最後一區用唯讀的 `GET /api/config`：只回畫面要用的欄位與 daemon 實際讀的設定檔路徑；兩個次數上限是常數，標成「fixed」（194）。
 

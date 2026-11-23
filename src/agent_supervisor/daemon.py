@@ -30,6 +30,7 @@ from agent_supervisor.recovery import (
     ProcessTable,
     recover_open_runs,
 )
+from agent_supervisor.shell import ShellManager
 from agent_supervisor.supervisor import Supervisor, build_supervisor
 
 HOST = "127.0.0.1"
@@ -170,6 +171,7 @@ async def _run_until_quit(
     notifier = Notifier(enabled=config.notify_needs_you)
     feed = ChangeFeed(supervisor, on_needs_you=notifier.card_needs_you)
     await feed.start()
+    shells = ShellManager()
     server = _Server(
         uvicorn.Config(
             create_app(
@@ -178,6 +180,7 @@ async def _run_until_quit(
                 is_closing=quit_requested.is_set,
                 static_dir=web_dist,
                 config_path=config_path,
+                shells=shells,
             ),
             host=HOST,
             port=config.api_port,
@@ -191,7 +194,7 @@ async def _run_until_quit(
     workers = [
         asyncio.create_task(feed.run()),
         asyncio.create_task(_stop_whenever_requested(supervisor, stop_requested)),
-        asyncio.create_task(_exit_when_quitting(server, quit_requested)),
+        asyncio.create_task(_exit_when_quitting(server, quit_requested, shells)),
     ]
     polling = asyncio.create_task(_poll_until_quit(supervisor, quit_requested))
     try:
@@ -199,15 +202,23 @@ async def _run_until_quit(
     finally:
         # When the server exits on its own (e.g. the port is in use), the other work must stop too.
         quit_requested.set()
+        await shells.close_all()
         await asyncio.wait({polling})
         for worker in workers:
             worker.cancel()
         await asyncio.wait(workers)
 
 
-async def _exit_when_quitting(server: uvicorn.Server, quit_requested: asyncio.Event) -> None:
+async def _exit_when_quitting(
+    server: uvicorn.Server, quit_requested: asyncio.Event, shells: ShellManager
+) -> None:
     await quit_requested.wait()
-    server.should_exit = True
+    try:
+        # End the shells first: their WebSocket connections then close, and the server does not
+        # wait for them until the graceful shutdown times out.
+        await shells.close_all()
+    finally:
+        server.should_exit = True
 
 
 async def _stop_whenever_requested(supervisor: Supervisor, stop_requested: asyncio.Event) -> None:

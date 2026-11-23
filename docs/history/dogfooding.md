@@ -52,6 +52,7 @@
 - **任務**：任務 22 的 review
 - **發生什麼**：daemon 提供的是 `main` 上 build 好的前端（`web_dist`），看不到任務 branch 的畫面。review 時要在任務的 worktree 手動跑 `npx vite`，用 5173 埠打開（`/api` 轉給 daemon），看完再關掉。
 - **影響**：前端任務的 review 多了好幾步，也容易忘記關掉 dev server。
+- **進展**：任務 24 的 Shell 已經做好，可以在任務詳情頁的 worktree 裡直接跑測試與指令；但看前端畫面仍要自己開 dev server。
 - **想法**：任務 24 的 Shell 做好後，可以在任務詳情頁直接跑；更進一步是詳情頁的「Preview」：由 daemon 在 worktree 啟動專案設定好的預覽指令，給一個連結。需要專案層級的設定，排在 Shell 之後評估。
 - **狀態**：待排
 

@@ -71,6 +71,9 @@ export const getSetup = () => request<Setup>('GET', '/setup')
 export const checkSetup = () => request<Setup>('POST', '/setup/check')
 export const getUsage = () => request<Usage>('GET', '/usage')
 export const getConfig = () => request<ServerConfig>('GET', '/config')
+/** End the task's shell; a connected page then gets a new one. `restarted` is false if none was running. */
+export const restartShell = (taskId: number) =>
+  request<{ restarted: boolean }>('POST', `/tasks/${taskId}/shell/restart`)
 export const listTasks = () => request<Card[]>('GET', '/tasks')
 export const createTask = (task: NewTask) => request<TaskDetail>('POST', '/tasks', task)
 export const getTask = (taskId: number) => request<TaskDetail>('GET', `/tasks/${taskId}`)
