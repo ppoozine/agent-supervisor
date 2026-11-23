@@ -6,8 +6,9 @@ interface DialogProps {
   isBusy: boolean
   /** False keeps the submit button disabled, e.g. while a required choice has no options. */
   canSubmit?: boolean
+  /** Shown above the buttons; forms that show an error under a field pass null. */
   error: string | null
-  /** Shown before the submit button when a field in the form submits on a keyboard shortcut. */
+  /** Shown at the left of the footer when a field in the form submits on a keyboard shortcut. */
   shortcutHint?: string
   onSubmit: () => void
   onClose: () => void
@@ -15,7 +16,8 @@ interface DialogProps {
 }
 
 /**
- * A form laid over the page. When the API refuses, the reason is shown above the buttons.
+ * A form laid over the page: a title bar with a close button, the fields, and a footer with the
+ * shortcut, Cancel and the main button. When the API refuses, the reason is shown above the footer.
  *
  * Uses the browser's native modal: focus stays in the form, the background is inert, and
  * Escape closes it.
@@ -53,17 +55,30 @@ export function Dialog(props: DialogProps) {
       }}
       onMouseDown={(event) => event.target === event.currentTarget && close()}
     >
-      <form className="dialog-form" onSubmit={submit}>
-        <h2>{props.title}</h2>
-        {props.children}
-        {props.error && (
-          <div className="alert" role="alert">
-            {props.error}
-          </div>
-        )}
-        <div className="dialog-actions">
-          {props.shortcutHint && <kbd className="shortcut-hint whitespace-nowrap">{props.shortcutHint}</kbd>}
-          <button type="button" className="ghost" onClick={close} disabled={props.isBusy}>
+      <form onSubmit={submit}>
+        <div className="dialog-head">
+          <h2>{props.title}</h2>
+          <button
+            type="button"
+            className="ghost"
+            aria-label="Close"
+            onClick={close}
+            disabled={props.isBusy}
+          >
+            <span aria-hidden="true">✕</span>
+          </button>
+        </div>
+        <div className="dialog-body">
+          {props.children}
+          {props.error && (
+            <div className="alert" role="alert">
+              {props.error}
+            </div>
+          )}
+        </div>
+        <div className="dialog-foot">
+          <kbd className="key-hint">{props.shortcutHint}</kbd>
+          <button type="button" className="btn" onClick={close} disabled={props.isBusy}>
             Cancel
           </button>
           <button

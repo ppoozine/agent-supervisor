@@ -40,13 +40,35 @@ time anything changes. A task is in exactly one place.
 | **Needs you** | Nothing more will happen without you. The label says why. |
 | **In review** | The pull request is open and waiting on CI, on GitHub, or on a review. |
 | **Ready to merge** | CI passed, no conflicts, and (if the project requires it) a review approved. Merge on GitHub. |
-| **Archive** | Below the board: the pull request was merged or closed, or you archived the task. |
+| **Archive** | Its own view at `#/archive`: the pull request was merged or closed, or you archived the task. |
 
-The sidebar lists active tasks by project. Its colored dots match the board columns; a pulsing
-dot means a run is active. Use the collapse button to switch between the 240px sidebar and a
-56px icon rail; the browser remembers that choice. Archive starts collapsed and opens as a list
-of task titles, outcomes, and dates. The board and task page follow your system's light or dark
-theme. Settings and dialogs retain their existing appearance until their separate restyle.
+The header switches between **Board** and **Archive**, filters by project, and sums up the cards
+shown (`6 active · 2 need you`). Pick a project from the filter, or click its name in the sidebar
+(click again for all projects): the board then shows only that project's cards, and **New task**
+becomes **New task in web-app** with that project already chosen. The browser remembers the
+filter, and the Archive uses the same one.
+
+The sidebar has **New task**, **Board** and **Archive** with their counts, then each project with
+its active tasks. Its colored dots match the board columns; a pulsing dot means a run is active.
+At the bottom are the connection (**Live**, or **Reconnecting…** with a banner over the page while
+the daemon cannot be reached) and **Settings**. Use the collapse button to switch between the
+240px sidebar and a 56px icon rail; the browser remembers that choice. Every screen follows your
+system's light or dark theme.
+
+### The Archive
+
+The Archive lists finished tasks in a table, newest first: title, project, agent, outcome, pull
+request, when it finished, and usage. Filter by outcome (**Merged**, **PR closed**, **Archived by
+you**; the counts follow the project filter) or search titles and branch names. Opening an
+archived task shows its Chat, Diff and history read-only.
+
+### Settings
+
+Settings is read-only. **Agents** and **GitHub** show whether each agent and `gh` can be used,
+with the commands to run in a terminal (each with a **Copy** button) for those that cannot; press
+**Check again** afterwards. **Projects** lists each project's path, GitHub repo, review rule and
+task counts. **Usage** totals cost and tokens over every task, archived ones included. To change
+limits and permissions, edit the config file described below.
 
 ### Labels
 
@@ -99,12 +121,15 @@ conflict, then the CI failure.
 On windows at least 1100px wide, Chat stays on the left and Diff, Shell, Events, and Runs occupy
 the right panel. Drag the divider to resize it, or focus it and press Left or Right. Narrower
 windows show one tab at a time, starting with Chat. The browser remembers the last detail panel
-selected. The branch copy button copies the full branch name; the header also shows CI, review,
-conflicts, and usage.
+selected. The header shows the status, the project and agent, the branch with a copy button, the
+pull request, CI, review, conflicts, the automatic rounds, and usage, with **Archive** and **Stop**
+on the right.
 
-Diff includes a file list and totals; each file can be folded. Events retains its type filter and
-colors event types by source. Select a run in Runs to jump to its divider in Chat. Shell is a
-placeholder for 0.4; it does not open a terminal yet.
+Diff includes a file list and totals; each file can be folded. Events lists the newest first and
+filters by source (Agent, You, Reviewer, Automatic, System), by event type and by run; click a row
+to see its full payload and copy it as JSON. Runs shows the task's tokens, the agent's total time
+and the automatic rounds used, then one card per run; select a card to jump to that run in Chat.
+Shell is a placeholder for 0.4; it does not open a terminal yet.
 
 ### The Chat tab
 
@@ -115,10 +140,10 @@ from:
 
 | Entry | What it is |
 | --- | --- |
-| **You** (right, blue) | The task description or a message you sent |
-| **Automatic** (dashed, yellow) | Instructions agent-supervisor sent on its own: failing CI logs, a merge conflict, or PR comments. Folded; open it to see exactly what the agent was given |
-| **Reviewer** (purple edge) | A comment on the pull request, with the file and line for inline comments. Faded, with the reason, when it was not passed to the agent (a bot, an author who is not a collaborator, an approval, no text) |
-| **Agent** | What the agent said, and one line per command, tool call or thought; open a line to see its output. Failed commands are red; actions blocked by the policy are orange |
+| **You** (right) | The task description or a message you sent |
+| **Automatic** (centered, amber) | Instructions agent-supervisor sent on its own: failing CI logs, a merge conflict, or PR comments. Folded; open it to see exactly what the agent was given |
+| **Reviewer** (left, purple) | A comment on the pull request, with the file and line for inline comments. Faded, with the reason, when it was not passed to the agent (a bot, an author who is not a collaborator, an approval, no text) |
+| **Agent** (left) | What the agent said, and one line per command, tool call or thought; open a line to see its output. Failed commands and actions blocked by the policy are red |
 | System lines (centered) | Pushes, the pull request, CI results, and runs that ended badly |
 
 The header shows the automatic rounds used since you last stepped in, against their limits:
@@ -233,8 +258,8 @@ the [trust model](trust-model.md#what-the-permission-policy-does) before relying
 
 ## Projects
 
-A project is a local clone registered with the supervisor. The board's **Add project** asks for the
-path and whether an approving review is required before **Ready to merge**. The GitHub repo and the
+A project is a local clone registered with the supervisor. **Add project** (in the sidebar, the project
+filter, or Settings) asks for the path and whether an approving review is required before **Ready to merge**. The GitHub repo and the
 base branch are read from `origin`.
 
 To choose a different base branch or GitHub repo, register it from the command line instead. Running

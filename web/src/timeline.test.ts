@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'vitest'
 
-import { buildTimeline, type AgentItem, type TimelineItem } from './timeline'
+import { initials } from './components/ChatTab'
+import { makeEvent } from './testing'
+import { buildTimeline, eventSummary, type AgentItem, type TimelineItem } from './timeline'
 import type { EventRow, Run } from './types'
 
 function run(id: number, trigger: string, startedAt: string, fields: Partial<Run> = {}): Run {
@@ -227,4 +229,35 @@ describe('order and runs', () => {
 
     expect(kinds(items)).toEqual(['run'])
   })
+})
+
+describe('eventSummary', () => {
+  test('says what each event was in one line instead of showing its JSON', () => {
+    const summaries = [
+      makeEvent(1, 'ci_status', { ci_state: 'passed', head_sha: 'f2e2268abc' }),
+      makeEvent(2, 'command', { phase: 'finished', command: 'npm test', exit_code: 0 }),
+      makeEvent(3, 'tool_call', { tool: 'Edit', input: { file_path: 'web/src/App.tsx' } }),
+      makeEvent(4, 'pushed', { head_sha: 'abcdef1234', branch: 'asv/task-7' }),
+      makeEvent(5, 'agent_message', { kind: 'message', text: 'Done.\nMore below' }),
+      makeEvent(6, 'review_comment', { author: 'amy', body: 'Rename this', path: 'a.py', line: 3 }),
+      makeEvent(7, 'state_change', { change: 'run_started' }),
+    ].map(eventSummary)
+
+    expect(summaries).toEqual([
+      'CI passed on f2e2268a',
+      '$ npm test · exit 0',
+      'Edit web/src/App.tsx',
+      'Pushed abcdef12 to asv/task-7',
+      'Done.',
+      '@amy on a.py:3: Rename this',
+      'Run started',
+    ])
+    expect(summaries.some((summary) => summary.includes('{'))).toBe(false)
+  })
+})
+
+test('avatars use two letters: Claude Code is CC and Codex is CX', () => {
+  expect(initials('Claude Code')).toBe('CC')
+  expect(initials('Codex')).toBe('CX')
+  expect(initials('X')).toBe('X')
 })

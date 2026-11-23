@@ -9,7 +9,7 @@ import { DiffTab } from './DiffTab'
 import { ChatTab } from './ChatTab'
 import { EventsTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
-import { Checks, useAgentName } from './TaskCard'
+import { Attempts, Checks, useAgentName } from './TaskCard'
 import { readPreference, savePreference } from '../preferences'
 
 interface TaskPageProps {
@@ -137,7 +137,12 @@ export function TaskPage(props: TaskPageProps) {
         {error}
       </div>
     ) : (
-      <p className="empty">Loading…</p>
+      <div className="skeleton" aria-busy="true">
+        <span className="sr-only">Loading…</span>
+        <span className="w-1/3" />
+        <span className="w-2/3" />
+        <span className="w-1/2" />
+      </div>
     )
   }
   const prUrl = pullRequestUrl(project, current)
@@ -162,99 +167,86 @@ export function TaskPage(props: TaskPageProps) {
 
   return (
     <div className="task-page">
-      <div className="task-header">
-        <a className="back shrink-0 py-1" href="#/">
-          ← Board
-        </a>
-        <div className="task-heading">
-          <h2>{current.title}</h2>
-          <div className="task-meta">
-            <StatusLabel
-              label={current.label}
-              column={current.column}
-              active={current.has_open_run}
-            />
-            <span>{project?.name}</span>
-            <span className={`agent agent-${current.agent_type}`}>
-              {agentName(current.agent_type)}
-            </span>
-            {current.branch && (
-              <span className="inline-flex min-w-0 items-center gap-1">
-                <span className="branch">{current.branch}</span>
-                <button
-                  className="ghost px-1 py-0"
-                  aria-label="Copy branch name"
-                  title="Copy branch name"
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        await navigator.clipboard.writeText(current.branch!)
-                        setCopyStatus('Branch copied')
-                      } catch {
-                        setCopyStatus('Could not copy branch name')
-                      }
-                    })()
-                  }}
-                >
-                  ⧉
-                </button>
-                <span role="status" className="text-xs">
-                  {copyStatus}
-                </span>
+      <header className="task-header">
+        <div className="task-title-row">
+          <a className="crumb" href="#/">
+            Board <span aria-hidden="true">/</span>
+          </a>
+          <h1 className="task-title">{current.title}</h1>
+          <StatusLabel
+            label={current.label}
+            column={current.column}
+            active={current.has_open_run}
+          />
+          <div className="task-actions">
+            <button
+              className="btn"
+              onClick={requestArchive}
+              disabled={isArchived || busyAction !== null}
+            >
+              {busyAction === 'archive' ? 'Archiving…' : isArchived ? 'Archived' : 'Archive'}
+            </button>
+            <button
+              className="btn btn-danger"
+              onClick={() => void perform('stop', () => stopTask(taskId))}
+              disabled={!current.has_open_run || busyAction !== null}
+              title={current.has_open_run ? undefined : 'No run is active'}
+            >
+              {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
+            </button>
+          </div>
+        </div>
+        <div className="task-meta">
+          <span>
+            {project?.name} · {agentName(current.agent_type)}
+          </span>
+          {current.branch && (
+            <span className="inline-flex min-w-0 items-center gap-1">
+              <span className="branch">{current.branch}</span>
+              <button
+                className="ghost px-1 py-0"
+                aria-label="Copy branch name"
+                title="Copy branch name"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await navigator.clipboard.writeText(current.branch!)
+                      setCopyStatus('Branch copied')
+                    } catch {
+                      setCopyStatus('Could not copy branch name')
+                    }
+                  })()
+                }}
+              >
+                ⧉
+              </button>
+              <span role="status" className="text-xs">
+                {copyStatus}
               </span>
-            )}
-            {current.pr_number !== null &&
-              (prUrl ? (
+            </span>
+          )}
+          {current.pr_number !== null && (
+            <span>
+              {prUrl ? (
                 <a href={prUrl} target="_blank" rel="noreferrer">
-                  PR #{current.pr_number} {current.pr_state}
+                  PR #{current.pr_number}
                 </a>
               ) : (
-                <span>
-                  PR #{current.pr_number} {current.pr_state}
-                </span>
-              ))}
-            <Checks card={current} detailed />
-          </div>
-          <div className="task-meta">
-            <span
-              className="muted"
-              title={`All runs: ${formatCount(detail.tokens_in)} in · ${formatCount(detail.tokens_out)} out. Cost is an estimate; agents that do not report cost show tokens only`}
-            >
-              {formatUsage(current)}
-              {current.cost_usd !== null && ` · ${formatCount(current.tokens)} tok`}
+                `PR #${current.pr_number}`
+              )}
+              {current.pr_state !== 'open' && current.pr_state && ` ${current.pr_state}`}
             </span>
-            <span
-              className={
-                current.ci_fix_attempts >= current.max_ci_fix_attempts ||
-                current.feedback_attempts >= current.max_feedback_attempts
-                  ? 'text-needs-you'
-                  : 'text-text-muted'
-              }
-              title="Automatic rounds used since you last stepped in"
-            >
-              fixes {current.ci_fix_attempts}/{current.max_ci_fix_attempts} · comments{' '}
-              {current.feedback_attempts}/{current.max_feedback_attempts}
-            </span>
-          </div>
-        </div>
-        <div className="task-actions">
-          <button
-            className="btn text-danger"
-            onClick={() => void perform('stop', () => stopTask(taskId))}
-            disabled={!current.has_open_run || busyAction !== null}
-            title={current.has_open_run ? undefined : 'No run is active'}
+          )}
+          <Checks card={current} detailed />
+          <Attempts card={current} always />
+          <span
+            title={`All runs: ${formatCount(detail.tokens_in)} in · ${formatCount(detail.tokens_out)} out. Cost is an estimate; agents that do not report cost show tokens only`}
           >
-            {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
-          </button>
-          <button
-            className="btn"
-            onClick={requestArchive}
-            disabled={isArchived || busyAction !== null}
-          >
-            {busyAction === 'archive' ? 'Archiving…' : isArchived ? 'Archived' : 'Archive'}
-          </button>
+            {formatUsage(current)}
+            {current.cost_usd !== null && ` · ${formatCount(current.tokens)} tok`}
+          </span>
         </div>
-      </div>
+      </header>
       {isConfirmingArchive && (
         <Dialog
           title="Archive this task?"
@@ -313,7 +305,7 @@ export function TaskPage(props: TaskPageProps) {
             />
           </div>
           {closedReason !== null ? (
-            <p className="composer-closed muted">{closedReason}</p>
+            <p className="composer-closed">{closedReason}</p>
           ) : (
             <form
               className="composer"
@@ -322,11 +314,6 @@ export function TaskPage(props: TaskPageProps) {
                 void send()
               }}
             >
-              {current.has_open_run && (
-                <p className="composer-note muted">
-                  The agent is working. Stop it to send a message now.
-                </p>
-              )}
               <div className="composer-box">
                 <textarea
                   value={messageText}
@@ -338,7 +325,11 @@ export function TaskPage(props: TaskPageProps) {
                   aria-keyshortcuts="Meta+Enter Control+Enter"
                 />
                 <div className="composer-foot">
-                  <kbd className="shortcut-hint whitespace-nowrap">{shortcutLabel}</kbd>
+                  <span>
+                    {current.has_open_run
+                      ? 'The agent is working. Stop it to send a message now.'
+                      : 'Continues the same agent session.'}
+                  </span>
                   <button
                     type="submit"
                     className="primary"
@@ -347,6 +338,9 @@ export function TaskPage(props: TaskPageProps) {
                     }
                   >
                     {busyAction === 'send' ? 'Sending…' : 'Send'}
+                    <kbd className="key-hint" aria-hidden="true">
+                      {shortcutLabel}
+                    </kbd>
                   </button>
                 </div>
               </div>
@@ -411,16 +405,18 @@ export function TaskPage(props: TaskPageProps) {
               />
             )}
             {selected === 'Shell' && (
-              <p className="empty">
+              <p className="shell-placeholder">
                 {isArchived
                   ? 'The worktree was removed when the task was archived.'
                   : "A terminal in this task's worktree. Coming in 0.4."}
               </p>
             )}
-            {selected === 'Events' && <EventsTab events={events} />}
+            {selected === 'Events' && <EventsTab events={events} runs={detail.runs} />}
             {selected === 'Runs' && (
               <RunsTab
                 runs={detail.runs}
+                events={events}
+                card={current}
                 onSelectRun={(number) => {
                   setTab('Chat')
                   setJump({ number })

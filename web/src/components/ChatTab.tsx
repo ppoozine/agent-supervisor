@@ -77,7 +77,7 @@ export function ChatTab({ runs, events, agentName, jump, visible = true }: ChatT
         if (isFollowing.current) setHasUnseen(false)
       }}
     >
-      {items.length === 0 && <p className="empty">Nothing yet.</p>}
+      {items.length === 0 && <p className="empty self-center">Nothing yet.</p>}
       {items.map((item) => (
         <ChatItem item={item} agentName={agentName} key={item.key} />
       ))}
@@ -95,12 +95,18 @@ function ChatItem({ item, agentName }: { item: TimelineItem; agentName: string }
     case 'run':
       return <RunDivider item={item} />
     case 'you':
+      // Your words are on the right; everyone else's are on the left.
       return (
-        <div className="chat-you" data-source="you">
-          <div className="chat-source">
-            You <span className="muted">· {clockTime(item.ts)}</span>
+        <div className="msg msg-you source-you" data-source="you">
+          <div className="bubble bubble-you">
+            <div className="bubble-head">
+              <span className="muted">{clockTime(item.ts)}</span> You
+            </div>
+            <div className="chat-body">{item.text}</div>
           </div>
-          <div className="chat-bubble">{item.text}</div>
+          <span className="avatar" aria-hidden="true">
+            YO
+          </span>
         </div>
       )
     case 'auto':
@@ -113,8 +119,10 @@ function ChatItem({ item, agentName }: { item: TimelineItem; agentName: string }
       return <SystemEntry item={item} />
     case 'working':
       return (
-        <div className="chat-working" data-source="agent">
-          <span className="chat-stamp">{initials(agentName)}</span>
+        <div className="chat-working source-agent" data-source="agent">
+          <span className="avatar" aria-hidden="true">
+            {initials(agentName)}
+          </span>
           <span>Working…</span>
         </div>
       )
@@ -122,17 +130,15 @@ function ChatItem({ item, agentName }: { item: TimelineItem; agentName: string }
 }
 
 function RunDivider({ item }: { item: RunItem }) {
-  const facts = [runOutcome(item.run)]
-  if (item.run.ended_at !== null) facts.push(runDuration(item.run))
   const usage = runUsage(item.run)
-  if (usage) facts.push(usage)
   return (
     <div className="chat-run" data-run={item.number} tabIndex={-1}>
-      <span>
-        <b>Run #{item.number}</b> ·{' '}
-        <span className={`chat-why source-${item.source}`}>{item.reason}</span> ·{' '}
-        {facts.join(' · ')}
-      </span>
+      <b>Run {item.number}</b>
+      <span className={`toned source-${item.source}`}>{item.reason}</span>
+      <span>{clockTime(item.run.started_at)}</span>
+      {item.run.ended_at !== null && <span>{runDuration(item.run)}</span>}
+      {usage && <span>{usage}</span>}
+      <span>{runOutcome(item.run)}</span>
     </div>
   )
 }
@@ -140,60 +146,58 @@ function RunDivider({ item }: { item: RunItem }) {
 function AutoEntry({ item }: { item: AutoItem }) {
   const lines = item.text.split('\n').length
   return (
-    <details className="chat-auto" data-source="auto">
+    <details className="chat-centre chat-auto flex-col" data-source="auto">
       <summary>
-        <span className="chat-source">
-          ⚙ Automatic{' '}
-          <span className="muted">· sent by agent-supervisor · {clockTime(item.ts)}</span>
-        </span>
-        <span>
-          {item.reason}.{' '}
-          <span className="muted">
-            Show what was sent · {lines} {lines === 1 ? 'line' : 'lines'}
-          </span>
+        Automatic · {item.reason} · {clockTime(item.ts)}{' '}
+        <span className="opacity-75">
+          (show what was sent · {lines} {lines === 1 ? 'line' : 'lines'})
         </span>
       </summary>
-      <pre>{item.text}</pre>
+      <pre className="text-left text-text">{item.text}</pre>
     </details>
   )
 }
 
 function ReviewerEntry({ item }: { item: ReviewerItem }) {
   return (
-    <div className={`chat-reviewer${item.notSent ? ' is-ignored' : ''}`} data-source="reviewer">
-      <div className="chat-source">
-        Reviewer{' '}
-        <span className="muted">
-          · @{item.author} · {item.commentKind} · {clockTime(item.ts)}
-        </span>
-      </div>
-      {(item.where || item.url) && (
-        <div className="chat-where">
-          {item.where}
-          {item.where && item.url && ' · '}
-          {item.url && (
-            <a href={item.url} target="_blank" rel="noreferrer">
-              view on GitHub ↗
-            </a>
-          )}
+    <div className="msg source-reviewer" data-source="reviewer">
+      <span className="avatar" aria-hidden="true">
+        {initials(item.author)}
+      </span>
+      <div className={`bubble bubble-reviewer${item.notSent ? ' is-ignored' : ''}`}>
+        <div className="bubble-head">
+          @{item.author}
+          <span className="muted">
+            · reviewer · {item.commentKind} · {clockTime(item.ts)}
+          </span>
         </div>
-      )}
-      <div className="chat-body">{item.body}</div>
-      {item.notSent && <div className="chat-not-sent">{item.notSent}</div>}
+        {(item.where || item.url) && (
+          <div className="chat-where">
+            {item.where}
+            {item.where && item.url && ' · '}
+            {item.url && (
+              <a href={item.url} target="_blank" rel="noreferrer">
+                view on GitHub ↗
+              </a>
+            )}
+          </div>
+        )}
+        <div className="chat-body">{item.body}</div>
+        {item.notSent && <div className="chat-not-sent">{item.notSent}</div>}
+      </div>
     </div>
   )
 }
 
 function AgentEntry({ item, agentName }: { item: AgentItem; agentName: string }) {
   return (
-    <div className="chat-agent" data-source="agent">
-      <span className="chat-stamp">{initials(agentName)}</span>
-      <div className="chat-agent-body">
-        <div className="chat-source">
-          Agent{' '}
-          <span className="muted">
-            · {agentName} · {clockTime(item.ts)}
-          </span>
+    <div className="msg source-agent" data-source="agent">
+      <span className="avatar" aria-hidden="true">
+        {initials(agentName)}
+      </span>
+      <div className="bubble bubble-agent">
+        <div className="bubble-head">
+          {agentName} <span className="muted">· {clockTime(item.ts)}</span>
         </div>
         {item.parts.map((part) =>
           part.kind === 'message' ? (
@@ -228,7 +232,7 @@ function ActionRow({ action }: { action: AgentAction }) {
 
 function SystemEntry({ item }: { item: SystemItem }) {
   return (
-    <div className={`chat-system tone-${item.tone}`} data-source="system">
+    <div className={`chat-centre chat-system tone-${item.tone}`} data-source="system">
       <span className="chat-system-symbol">{item.symbol}</span>
       {item.url ? (
         <a href={item.url} target="_blank" rel="noreferrer">
@@ -237,14 +241,15 @@ function SystemEntry({ item }: { item: SystemItem }) {
       ) : (
         item.text
       )}
-      <span className="muted">· {clockTime(item.ts)}</span>
+      <span>· {clockTime(item.ts)}</span>
     </div>
   )
 }
 
-/** Up to two letters for the agent's stamp: `Claude Code` becomes `CC`, `Codex` becomes `CO`. */
+/** Two letters for an avatar: `Claude Code` becomes `CC`; one word takes its first and last letter, so `Codex` becomes `CX`. */
 export function initials(name: string): string {
   const words = name.split(/\s+/).filter(Boolean)
   if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase()
-  return name.slice(0, 2).toUpperCase()
+  const word = words[0] ?? ''
+  return (word.length > 1 ? word[0] + word[word.length - 1] : word).toUpperCase()
 }

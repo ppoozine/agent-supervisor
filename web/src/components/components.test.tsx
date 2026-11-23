@@ -24,6 +24,8 @@ vi.mock('../api', async (importOriginal) => ({
   getDiff: vi.fn(),
   getSetup: vi.fn(),
   checkSetup: vi.fn(),
+  // Never resolves: the settings tests are about the tools, not the usage totals.
+  getUsage: vi.fn(() => new Promise(() => undefined)),
 }))
 
 const project: Project = {
@@ -116,8 +118,74 @@ test('the board puts each card in the column the api names', () => {
   expect(screen.getByRole('region', { name: 'Needs you' }).textContent).toContain('one')
   expect(screen.getByRole('region', { name: 'Ready to merge' }).textContent).toContain('two')
   expect(screen.queryByText('three')).toBeNull()
-  fireEvent.click(screen.getByRole('button', { name: /Archive/ }))
-  expect(screen.getByRole('region', { name: 'Archive' }).textContent).toContain('three')
+})
+
+test('the project filter shows one project on the board and names it on New task', () => {
+  const other: Project = { ...project, id: 2, name: 'api-service' }
+  const cards = [
+    makeCard({ id: 1, title: 'one', project_id: 1 }),
+    makeCard({ id: 2, title: 'two', project_id: 2, column: 'Needs you' }),
+  ]
+  const select = vi.fn()
+  const view = render(
+    <Board cards={cards} projects={[project, other]} onSelectProject={select} />,
+  )
+  expect(screen.getByText('2 active · 1 need you')).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Project: All projects' }))
+  const options = within(screen.getByRole('listbox', { name: 'Project' })).getAllByRole('option')
+  expect(options.map((option) => option.textContent)).toEqual([
+    '✓All projects 2',
+    `${project.name} 1`,
+    'api-service 1',
+    'Add project…',
+  ])
+  fireEvent.click(options[2])
+  expect(select).toHaveBeenCalledWith(2)
+  expect(screen.queryByRole('listbox')).toBeNull()
+
+  view.rerender(
+    <Board cards={cards} projects={[project, other]} selectedProjectId={2} onSelectProject={select} />,
+  )
+  expect(screen.queryByText('one')).toBeNull()
+  expect(screen.getByText('two')).toBeTruthy()
+  expect(screen.getByText('1 active · 1 need you')).toBeTruthy()
+  expect(screen.getByRole('button', { name: 'New task in api-service' })).toBeTruthy()
+  expect(screen.getByText('Nothing running in api-service')).toBeTruthy()
+})
+
+test('the archive lists finished tasks, filtered by outcome and searched by title or branch', async () => {
+  const { Archive } = await import('./Archive')
+  const cards = [
+    makeCard({ id: 1, title: 'merged one', column: 'Archive', pr_number: 4, pr_state: 'merged', archived_at: '2026-11-20T10:00:00Z' }),
+    makeCard({ id: 2, title: 'closed one', column: 'Archive', pr_number: 5, pr_state: 'closed', archived_at: '2026-11-21T10:00:00Z', branch: 'asv/task-2-special' }),
+    makeCard({ id: 3, title: 'dropped', column: 'Archive', archived_at: '2026-11-22T10:00:00Z' }),
+    makeCard({ id: 4, title: 'still working' }),
+  ]
+  render(
+    <Archive
+      cards={cards}
+      projects={[project]}
+      selectedProjectId={null}
+      onSelectProject={vi.fn()}
+      onAddProject={vi.fn()}
+    />,
+  )
+  const titles = (): string[] =>
+    within(screen.getByRole('table', { name: 'Archived tasks' }))
+      .queryAllByRole('link')
+      .map((link) => link.textContent ?? '')
+  expect(titles()).toEqual(['dropped', 'closed one', 'merged one'])
+  expect(screen.getByRole('button', { name: 'All 3' }).getAttribute('aria-pressed')).toBe('true')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Merged 1' }))
+  expect(titles()).toEqual(['merged one'])
+  fireEvent.click(screen.getByRole('button', { name: 'Archived by you 1' }))
+  expect(titles()).toEqual(['dropped'])
+  fireEvent.click(screen.getByRole('button', { name: 'All 3' }))
+  fireEvent.change(screen.getByRole('searchbox', { name: 'Search title or branch' }), {
+    target: { value: 'SPECIAL' },
+  })
+  expect(titles()).toEqual(['closed one'])
 })
 
 test('a new task is sent with the chosen project and agent', async () => {
@@ -127,7 +195,7 @@ test('a new task is sent with the chosen project and agent', async () => {
     <NewTaskDialog projects={[project]} agents={agents} onCreated={created} onClose={vi.fn()} />,
   )
 
-  fireEvent.change(screen.getByLabelText('Agent'), { target: { value: 'codex' } })
+  fireEvent.click(screen.getByRole('radio', { name: /Codex/ }))
   fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'add cube(x)' } })
   fireEvent.click(button('Start task'))
 
@@ -310,7 +378,8 @@ test('the header shows automatic rounds against their limits', async () => {
   renderTaskPage(makeCard({ ci_fix_attempts: 1, feedback_attempts: 2 }))
   await screen.findByText('working on it')
 
-  expect(screen.getByText(/fixes 1\/3 · comments 2\/5/)).toBeTruthy()
+  expect(screen.getByText('fixes 1/3')).toBeTruthy()
+  expect(screen.getByText('comments 2/5')).toBeTruthy()
 })
 
 test('the chat labels who each entry came from and keeps long content folded', async () => {
@@ -366,7 +435,7 @@ test('the chat labels who each entry came from and keeps long content folded', a
   )
   expect(sources).toEqual(['you', 'agent', 'reviewer', 'auto', 'agent', 'agent'])
   expect(within(chat).getByText('add power(base, exponent)')).toBeTruthy()
-  expect(within(chat).getByText(/Run #2/).parentElement?.textContent).toContain(
+  expect(within(chat).getByText('Run 2').parentElement?.textContent).toContain(
     'Automatic: CI failed',
   )
   const automatic = chat.querySelector('[data-source="auto"]') as HTMLDetailsElement
@@ -407,10 +476,32 @@ test('events can be filtered by type', async () => {
   await screen.findByText('working on it')
 
   fireEvent.click(screen.getByRole('tab', { name: 'Events' }))
-  expect(screen.getAllByRole('row')).toHaveLength(3)
+  const rows = (): HTMLElement[] =>
+    within(screen.getByRole('list', { name: 'Events' })).getAllByRole('listitem')
+  expect(rows()).toHaveLength(2)
   fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'pushed' } })
 
-  expect(screen.getAllByRole('row')).toHaveLength(2)
+  expect(rows()).toHaveLength(1)
+})
+
+test('events can be filtered by source and a row opens to its payload', async () => {
+  renderTaskPage()
+  await screen.findByText('working on it')
+
+  fireEvent.click(screen.getByRole('tab', { name: 'Events' }))
+  const list = (): HTMLElement => screen.getByRole('list', { name: 'Events' })
+  fireEvent.click(screen.getByRole('button', { name: 'System' }))
+  expect(screen.getByRole('button', { name: 'System' }).getAttribute('aria-pressed')).toBe('true')
+  expect(within(list()).getAllByRole('listitem').map((row) => row.textContent)).toEqual([
+    expect.stringContaining('pushed'),
+  ])
+  fireEvent.click(screen.getByRole('button', { name: 'Agent' }))
+  const row = within(list()).getByRole('button', { expanded: false })
+  expect(row.textContent).toContain('agent_message')
+  fireEvent.click(row)
+  expect(within(list()).getByRole('button', { name: 'Copy JSON' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Reviewer' }))
+  expect(screen.getByText('No events match.')).toBeTruthy()
 })
 
 test('a successful stop reports the new state so the board card follows', async () => {
@@ -562,8 +653,9 @@ test('the new task form offers only the agents that can be used', () => {
     <NewTaskDialog projects={[project]} agents={someReady} onCreated={vi.fn()} onClose={vi.fn()} />,
   )
 
-  const options = within(screen.getByLabelText('Agent')).getAllByRole('option')
-  expect(options.map((option) => option.textContent)).toEqual(['Claude Code'])
+  const radios = screen.getAllByRole('radio') as HTMLInputElement[]
+  expect(radios.map((radio) => radio.disabled)).toEqual([false, true])
+  expect(radios[0].checked).toBe(true)
   expect(screen.getByRole('link', { name: 'See Settings' }).getAttribute('href')).toBe('#/settings')
   expect(button('Start task').disabled).toBe(false)
 })
@@ -670,7 +762,6 @@ test('the sidebar remembers its compact state and keeps primary actions availabl
     projects: [project],
     cards: [makeCard()],
     openTaskId: 7,
-    isSettingsOpen: false,
     onNewTask: newTask,
     onAddProject: addProject,
     newTaskBlocker: null,
@@ -712,7 +803,7 @@ test('wide layout remembers the detail panel and supports keyboard resizing', as
     removeEventListener: vi.fn(),
   }))
   renderTaskPage()
-  await screen.findByText('working on it')
+  await within(await screen.findByRole('log', { name: 'Chat' })).findByText('working on it')
   expect(screen.getByRole('tab', { name: 'Events' }).getAttribute('aria-selected')).toBe('true')
   expect(screen.getByRole('log', { name: 'Chat' })).toBeTruthy()
   const separator = screen.getByRole('separator', { name: 'Resize detail panel' })
@@ -741,7 +832,7 @@ test('Runs jumps to its Chat divider and can jump to the same run again', async 
   await screen.findByRole('log', { name: 'Chat' })
   for (let repeat = 0; repeat < 2; repeat++) {
     fireEvent.click(screen.getByRole('tab', { name: /Runs/ }))
-    fireEvent.click(button('Go to Run #1'))
+    fireEvent.click(screen.getByRole('button', { name: /^Run 1/ }))
     expect(screen.getByRole('tab', { name: 'Chat' }).getAttribute('aria-selected')).toBe('true')
     expect(document.activeElement?.getAttribute('data-run')).toBe('1')
   }
@@ -771,7 +862,6 @@ test('storage failures do not prevent switching panels or collapsing the sidebar
       projects={[project]}
       cards={[]}
       openTaskId={null}
-      isSettingsOpen={false}
       onNewTask={vi.fn()}
       onAddProject={vi.fn()}
       newTaskBlocker={null}
@@ -818,7 +908,7 @@ test('switching window widths preserves the selected detail panel and chat draft
   }))
   localStorage.setItem('agsv.task-panel', 'Events')
   renderTaskPage(idle)
-  await screen.findByText('working on it')
+  await within(await screen.findByRole('log', { name: 'Chat' })).findByText('working on it')
   fireEvent.change(screen.getByLabelText('Message'), { target: { value: 'draft across resize' } })
   act(() => {
     matches = false
