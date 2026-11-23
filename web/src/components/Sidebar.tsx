@@ -55,6 +55,7 @@ export function Sidebar({
       <div className="flex w-full items-center gap-1">
         {!isCompact && (
           <a className="brand" href="#/">
+            <span className="brand-mark" aria-hidden="true" />
             agent-supervisor
           </a>
         )}
@@ -97,52 +98,75 @@ export function Sidebar({
         </>
       ) : view === 'settings' ? (
         <>
-          <a className="nav-item" href="#/">
-            ← Board
-          </a>
-          <div className="sidebar-heading">Settings</div>
-          {SETTINGS_SECTIONS.map(([id, name]) => (
-            <button
-              key={id}
-              className="nav-item"
-              onClick={() => document.getElementById(id)?.scrollIntoView?.({ block: 'start' })}
-            >
-              {name}
-            </button>
-          ))}
+          <div className="sidebar-section">
+            <a className="nav-item" href="#/">
+              Board <span className="count">{active.length}</span>
+            </a>
+            <a className="nav-item" href="#/archive">
+              Archive <span className="count">{archivedCount}</span>
+            </a>
+          </div>
+          <div className="sidebar-section">
+            <div className="sidebar-heading">Settings</div>
+            {SETTINGS_SECTIONS.map(([id, name]) => (
+              <button
+                key={id}
+                className="nav-item"
+                onClick={() => document.getElementById(id)?.scrollIntoView?.({ block: 'start' })}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
         </>
       ) : (
         <>
-          <a className="nav-item" href="#/" aria-current={view === 'board' ? 'page' : undefined}>
-            Board <span className="count">{active.length}</span>
-          </a>
-          <a
-            className="nav-item"
-            href="#/archive"
-            aria-current={view === 'archive' ? 'page' : undefined}
-          >
-            Archive <span className="count">{archivedCount}</span>
-          </a>
-          <div className="sidebar-heading">Projects</div>
+          <div className="sidebar-section">
+            <a className="nav-item" href="#/" aria-current={view === 'board' ? 'page' : undefined}>
+              Board <span className="count">{active.length}</span>
+            </a>
+            <a
+              className="nav-item"
+              href="#/archive"
+              aria-current={view === 'archive' ? 'page' : undefined}
+            >
+              Archive <span className="count">{archivedCount}</span>
+            </a>
+          </div>
+          <div className="sidebar-section sidebar-projects">
+          <div className="sidebar-heading">
+            <span>Projects</span>
+            <button
+              className="sidebar-plan"
+              disabled
+              aria-label="Plan with main agent"
+              title="Plan with main agent · Coming in 0.5"
+            >
+              ✦ Main agent
+            </button>
+          </div>
           {projects.map((project) => {
             const tasks = active
               .filter((card) => card.project_id === project.id)
               .sort((first, second) => second.id - first.id)
             const isSelected = project.id === selectedProjectId
             return (
-              <div key={project.id}>
+              <div className="sidebar-project" key={project.id}>
                 <button
                   className={`nav-item${selectedProjectId !== null && !isSelected ? ' is-dimmed' : ''}`}
                   aria-current={isSelected ? 'true' : undefined}
                   onClick={() => onSelectProject(isSelected ? null : project.id)}
                   title={project.repo_path}
                 >
+                  <svg className="project-icon" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M1.75 3.5h4l1.5 1.5h7a.75.75 0 0 1 .75.75v6.5a.75.75 0 0 1-.75.75H1.75a.75.75 0 0 1-.75-.75V4.25a.75.75 0 0 1 .75-.75Z" />
+                  </svg>
                   <span className="truncate">{project.name}</span>
                   <span className="count">{tasks.length}</span>
                 </button>
                 {/* The Archive lists only project names; archived tasks live in its table. */}
-                {view !== 'archive' && (
-                  <>
+                {view !== 'archive' && tasks.length > 0 && (
+                  <div className="sidebar-tasks">
                     {tasks.map((card) => (
                       <a
                         key={card.id}
@@ -155,10 +179,7 @@ export function Sidebar({
                         <span className="truncate">{card.title}</span>
                       </a>
                     ))}
-                    <button className="sidebar-plan" disabled title="Coming in 0.5">
-                      ✦ Plan with main agent
-                    </button>
-                  </>
+                  </div>
                 )}
               </div>
             )
@@ -166,6 +187,7 @@ export function Sidebar({
           <button className="nav-item text-text-muted" onClick={onAddProject}>
             + Add project
           </button>
+          </div>
         </>
       )}
       <div className="sidebar-foot">

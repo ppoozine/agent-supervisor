@@ -191,14 +191,16 @@ export function TaskPage(props: TaskPageProps) {
             >
               {busyAction === 'archive' ? 'Archiving…' : isArchived ? 'Archived' : 'Archive'}
             </button>
-            <button
-              className="btn btn-danger"
-              onClick={() => void perform('stop', () => stopTask(taskId))}
-              disabled={!current.has_open_run || busyAction !== null}
-              title={current.has_open_run ? undefined : 'No run is active'}
-            >
-              {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
-            </button>
+            {/* Only while a run is active: a greyed-out red button reads like an error. */}
+            {(current.has_open_run || busyAction === 'stop') && (
+              <button
+                className="btn btn-danger"
+                onClick={() => void perform('stop', () => stopTask(taskId))}
+                disabled={busyAction !== null}
+              >
+                {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
+              </button>
+            )}
           </div>
         </div>
         <div className="task-meta">
@@ -242,8 +244,9 @@ export function TaskPage(props: TaskPageProps) {
               {current.pr_state !== 'open' && current.pr_state && ` ${current.pr_state}`}
             </span>
           )}
+          {/* Only what tells something: no "no conflict" or "fixes 0/3". */}
           <Checks card={current} detailed />
-          <Attempts card={current} always />
+          <Attempts card={current} />
           <span
             title={`All runs: ${formatCount(detail.tokens_in)} in · ${formatCount(detail.tokens_out)} out. Cost is an estimate; agents that do not report cost show tokens only`}
           >

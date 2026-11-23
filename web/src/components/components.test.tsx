@@ -127,7 +127,7 @@ test('the board puts each card in the column the api names', () => {
   expect(screen.queryByText('three')).toBeNull()
 })
 
-test('the project filter shows one project on the board and names it on New task', () => {
+test('the project filter shows one project on the board', () => {
   const other: Project = { ...project, id: 2, name: 'api-service' }
   const cards = [
     makeCard({ id: 1, title: 'one', project_id: 1 }),
@@ -156,8 +156,9 @@ test('the project filter shows one project on the board and names it on New task
   expect(screen.queryByText('one')).toBeNull()
   expect(screen.getByText('two')).toBeTruthy()
   expect(screen.getByText('1 active · 1 need you')).toBeTruthy()
-  expect(screen.getByRole('button', { name: 'New task in api-service' })).toBeTruthy()
-  expect(screen.getByText('Nothing running in api-service')).toBeTruthy()
+  // The filter button already names the project, so the rest stays short.
+  expect(screen.getByRole('button', { name: 'New task' })).toBeTruthy()
+  expect(screen.getAllByText('Nothing here').length).toBeGreaterThan(0)
 })
 
 test('the archive lists finished tasks, filtered by outcome and searched by title or branch', async () => {
@@ -285,7 +286,7 @@ test('a project that cannot be added shows the reason', async () => {
   expect((await screen.findByRole('alert')).textContent).toBe('/repos/demo is already project 1')
 })
 
-test('stop can only be pressed while a run is active', async () => {
+test('stop is there only while a run is active', async () => {
   renderTaskPage(makeCard({ has_open_run: true }))
   await screen.findByText('working on it')
   expect(button('Stop').disabled).toBe(false)
@@ -293,7 +294,17 @@ test('stop can only be pressed while a run is active', async () => {
 
   renderTaskPage(makeCard({ has_open_run: false, column: 'Needs you', label: 'Stopped' }))
   await screen.findByText('working on it')
-  expect(button('Stop').disabled).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
+})
+
+test('the header leaves out states that say nothing', async () => {
+  renderTaskPage(
+    makeCard({ review_state: 'none', merge_state: 'clean', ci_fix_attempts: 0, feedback_attempts: 0 }),
+  )
+  await screen.findByText('working on it')
+
+  const header = screen.getByRole('banner')
+  expect(header.textContent).not.toMatch(/no conflict|review —|fixes 0|comments 0/)
 })
 
 test('the task page shows the chat and the pull request link', async () => {
@@ -623,8 +634,13 @@ test('the diff tab shows each changed file with its added and removed lines', as
 
   expect(within(file).getByText('+1')).toBeTruthy()
   expect(within(file).getByText('−1')).toBeTruthy()
-  expect(within(file).getByText(/return a \+ b/).className).toContain('diff-added')
-  expect(within(file).getByText(/return a - b/).className).toContain('diff-removed')
+  // GitHub's layout: the code without its sign, in a row marked added or removed, with line numbers.
+  const added = within(file).getByText(/return a \+ b/).closest('tr')!
+  const removed = within(file).getByText(/return a - b/).closest('tr')!
+  expect(added.className).toContain('is-added')
+  expect(removed.className).toContain('is-removed')
+  expect(added.querySelector('.diff-sign')?.textContent).toBe('+')
+  expect([...added.querySelectorAll('.diff-num')].map((cell) => cell.textContent)).toEqual(['', '2'])
   expect(screen.getByText(/1 file changed against main/)).toBeTruthy()
 })
 
@@ -831,7 +847,7 @@ test('the sidebar remembers its compact state and keeps primary actions availabl
   expect(button('Expand sidebar')).toBeTruthy()
   fireEvent.click(button('Expand sidebar'))
   expect(screen.getByText('Add a power function')).toBeTruthy()
-  expect(button('✦ Plan with main agent').disabled).toBe(true)
+  expect(button('Plan with main agent').disabled).toBe(true)
 })
 
 test('branch copy reports success and clipboard failures without changing the task', async () => {

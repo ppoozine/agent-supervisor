@@ -90,15 +90,10 @@ export function Checks({ card, detailed = false }: { card: Card; detailed?: bool
       {card.review_state === 'approved' ? (
         <span className="text-success">✓ review</span>
       ) : (
-        detailed && <span>review {card.review_state === 'none' ? '—' : card.review_state}</span>
+        // A review waiting or asking for changes is worth showing; no review yet is not.
+        detailed && card.review_state !== 'none' && <span>review {card.review_state}</span>
       )}
-      {card.merge_state === 'conflicting' ? (
-        <span className="text-needs-you-text">⚠ conflict</span>
-      ) : (
-        detailed && (
-          <span>{card.merge_state === 'clean' ? 'no conflict' : 'mergeability unknown'}</span>
-        )
-      )}
+      {card.merge_state === 'conflicting' && <span className="text-needs-you-text">⚠ conflict</span>}
     </>
   )
 }

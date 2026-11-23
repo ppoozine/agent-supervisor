@@ -124,10 +124,12 @@ On windows at least 1100px wide, Chat stays on the left and Diff, Shell, Events,
 the right panel. Drag the divider to resize it, or focus it and press Left or Right. Narrower
 windows show one tab at a time, starting with Chat. The browser remembers the last detail panel
 selected. The header shows the status, the project and agent, the branch with a copy button, the
-pull request, CI, review, conflicts, the automatic rounds, and usage, with **Archive** and **Stop**
-on the right.
+pull request and CI, and usage; a review, a merge conflict and the automatic rounds appear only when
+there is something to say. **Archive** is on the right, and **Stop** appears there while a run is
+active.
 
-Diff includes a file list and totals; each file can be folded. Events lists the newest first and
+Diff includes a file list and totals; each file can be folded. Like on GitHub, each line shows its
+number in the old and the new file, and added and removed lines use GitHub's colors. Events lists the newest first and
 filters by source (Agent, You, Reviewer, Automatic, System), by event type and by run; click a row
 to see its full payload and copy it as JSON. Runs shows the task's tokens, the agent's total time
 and the automatic rounds used, then one card per run; select a card to jump to that run in Chat.
@@ -154,7 +156,7 @@ from:
 | **You** (right) | The task description or a message you sent |
 | **Automatic** (centered, amber) | Instructions agent-supervisor sent on its own: failing CI logs, a merge conflict, or PR comments. Folded; open it to see exactly what the agent was given |
 | **Reviewer** (left, purple) | A comment on the pull request, with the file and line for inline comments. Faded, with the reason, when it was not passed to the agent (a bot, an author who is not a collaborator, an approval, no text) |
-| **Agent** (left) | What the agent said, and one line per command, tool call or thought; open a line to see its output. Failed commands and actions blocked by the policy are red |
+| **Agent** (left) | What the agent said, with its formatting (lists, tables, code), and one line per command, tool call or thought; open a line to see its output. Three or more actions in a row fold into one line such as "23 actions · 18 commands, 5 tool calls". Failed commands and actions blocked by the policy are red |
 | System lines (centered) | Pushes, the pull request, CI results, and runs that ended badly |
 
 The header shows the automatic rounds used since you last stepped in, against their limits:

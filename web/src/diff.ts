@@ -4,7 +4,14 @@ export type DiffLineKind = 'added' | 'removed' | 'hunk' | 'context' | 'meta'
 
 export interface DiffLine {
   kind: DiffLineKind
+  /** The line as git printed it, sign included. */
   text: string
+  /** The line without its `+`, `-` or space sign; the whole line for hunk and meta lines. */
+  content: string
+  /** Line number in the old file (removed and unchanged lines), or null. */
+  oldNumber: number | null
+  /** Line number in the new file (added and unchanged lines), or null. */
+  newNumber: number | null
 }
 
 export interface DiffFile {
@@ -17,6 +24,7 @@ export interface DiffFile {
 }
 
 const FILE_HEADER = /^diff --git a\/(.+) b\/(.+)$/
+const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/
 // Keep only these header lines of a file; the others (index, rename, --- and +++) are hidden
 // because the path is already in the title.
 const NOTE_PREFIXES = ['new file mode', 'deleted file mode', 'Binary files ', '\\ No newline']
@@ -33,6 +41,16 @@ export function parseDiff(text: string): DiffFile[] {
   const files: DiffFile[] = []
   let current: DiffFile | null = null
   let isInHunk = false
+  // Where the next old and new lines are, from the last hunk header.
+  let oldLine = 0
+  let newLine = 0
+  const meta = (text: string): DiffLine => ({
+    kind: 'meta',
+    text,
+    content: text,
+    oldNumber: null,
+    newNumber: null,
+  })
   for (const line of text.split('\n')) {
     const header = FILE_HEADER.exec(line)
     if (header) {
@@ -45,19 +63,33 @@ export function parseDiff(text: string): DiffFile[] {
     if (current === null) continue
     if (line.startsWith('@@')) isInHunk = true
     if (!isInHunk) {
-      if (NOTE_PREFIXES.some((prefix) => line.startsWith(prefix))) {
-        current.lines.push({ kind: 'meta', text: line })
-      }
+      if (NOTE_PREFIXES.some((prefix) => line.startsWith(prefix))) current.lines.push(meta(line))
       continue
     }
     if (line.startsWith('\\ No newline')) {
-      current.lines.push({ kind: 'meta', text: line })
+      current.lines.push(meta(line))
       continue
     }
     const kind = lineKind(line)
-    if (kind === 'added') current.added += 1
-    if (kind === 'removed') current.removed += 1
-    current.lines.push({ kind, text: line })
+    if (kind === 'hunk') {
+      const numbers = HUNK_HEADER.exec(line)
+      if (numbers) {
+        oldLine = Number(numbers[1])
+        newLine = Number(numbers[2])
+      }
+      current.lines.push({ kind, text: line, content: line, oldNumber: null, newNumber: null })
+      continue
+    }
+    const content = line.slice(1)
+    if (kind === 'added') {
+      current.added += 1
+      current.lines.push({ kind, text: line, content, oldNumber: null, newNumber: newLine++ })
+    } else if (kind === 'removed') {
+      current.removed += 1
+      current.lines.push({ kind, text: line, content, oldNumber: oldLine++, newNumber: null })
+    } else {
+      current.lines.push({ kind, text: line, content, oldNumber: oldLine++, newNumber: newLine++ })
+    }
   }
   // The empty string after the final newline is not part of the diff.
   for (const file of files) {

@@ -491,3 +491,54 @@ export function eventSummary(event: EventRow): string {
       return systemItem(event)?.text ?? event.type.replace(/_/g, ' ')
   }
 }
+
+/** Several of the agent's actions in a row, shown as one line that opens to list them. */
+export interface ActionGroup {
+  kind: 'actions'
+  key: string
+  actions: AgentAction[]
+}
+
+/** Fold runs of at least `minimum` consecutive actions into groups; messages stay as they are. */
+export function groupParts(
+  parts: AgentItem['parts'],
+  minimum = 3,
+): Array<AgentItem['parts'][number] | ActionGroup> {
+  const grouped: Array<AgentItem['parts'][number] | ActionGroup> = []
+  let pending: AgentAction[] = []
+  const flush = (): void => {
+    if (pending.length >= minimum) {
+      grouped.push({ kind: 'actions', key: `group-${pending[0].key}`, actions: pending })
+    } else grouped.push(...pending)
+    pending = []
+  }
+  for (const part of parts) {
+    if (part.kind === 'action') pending.push(part)
+    else {
+      flush()
+      grouped.push(part)
+    }
+  }
+  flush()
+  return grouped
+}
+
+const ACTION_NOUNS: Record<AgentAction['type'], [string, string]> = {
+  command: ['command', 'commands'],
+  tool: ['tool call', 'tool calls'],
+  thinking: ['thought', 'thoughts'],
+  plan: ['plan', 'plans'],
+  denied: ['denied action', 'denied actions'],
+}
+
+/** The one line a group shows, e.g. `23 actions · 18 commands, 5 tool calls`, and how many failed. */
+export function actionSummary(actions: AgentAction[]): { text: string; failed: number } {
+  const counts = new Map<AgentAction['type'], number>()
+  for (const action of actions) counts.set(action.type, (counts.get(action.type) ?? 0) + 1)
+  const kinds = [...counts].map(([type, count]) => `${count} ${ACTION_NOUNS[type][count === 1 ? 0 : 1]}`)
+  return {
+    text: `${actions.length} actions · ${kinds.join(', ')}`,
+    failed: actions.filter((action) => action.failed).length,
+  }
+}
+
