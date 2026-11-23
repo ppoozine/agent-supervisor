@@ -41,7 +41,11 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
   }
   if (loaded === null) return <p className="empty">Loading…</p>
   if (files.length === 0) {
-    return <p className="empty">No changes: this task has no commits against {loaded.base_branch} yet.</p>
+    return (
+      <p className="empty">
+        No changes: this task has no commits against {loaded.base_branch} yet.
+      </p>
+    )
   }
   return (
     <div className="diff">
@@ -49,24 +53,57 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
         {files.length} {files.length === 1 ? 'file' : 'files'} changed against {loaded.base_branch}
         {loaded.is_truncated && ' · diff too long, the rest is not shown'}
       </p>
-      {files.map((file) => (
-        <section className="diff-file" key={file.path} aria-label={file.path}>
-          <header>
-            <span className="diff-path">
-              {file.previousPath && `${file.previousPath} → `}
-              {file.path}
-            </span>
-            <span className="diff-added">+{file.added}</span>
-            <span className="diff-removed">−{file.removed}</span>
-          </header>
-          <pre>
-            {file.lines.map((line, index) => (
-              <span className={`diff-line diff-${line.kind}`} key={index}>
-                {line.text || ' '}
-                {'\n'}
+      <div className="mb-4 flex flex-col gap-1 text-xs">
+        <span>
+          <span className="text-success">
+            +{files.reduce((total, file) => total + file.added, 0)}
+          </span>{' '}
+          <span className="text-danger">
+            −{files.reduce((total, file) => total + file.removed, 0)}
+          </span>
+        </span>
+        {files.map((file, index) => (
+          <a
+            key={file.path}
+            href={`#diff-file-${taskId}-${index}`}
+            onClick={(event) => {
+              event.preventDefault()
+              document
+                .getElementById(`diff-file-${taskId}-${index}`)
+                ?.scrollIntoView({ block: 'start' })
+            }}
+            className="font-mono"
+          >
+            {file.path}
+          </a>
+        ))}
+      </div>
+      {files.map((file, index) => (
+        <section
+          id={`diff-file-${taskId}-${index}`}
+          className="diff-file"
+          key={file.path}
+          aria-label={file.path}
+        >
+          <details open>
+            <summary>
+              <span aria-hidden="true">▾</span>
+              <span className="diff-path">
+                {file.previousPath && `${file.previousPath} → `}
+                {file.path}
               </span>
-            ))}
-          </pre>
+              <span className="diff-added">+{file.added}</span>
+              <span className="diff-removed">−{file.removed}</span>
+            </summary>
+            <pre>
+              {file.lines.map((line, index) => (
+                <span className={`diff-line diff-${line.kind}`} key={index}>
+                  {line.text || ' '}
+                  {'\n'}
+                </span>
+              ))}
+            </pre>
+          </details>
         </section>
       ))}
     </div>

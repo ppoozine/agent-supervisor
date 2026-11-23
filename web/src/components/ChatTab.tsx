@@ -19,6 +19,8 @@ interface ChatTabProps {
   runs: Run[]
   events: EventRow[]
   agentName: string
+  visible?: boolean
+  jump?: { number: number } | null
 }
 
 /**
@@ -26,7 +28,7 @@ interface ChatTabProps {
  * did, and what happened on GitHub. Follows new activity while scrolled to the bottom; while
  * reading older entries, a button offers to jump to the new ones instead.
  */
-export function ChatTab({ runs, events, agentName }: ChatTabProps) {
+export function ChatTab({ runs, events, agentName, jump, visible = true }: ChatTabProps) {
   const items = useMemo(() => buildTimeline(runs, events), [runs, events])
   const container = useRef<HTMLDivElement>(null)
   const isFollowing = useRef(true)
@@ -38,6 +40,22 @@ export function ChatTab({ runs, events, agentName }: ChatTabProps) {
     if (isFollowing.current) element.scrollTop = element.scrollHeight
     else setHasUnseen(true)
   }, [items])
+
+  useEffect(() => {
+    // A hidden pane has no scroll height; resume following when it becomes visible again.
+    const element = container.current
+    if (visible && element && isFollowing.current) element.scrollTop = element.scrollHeight
+  }, [visible])
+
+  useEffect(() => {
+    if (!jump) return
+    const target = container.current?.querySelector<HTMLElement>(`[data-run="${jump.number}"]`)
+    if (target) {
+      isFollowing.current = false
+      target.scrollIntoView?.({ block: 'start' })
+      target.focus({ preventScroll: true })
+    }
+  }, [jump])
 
   const jumpToLatest = (): void => {
     const element = container.current
@@ -109,10 +127,11 @@ function RunDivider({ item }: { item: RunItem }) {
   const usage = runUsage(item.run)
   if (usage) facts.push(usage)
   return (
-    <div className="chat-run" data-run={item.number}>
+    <div className="chat-run" data-run={item.number} tabIndex={-1}>
       <span>
-        <b>Run #{item.number}</b> · <span className={`chat-why source-${item.source}`}>{item.reason}</span>{' '}
-        · {facts.join(' · ')}
+        <b>Run #{item.number}</b> ·{' '}
+        <span className={`chat-why source-${item.source}`}>{item.reason}</span> ·{' '}
+        {facts.join(' · ')}
       </span>
     </div>
   )
@@ -124,7 +143,8 @@ function AutoEntry({ item }: { item: AutoItem }) {
     <details className="chat-auto" data-source="auto">
       <summary>
         <span className="chat-source">
-          ⚙ Automatic <span className="muted">· sent by agent-supervisor · {clockTime(item.ts)}</span>
+          ⚙ Automatic{' '}
+          <span className="muted">· sent by agent-supervisor · {clockTime(item.ts)}</span>
         </span>
         <span>
           {item.reason}.{' '}
@@ -170,7 +190,10 @@ function AgentEntry({ item, agentName }: { item: AgentItem; agentName: string })
       <span className="chat-stamp">{initials(agentName)}</span>
       <div className="chat-agent-body">
         <div className="chat-source">
-          Agent <span className="muted">· {agentName} · {clockTime(item.ts)}</span>
+          Agent{' '}
+          <span className="muted">
+            · {agentName} · {clockTime(item.ts)}
+          </span>
         </div>
         {item.parts.map((part) =>
           part.kind === 'message' ? (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 
 import { archiveTask, errorMessage, getTask, listEventsAfter, sendMessage, stopTask } from '../api'
 import { formatCount, formatUsage, mergeEvents, pullRequestUrl } from '../format'
@@ -9,7 +9,8 @@ import { DiffTab } from './DiffTab'
 import { ChatTab } from './ChatTab'
 import { EventsTab, RunsTab } from './TaskTabs'
 import { StatusLabel } from './StatusLabel'
-import { useAgentName } from './TaskCard'
+import { Checks, useAgentName } from './TaskCard'
+import { readPreference, savePreference } from '../preferences'
 
 interface TaskPageProps {
   taskId: number
@@ -23,7 +24,7 @@ interface TaskPageProps {
   onTaskChanged: (task: TaskDetail) => void
 }
 
-const TABS = ['Chat', 'Diff', 'Events', 'Runs'] as const
+const TABS = ['Chat', 'Diff', 'Shell', 'Events', 'Runs'] as const
 type Tab = (typeof TABS)[number]
 
 /** Task detail page: header, the Chat / Diff / Events / Runs tabs, follow-up messages, Stop and Archive. */
@@ -31,9 +32,40 @@ export function TaskPage(props: TaskPageProps) {
   const { taskId, card, project, connectionCount, subscribeToEvents, onTaskChanged } = props
   const agentName = useAgentName()
   const shortcutLabel = currentSubmitShortcutLabel()
-  const [detail,setDetail] = useState<TaskDetail | null>(null)
+  const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [events, setEvents] = useState<EventRow[]>([])
   const [tab, setTab] = useState<Tab>('Chat')
+  const [panel, setPanel] = useState<Tab>(() => {
+    const saved = readPreference('task-panel')
+    return saved && TABS.includes(saved as Tab) && saved !== 'Chat' ? (saved as Tab) : 'Diff'
+  })
+  const [wide, setWide] = useState(
+    () => window.matchMedia?.('(min-width: 1100px)').matches ?? false,
+  )
+  const [panelWidth, setPanelWidth] = useState(42)
+  const workspace = useRef<HTMLDivElement>(null)
+  const [jump, setJump] = useState<{ number: number } | null>(null)
+  const [copyStatus, setCopyStatus] = useState('')
+  useEffect(() => {
+    const query = window.matchMedia?.('(min-width: 1100px)')
+    if (!query) return
+    const update = (): void => setWide(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  const selectTab = (name: Tab): void => {
+    setTab(name)
+    if (name !== 'Chat') {
+      setPanel(name)
+      savePreference('task-panel', name)
+    }
+  }
+  const resizePanel = (clientX: number): void => {
+    const rect = workspace.current?.getBoundingClientRect()
+    if (rect?.width)
+      setPanelWidth(Math.max(30, Math.min(65, ((rect.right - clientX) / rect.width) * 100)))
+  }
+  const selected = wide ? panel : tab
   const [messageText, setMessageText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<string | null>(null)
@@ -131,13 +163,46 @@ export function TaskPage(props: TaskPageProps) {
   return (
     <div className="task-page">
       <div className="task-header">
+        <a className="back shrink-0 py-1" href="#/">
+          ← Board
+        </a>
         <div className="task-heading">
           <h2>{current.title}</h2>
           <div className="task-meta">
-            <StatusLabel label={current.label} column={current.column} />
-            <span className="muted">{current.column}</span>
-            <span className={`agent agent-${current.agent_type}`}>{agentName(current.agent_type)}</span>
-            {current.branch && <span className="branch">{current.branch}</span>}
+            <StatusLabel
+              label={current.label}
+              column={current.column}
+              active={current.has_open_run}
+            />
+            <span>{project?.name}</span>
+            <span className={`agent agent-${current.agent_type}`}>
+              {agentName(current.agent_type)}
+            </span>
+            {current.branch && (
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <span className="branch">{current.branch}</span>
+                <button
+                  className="ghost px-1 py-0"
+                  aria-label="Copy branch name"
+                  title="Copy branch name"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        await navigator.clipboard.writeText(current.branch!)
+                        setCopyStatus('Branch copied')
+                      } catch {
+                        setCopyStatus('Could not copy branch name')
+                      }
+                    })()
+                  }}
+                >
+                  ⧉
+                </button>
+                <span role="status" className="text-xs">
+                  {copyStatus}
+                </span>
+              </span>
+            )}
             {current.pr_number !== null &&
               (prUrl ? (
                 <a href={prUrl} target="_blank" rel="noreferrer">
@@ -148,12 +213,25 @@ export function TaskPage(props: TaskPageProps) {
                   PR #{current.pr_number} {current.pr_state}
                 </span>
               ))}
-            <span className="muted" title="Cost is an estimate; agents that do not report cost show tokens only">
+            <Checks card={current} detailed />
+          </div>
+          <div className="task-meta">
+            <span
+              className="muted"
+              title={`All runs: ${formatCount(detail.tokens_in)} in · ${formatCount(detail.tokens_out)} out. Cost is an estimate; agents that do not report cost show tokens only`}
+            >
               {formatUsage(current)}
               {current.cost_usd !== null && ` · ${formatCount(current.tokens)} tok`}
-              {` (in ${formatCount(detail.tokens_in)} / out ${formatCount(detail.tokens_out)})`}
             </span>
-            <span className="muted" title="Automatic rounds used since you last stepped in">
+            <span
+              className={
+                current.ci_fix_attempts >= current.max_ci_fix_attempts ||
+                current.feedback_attempts >= current.max_feedback_attempts
+                  ? 'text-needs-you'
+                  : 'text-text-muted'
+              }
+              title="Automatic rounds used since you last stepped in"
+            >
               fixes {current.ci_fix_attempts}/{current.max_ci_fix_attempts} · comments{' '}
               {current.feedback_attempts}/{current.max_feedback_attempts}
             </span>
@@ -161,6 +239,7 @@ export function TaskPage(props: TaskPageProps) {
         </div>
         <div className="task-actions">
           <button
+            className="btn text-danger"
             onClick={() => void perform('stop', () => stopTask(taskId))}
             disabled={!current.has_open_run || busyAction !== null}
             title={current.has_open_run ? undefined : 'No run is active'}
@@ -168,6 +247,7 @@ export function TaskPage(props: TaskPageProps) {
             {busyAction === 'stop' ? 'Stopping…' : 'Stop'}
           </button>
           <button
+            className="btn"
             onClick={requestArchive}
             disabled={isArchived || busyAction !== null}
           >
@@ -185,8 +265,8 @@ export function TaskPage(props: TaskPageProps) {
           onClose={() => setIsConfirmingArchive(false)}
         >
           <p>
-            PR #{current.pr_number} is still open. After archiving, CI failures are no longer
-            fixed automatically and you cannot send messages. Archiving cannot be undone.
+            PR #{current.pr_number} is still open. After archiving, CI failures are no longer fixed
+            automatically and you cannot send messages. Archiving cannot be undone.
           </p>
           <p>Merge or close the PR on GitHub.</p>
         </Dialog>
@@ -196,62 +276,160 @@ export function TaskPage(props: TaskPageProps) {
           {error}
         </div>
       )}
-      <div className="tabs" role="tablist">
-        {TABS.map((name) => (
-          <button
-            key={name}
-            role="tab"
-            aria-selected={tab === name}
-            className={tab === name ? 'tab is-active' : 'tab'}
-            onClick={() => setTab(name)}
-          >
-            {name}
-            {name === 'Runs' && <span className="count">{detail.runs.length}</span>}
-          </button>
-        ))}
-      </div>
-      <div className="tab-body">
-        {tab === 'Chat' && (
-          <ChatTab runs={detail.runs} events={events} agentName={agentName(current.agent_type)} />
+      <div
+        className="task-workspace"
+        ref={workspace}
+        style={{ '--panel-width': `${panelWidth}%` } as CSSProperties}
+      >
+        {!wide && (
+          <div className="tabs page-tabs" role="tablist">
+            {TABS.map((name) => (
+              <button
+                key={name}
+                role="tab"
+                aria-selected={tab === name}
+                className={tab === name ? 'tab is-active' : 'tab'}
+                onClick={() => selectTab(name)}
+              >
+                {name}
+                {name === 'Runs' && <span className="count">{detail.runs.length}</span>}
+                {name === 'Events' && (
+                  <span className="count" aria-hidden="true">
+                    {events.length}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
         )}
-        {tab === 'Diff' && (
-          <DiffTab taskId={taskId} headSha={current.head_sha} connectionCount={connectionCount} />
-        )}
-        {tab === 'Events' && <EventsTab events={events} />}
-        {tab === 'Runs' && <RunsTab runs={detail.runs} />}
-      </div>
-      {closedReason !== null ? (
-        <p className="composer-closed muted">{closedReason}</p>
-      ) : (
-        <form
-          className="composer"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void send()
-          }}
-        >
-          {current.has_open_run && (
-            <p className="composer-note muted">The agent is working. Stop it to send a message now.</p>
+        <section className="chat-pane" data-visible={wide || tab === 'Chat'}>
+          <div className="tab-body">
+            <ChatTab
+              runs={detail.runs}
+              events={events}
+              agentName={agentName(current.agent_type)}
+              jump={jump}
+              visible={wide || tab === 'Chat'}
+            />
+          </div>
+          {closedReason !== null ? (
+            <p className="composer-closed muted">{closedReason}</p>
+          ) : (
+            <form
+              className="composer"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void send()
+              }}
+            >
+              {current.has_open_run && (
+                <p className="composer-note muted">
+                  The agent is working. Stop it to send a message now.
+                </p>
+              )}
+              <div className="composer-box">
+                <textarea
+                  value={messageText}
+                  onChange={(event) => setMessageText(event.target.value)}
+                  onKeyDown={submitOnShortcut}
+                  placeholder="Send a follow-up to the same session…"
+                  rows={2}
+                  aria-label="Message"
+                  aria-keyshortcuts="Meta+Enter Control+Enter"
+                />
+                <div className="composer-foot">
+                  <kbd className="shortcut-hint whitespace-nowrap">{shortcutLabel}</kbd>
+                  <button
+                    type="submit"
+                    className="primary"
+                    disabled={
+                      messageText.trim() === '' || busyAction !== null || current.has_open_run
+                    }
+                  >
+                    {busyAction === 'send' ? 'Sending…' : 'Send'}
+                  </button>
+                </div>
+              </div>
+            </form>
           )}
-          <textarea
-            value={messageText}
-            onChange={(event) => setMessageText(event.target.value)}
-            onKeyDown={submitOnShortcut}
-            placeholder="Send a follow-up to the same session…"
-            rows={2}
-            aria-label="Message"
-            aria-keyshortcuts="Meta+Enter Control+Enter"
-          />
-          <kbd className="shortcut-hint whitespace-nowrap">{shortcutLabel}</kbd>
-          <button
-            type="submit"
-            className="primary"
-            disabled={messageText.trim() === '' || busyAction !== null || current.has_open_run}
-          >
-            {busyAction === 'send' ? 'Sending…' : 'Send'}
-          </button>
-        </form>
-      )}
+        </section>
+        <div
+          className="panel-resizer"
+          role="separator"
+          aria-label="Resize detail panel"
+          aria-orientation="vertical"
+          aria-valuemin={30}
+          aria-valuemax={65}
+          aria-valuenow={Math.round(panelWidth)}
+          tabIndex={0}
+          onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)}
+          onPointerMove={(event) => {
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) resizePanel(event.clientX)
+          }}
+          onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+              event.preventDefault()
+              setPanelWidth((width) =>
+                Math.max(30, Math.min(65, width + (event.key === 'ArrowLeft' ? 2 : -2))),
+              )
+            }
+          }}
+        />
+        <section
+          className="detail-panel"
+          data-visible={wide || tab !== 'Chat'}
+          aria-label="Details"
+        >
+          {wide && (
+            <div className="tabs panel-tabs" role="tablist">
+              {TABS.filter((name) => name !== 'Chat').map((name) => (
+                <button
+                  key={name}
+                  role="tab"
+                  aria-selected={panel === name}
+                  className={panel === name ? 'tab is-active' : 'tab'}
+                  onClick={() => selectTab(name)}
+                >
+                  {name}
+                  {name === 'Runs' && <span className="count">{detail.runs.length}</span>}
+                  {name === 'Events' && (
+                    <span className="count" aria-hidden="true">
+                      {events.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="tab-body">
+            {selected === 'Diff' && (
+              <DiffTab
+                taskId={taskId}
+                headSha={current.head_sha}
+                connectionCount={connectionCount}
+              />
+            )}
+            {selected === 'Shell' && (
+              <p className="empty">
+                {isArchived
+                  ? 'The worktree was removed when the task was archived.'
+                  : "A terminal in this task's worktree. Coming in 0.4."}
+              </p>
+            )}
+            {selected === 'Events' && <EventsTab events={events} />}
+            {selected === 'Runs' && (
+              <RunsTab
+                runs={detail.runs}
+                onSelectRun={(number) => {
+                  setTab('Chat')
+                  setJump({ number })
+                }}
+              />
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   )
 }

@@ -79,7 +79,9 @@ export function App() {
       if (load !== latestLoad.current) return
       setProjects(loadedProjects)
       setAgents(loadedAgents)
-      setCards(Object.fromEntries([...loadedCards, ...arrived.values()].map((card) => [card.id, card])))
+      setCards(
+        Object.fromEntries([...loadedCards, ...arrived.values()].map((card) => [card.id, card])),
+      )
       setLoadError(null)
     } catch (error) {
       if (load === latestLoad.current) setLoadError(errorMessage(error))
@@ -134,28 +136,33 @@ export function App() {
           openTaskId={openTaskId}
           isSettingsOpen={page.kind === 'settings'}
           onAddProject={() => setIsAddingProject(true)}
+          onNewTask={() => setIsCreatingTask(true)}
+          newTaskBlocker={blocker}
+          connection={page.kind === 'task' ? { status, text: STATUS_TEXT[status] } : undefined}
         />
         <main className="main">
-          <header className="topbar">
-            <h1>
-              {page.kind === 'board' ? (
-                'Board'
-              ) : (
-                <a className="back" href="#/">
-                  ← Board
-                </a>
-              )}
-            </h1>
-            <span className={`connection connection-${status}`}>{STATUS_TEXT[status]}</span>
-            <button
-              className="primary"
-              onClick={() => setIsCreatingTask(true)}
-              disabled={blocker !== null}
-              title={blocker ?? undefined}
-            >
-              + New task
-            </button>
-          </header>
+          {page.kind !== 'task' && (
+            <header className="topbar">
+              <h1>
+                {page.kind === 'board' ? (
+                  'Board'
+                ) : (
+                  <a className="back" href="#/">
+                    ← Board
+                  </a>
+                )}
+              </h1>
+              <span className={`connection connection-${status}`}>{STATUS_TEXT[status]}</span>
+              <button
+                className="primary"
+                onClick={() => setIsCreatingTask(true)}
+                disabled={blocker !== null}
+                title={blocker ?? undefined}
+              >
+                + New task
+              </button>
+            </header>
+          )}
           {loadError && (
             <div className="alert" role="alert">
               {loadError}
@@ -197,7 +204,7 @@ export function App() {
               setProjects((current) => [...current, project])
               setIsAddingProject(false)
               // Fetch again: this invalidates any older load still in flight, so it cannot overwrite
-        // the new project.
+              // the new project.
               void reload()
             }}
             onClose={() => setIsAddingProject(false)}
