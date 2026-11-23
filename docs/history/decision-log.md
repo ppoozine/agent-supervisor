@@ -199,6 +199,8 @@
 | 189 | 設定頁先只能看不能改：Agents、GitHub（沒準備好時列出要在終端機跑的指令與 Copy 按鈕）、Projects、Usage（用已經有的 `GET /api/usage`）。Limits and permissions 需要唯讀的 `GET /api/config`，拆成獨立的小任務 23b | 這次就做可修改的設定頁；Limits 併進任務 23 | 修改設定要處理驗證、寫回 `config.toml`、哪些值要重啟才生效，是另一個任務的份量。任務 23 承諾不改後端，Limits 需要新 API，拆開才能維持這個承諾、也讓 code review 單純 |
 | 190 | 任務 23 改由 Claude Code 透過 agsv 實作（任務 22 是 Codex），範圍擴大成所有畫面（含對話框、設定頁、Archive），刪掉 `legacy.css` | 維持 Codex（第 176 筆）；由 Claude Code 在對話裡直接改 | 當初選 Codex 是想讓它照需求出一版設計；設計現在已經定案，實作交給誰都可以。換成 Claude Code，agsv 的兩個內建 adapter 都做過真的工作；Claude Code 會回報費用、能讀截圖比對。仍透過 agsv 而不是在對話裡直接改，是為了繼續實際使用 agsv |
 | 191 | 新增 `docs/history/dogfooding.md`：用 agsv 開發這個 repo 時，記下實際碰到的操作與問題、影響、改進的想法與狀態，定期挑出來排進任務 | 只在對話裡口頭提；開 GitHub issue | 問題散在對話裡很快就忘；這些多半是小改進，先集中在一份文件、和決策紀錄放在一起，比開一堆 issue 好整理。排進任務時再寫成決策或任務單 |
+| 192 | 由 agent-supervisor 開在這個 repo 的任務，agent 不用先提計畫等確認，任務的指示就是確認過的範圍；指示不清楚或要超出範圍時才停下來問。做完的訊息要列出和規格不同、需要決定的地方。寫進 `AGENTS.md` | 一律先停下來提計畫（任務 22 的 Codex 就是這樣） | 指示是在任務單上討論、確認過才交出去的，再確認一次只是多一輪來回；任務 22 的 Codex 因此白跑一次 run。同一份 `AGENTS.md`，Codex 停下來、Claude Code 直接做（`dogfooding.md` D9），要寫清楚才會一致。偏離規格的地方仍然會在 PR 的 review 擋下來 |
+| 193 | New task 對話框裡不能用的 agent 只寫「Not ready」並連到設定頁，不寫原因 | 開對話框時另外抓 `GET /api/setup`，寫出「Not installed」「Not signed in」 | 原因與修法在設定頁已經完整列出；為了一行字多打一個 API、處理它的載入與錯誤不划算（任務 23 的 agent 提出） |
 
 ## 尚未決定
 
