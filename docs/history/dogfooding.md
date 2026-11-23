@@ -20,6 +20,7 @@
 | D8 | 上限沒辦法關掉、不能依任務調整，改了要重啟 daemon | 大任務前要先改設定檔、等 run 結束才能重啟 | 待排 |
 | D9 | 同一份 `AGENTS.md`，Codex 停下來提計畫、Claude Code 直接做 | 行為不一致，Codex 白跑一次 run | 已改（決策第 192 筆） |
 | D10 | Chat 把 agent 回覆的 markdown 原樣顯示 | 長的回覆（`**粗體**`、清單）很難讀 | 待排 |
+| D11 | `agsv stop` 只停掉進行中的 run，不會關掉 daemon | 以為關掉了，daemon 其實還在跑 | 待排 |
 
 ## 運作良好的地方
 
@@ -110,5 +111,13 @@
 - **發生什麼**：agent 的最後一則訊息是 markdown（標題、粗體、清單、程式碼），Chat 直接顯示成文字，`**Chat**`、`- ` 都原樣出現。
 - **影響**：agent 的總結通常最長、最重要，卻最難讀。
 - **想法**：Chat 的 agent 訊息支援基本的 markdown（段落、粗體、清單、行內程式碼、程式碼區塊）。不能直接塞 HTML（內容來自 agent，要防 XSS）；自己寫一個小的轉換或用套件都要先討論（套件要先問）。
+- **狀態**：待排
+
+### D11 · `agsv stop` 不會關掉 daemon
+
+- **任務**：任務 23b 的驗證
+- **發生什麼**：為了在瀏覽器確認設定頁，另外用一份暫時的設定檔（不同的資料目錄與連接埠）啟動第二個 daemon。驗證完執行 `agsv --config … stop`，輸出「stop requested」，但 daemon 仍在回應；`stop` 送的是 SIGUSR1，意思是「停掉進行中的 run」，關掉 daemon 要送 SIGTERM（或在前景按 Ctrl-C）。
+- **影響**：名稱容易讓人以為會關掉 daemon；要關掉背景執行的 daemon 只能自己找 pid 送訊號。
+- **想法**：把現在的行為改名為 `agsv stop-runs`（或 `agsv stop --runs`），另外加 `agsv shutdown` 正常關掉 daemon；`--help` 寫清楚兩者的差別。和 D7 的 CLI 一起評估。
 - **狀態**：待排
 

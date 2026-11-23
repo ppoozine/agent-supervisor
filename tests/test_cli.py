@@ -620,3 +620,21 @@ async def test_serve_is_refused_while_another_instance_is_running(
     lock.release()
     assert code == 2
     assert "already running" in capsys.readouterr().err
+
+
+async def test_serve_tells_the_daemon_which_config_file_it_read(
+    asv: Cli, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    received: list[Path] = []
+
+    async def fake_serve(*args: object, config_path: Path) -> int:
+        received.append(config_path)
+        return 0
+
+    monkeypatch.setattr(cli.daemon, "serve", fake_serve)
+    config_file = tmp_path / "custom.toml"
+
+    code = await asv(FakeAdapter([]), "--config", str(config_file), "serve")
+
+    assert code == 0
+    assert received == [config_file]

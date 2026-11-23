@@ -116,7 +116,7 @@
 - 視覺方向是 A · Calm：中性色為主、只有一個靛藍強調色、細邊框不用陰影；字型用 Inter 與 JetBrains Mono，但不從網路載入（186）。
 - Chat 左右分邊：你的訊息靠右，agent 與 reviewer 靠左，系統與自動的事件置中（187）。
 - Archive 是獨立的畫面（`#/archive`，表格、依結果篩選、搜尋）；看板與 Archive 共用專案篩選，記在 `localStorage`。側欄在看板列出各專案進行中的任務，在 Archive 只列專案（188）。
-- 設定頁只能看不能改：Agents、GitHub、Projects、Usage；Limits and permissions 需要唯讀的 `GET /api/config`，拆成獨立的小任務（189）。
+- 設定頁只能看不能改：Agents、GitHub、Projects、Usage、Limits and permissions（189）。最後一區用唯讀的 `GET /api/config`：只回畫面要用的欄位與 daemon 實際讀的設定檔路徑；兩個次數上限是常數，標成「fixed」（194）。
 
 ## 開源、安裝與發布
 

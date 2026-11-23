@@ -243,7 +243,7 @@ PR 還開著時出現，說明封存不會關掉 PR、不能取消封存（沿�
 | **GitHub** | `gh` 一列，規則同 Agents（例如沒登入時顯示 `gh auth login`） | `GET /api/setup` 的 `github` |
 | **Projects** | 表格：Name、Local path、GitHub、Requires review、Tasks（進行中與已封存的數量）；右上角「Add project」 | `GET /api/projects`（`name`、`repo_path`、`github_repo`、`require_review`）與卡片 |
 | **Usage** | 三個數字：Cost（只算會回報費用的 agent）、Tokens in、Tokens out，涵蓋所有任務（含已封存）；有不回報費用的 agent 時加一行說明 | `GET /api/usage`（已經有，之前畫面沒用到） |
-| **Limits and permissions** | 兩欄的清單：每個任務的費用與 token 上限、每次 run 的輪數與時間上限、自動修復與留言的次數上限、輪詢間隔、通知、sandbox、網路、禁止的指令。下面說明「To change these, edit ~/.agent-supervisor/config.toml and restart agsv serve.」 | **需要新的 API**（見「需要新增的 API」），由獨立的小任務做（決策第 189 筆）；任務 23 先不放這一區 |
+| **Limits and permissions** | 兩欄的清單：每個任務的費用與 token 上限、每次 run 的輪數與時間上限、自動修復與留言的次數上限（後面標淡色的「fixed」：它們是程式裡的常數，不是設定）、輪詢間隔、通知、sandbox、網路、允許的工具、禁止的指令。下面說明「To change these, create or edit {實際讀的設定檔路徑} and restart agsv serve.」（預設的設定檔常常還不存在，所以寫 create or edit） | `GET /api/config`（任務 23b，決策第 189、194 筆）；讀取失敗時只在這一區顯示錯誤 |
 
 ## 空白、載入中、錯誤
 
@@ -319,11 +319,7 @@ Reviewer 泡泡的底色與邊框、diff 的行、各種淡底色用 `color-mix(
 
 ## 需要新增的 API
 
-| 端點 | 內容 | 誰做 |
-| --- | --- | --- |
-| `GET /api/config`（唯讀） | 設定頁「Limits and permissions」要顯示的值：上限、輪詢、通知、權限政策。只回這些欄位，不回路徑以外的本機資訊 | 獨立的小任務（決策第 189 筆） |
-
-其他畫面需要的資料 API 都已經有了；篩選、加總在前端算。
+這個階段需要的都已經有了：設定頁的 `GET /api/config`（唯讀，只回上限、輪詢、通知、權限政策與設定檔的路徑）在任務 23b 加上。篩選、加總在前端算。
 
 ## 不做
 

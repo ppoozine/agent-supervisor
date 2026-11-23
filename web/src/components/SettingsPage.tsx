@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 
-import { checkSetup, errorMessage, getSetup, getUsage } from '../api'
-import { formatCount, timeAgo } from '../format'
-import type { Agent, Card, Project, Setup, ToolStatus, Usage } from '../types'
+import { checkSetup, errorMessage, getConfig, getSetup, getUsage } from '../api'
+import { formatCount, settingRows, timeAgo } from '../format'
+import type { Agent, Card, Project, ServerConfig, Setup, ToolStatus, Usage } from '../types'
 
 interface SettingsPageProps {
   /** Called after a fresh check, so the rest of the page can pick up which agents are usable. */
@@ -13,7 +13,7 @@ interface SettingsPageProps {
   onAddProject?: () => void
 }
 
-/** Read-only settings: which agents and gh can be used, the projects, and usage over all tasks. */
+/** Read-only settings: which agents and gh can be used, the projects, usage over all tasks, and the limits. */
 export function SettingsPage({
   onChecked,
   projects = [],
@@ -23,6 +23,9 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [setup, setSetup] = useState<Setup | null>(null)
   const [usage, setUsage] = useState<Usage | null>(null)
+  const [config, setConfig] = useState<ServerConfig | null>(null)
+  // Kept apart from `error`: a failed limits request should not hide the rest of the page.
+  const [configError, setConfigError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isChecking, setIsChecking] = useState(false)
 
@@ -34,6 +37,9 @@ export function SettingsPage({
     getUsage()
       .then((loaded) => isCurrent && setUsage(loaded))
       .catch((failure: unknown) => isCurrent && setError(errorMessage(failure)))
+    getConfig()
+      .then((loaded) => isCurrent && setConfig(loaded))
+      .catch((failure: unknown) => isCurrent && setConfigError(errorMessage(failure)))
     return () => {
       isCurrent = false
     }
@@ -159,6 +165,39 @@ export function SettingsPage({
           Over every task, archived ones included. Cost is an estimate
           {usage?.has_unknown_cost && '; it leaves out agents that do not report cost'}.
         </p>
+      </section>
+      <section className="settings-section" id="settings-limits">
+        <h2>Limits and permissions</h2>
+        {configError ? (
+          <div className="alert m-0" role="alert">
+            {configError}
+          </div>
+        ) : (
+          <div className="settings-card">
+            {config ? (
+              <>
+                <dl className="setting-list" aria-label="Limits and permissions">
+                  {settingRows(config).map((row) => (
+                    <div key={row.label} className="setting-row">
+                      <dt>
+                        {row.label}
+                        {row.fixed && <span className="setting-fixed">fixed</span>}
+                      </dt>
+                      <dd className={row.mono ? 'font-mono' : undefined}>{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <p className="setting-note">
+                  To change these, create or edit <code className="font-mono">{config.config_path}</code> and
+                  restart{' '}
+                  <code className="font-mono">agsv serve</code>. Values marked fixed are built in.
+                </p>
+              </>
+            ) : (
+              <p className="empty">Loading…</p>
+            )}
+          </div>
+        )}
       </section>
     </div>
   )

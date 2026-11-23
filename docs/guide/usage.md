@@ -67,8 +67,10 @@ archived task shows its Chat, Diff and history read-only.
 Settings is read-only. **Agents** and **GitHub** show whether each agent and `gh` can be used,
 with the commands to run in a terminal (each with a **Copy** button) for those that cannot; press
 **Check again** afterwards. **Projects** lists each project's path, GitHub repo, review rule and
-task counts. **Usage** totals cost and tokens over every task, archived ones included. To change
-limits and permissions, edit the config file described below.
+task counts. **Usage** totals cost and tokens over every task, archived ones included. **Limits and
+permissions** lists the limits and the permission policy the daemon is running with, and names the
+config file it read them from; to change them, edit that file (described below) and restart `agsv
+serve`. The automatic fix and comment round limits are marked *fixed*: they are built in.
 
 ### Labels
 

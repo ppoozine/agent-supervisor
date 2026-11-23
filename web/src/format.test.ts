@@ -1,6 +1,15 @@
 import { expect, test } from 'vitest'
 
-import { formatUsage, mergeEvents, runDuration, runOutcome, runUsage, timeAgo } from './format'
+import {
+  formatSeconds,
+  formatUsage,
+  mergeEvents,
+  runDuration,
+  runOutcome,
+  runUsage,
+  settingRows,
+  timeAgo,
+} from './format'
 import { makeCard, makeEvent } from './testing'
 
 test('cost is shown as an estimate', () => {
@@ -51,3 +60,42 @@ test('a run shows how long it took, how it ended, and what it cost', () => {
   expect(runDuration({ ...run, ended_at: null })).toBe('running')
   expect(runOutcome({ exit_status: null })).toBe('running')
 })
+
+test('lengths of time use the largest unit that reads naturally', () => {
+  expect(formatSeconds(30)).toBe('30 s')
+  expect(formatSeconds(1800)).toBe('30 min')
+  expect(formatSeconds(90)).toBe('1.5 min')
+  expect(formatSeconds(5400)).toBe('1.5 h')
+})
+
+test('the limits read as label and value, with the built-in ones marked', () => {
+  const rows = settingRows({
+    config_path: '/c.toml',
+    limits: {
+      task_cost_limit_usd: 1000,
+      task_token_limit: 500_000_000,
+      max_turns_per_run: 200,
+      run_timeout_seconds: 5400,
+      max_ci_fix_attempts: 3,
+      max_feedback_attempts: 5,
+    },
+    poll_interval_seconds: 30,
+    notify_needs_you: false,
+    permission: { sandbox_level: 'read-only', allow_network: false, tool_rules: { denied_commands: [] } },
+  })
+  const value = (label: string) => rows.find((row) => row.label === label)
+
+  expect(value('Cost limit per task')?.value).toBe('$1000.00')
+  expect(value('Token limit per task')?.value).toBe('500,000,000')
+  expect(value('Time per run')?.value).toBe('1.5 h')
+  expect(value('Notify when a task needs you')?.value).toBe('off')
+  expect(value('Network for agents')?.value).toBe('not allowed')
+  expect(value('Denied commands')?.value).toBe('none')
+  // An adapter-specific rule that is not there is left out rather than shown empty.
+  expect(value('Allowed tools')).toBeUndefined()
+  expect(rows.filter((row) => row.fixed).map((row) => row.label)).toEqual([
+    'Automatic fixes per task',
+    'Comment rounds per task',
+  ])
+})
+
