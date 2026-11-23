@@ -165,6 +165,7 @@
 - Agent 自己 `git add` 衝突標記時收尾攔不到；本機合併沒衝突但 GitHub 說有時，run 以錯誤結束
 - 留言被編輯後不會再餵回；任務第一次被查到時 PR 上原本的留言也會餵回；工具不回覆、不解決 PR 上的留言
 - 「處理過留言後 `changes_requested` 不再擋住流程」（125）沒有實測
+- 測試 `test_worktree.py::test_tasks_started_at_the_same_time_do_not_fight_over_the_fetch` 偶爾在 Linux 的 CI 失敗（`git worktree add` 出錯，PR #49 重跑後通過）；兩個任務同時建 worktree 時，程式或測試可能還有競爭，`0.4` 之後再查
 - 點通知不會開啟看板，也不知道使用者是否關掉了通知
 - Diff 只有已 commit 的內容
 - PR 結束後 worktree 不會自動清掉（排在階段 8）；專案設定只能用 CLI 的 `project add` 改

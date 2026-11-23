@@ -2,7 +2,7 @@
 
 最後更新：2026-11-22
 
-目前的行為（`0.3`）以這份為準：資料表、run 的生命週期、看板、自動處理與上限、留言、衝突、復原、API、adapter 介面。各條規則的理由在 `../history/decision-log.md`，依主題的摘要在 `decisions.md`；之後的功能見 `roadmap.md`。
+目前的行為（`0.4`）以這份為準：資料表、run 的生命週期、看板、自動處理與上限、留言、衝突、復原、API、adapter 介面。各條規則的理由在 `../history/decision-log.md`，依主題的摘要在 `decisions.md`；之後的功能見 `roadmap.md`。
 
 **目前不做的**（各自排在 roadmap 的哪一階段見 `roadmap.md`）
 

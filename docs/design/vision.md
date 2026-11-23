@@ -22,7 +22,7 @@
 
 ## 功能
 
-**`0.3` 已經有的**：加入專案、開任務（Claude Code 或 Codex）、每個任務獨立的 worktree、由工具 commit / push / 開 PR、CI 失敗與 PR 留言與 merge conflict 自動送回 agent、各種上限、基本權限政策、事件紀錄與用量統計、Stop 與封存、當機復原、四欄看板與任務詳情（Log、Diff、Events、Runs）、即時更新、系統通知、agent 設定頁、外部 adapter。用法見 `../guide/usage.md`。
+**`0.4` 已經有的**：加入專案、開任務（Claude Code 或 Codex）、每個任務獨立的 worktree、由工具 commit / push / 開 PR、CI 失敗與 PR 留言與 merge conflict 自動送回 agent、各種上限、基本權限政策、事件紀錄與用量統計、Stop 與封存、當機復原、四欄看板與 Archive、任務詳情（Chat、Diff、Shell、Events、Runs）、即時更新、系統通知、唯讀的設定頁（agent、上限與權限政策）、外部 adapter。用法見 `../guide/usage.md`。
 
 **之後要做的**：新介面與每個任務的 Chat、Shell（階段 5），同時執行數上限與主 agent 派工（6），桌面版（7），看板內合併、issue 觸發、接手模式（8），直接打 endpoint 的 agent（9），治理（10）。內容與完成標準見 `roadmap.md`。
 
