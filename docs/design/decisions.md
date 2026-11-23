@@ -14,7 +14,7 @@
 - 加欄位時在啟動時用 `PRAGMA table_info` 檢查並補上；讀任務時略過不認得的欄位（127、133）。
 - GitHub 的狀態用輪詢（30 秒），不用 webhook（7）。
 - 前端 React + Vite + TypeScript，樣式用 Tailwind；不裝路由與資料抓取的套件，元件庫要用時再提出；Shell 會加 xterm.js（109、175）。
-- Tailwind 4.3 經 `@tailwindcss/vite` 接上；任務 22 已開啟 Preflight，看板與詳情以 `@theme` tokens、utilities 與 components layer 改版。設定頁與對話框的舊樣式限定在 `legacy.css`，暫保留原深色外觀，任務 23 再改（181、185）。
+- Tailwind 4.3 經 `@tailwindcss/vite` 接上，Preflight 已開啟，tokens 寫在 `@theme`；手寫的 CSS 放進 layer。設定頁與對話框的舊樣式暫時隔離在 `legacy.css`，任務 23 刪掉（181、185）。
 - daemon 在 `/` 提供 build 好的前端（`src/agent_supervisor/web_dist`），API 都在 `/api` 底下；開發時 Vite 把 `/api` 轉給 daemon（110、111、163）。
 - 支援 macOS 與 Linux，不支援 Windows（144）。
 - 模組的分工：列舉值在 `enums.py`、重啟復原在 `recovery.py`、準備與收尾在 `stages.py`、外部指令的底層在 `process.py`、檢查結果的歸類在 `github.py`、log 的截取在 `ci_log.py`（60、70、80）。
@@ -109,10 +109,14 @@
 - 版面最初參考 Agent Orchestrator 的看板，只參考資訊的配置，不複製它的程式碼、圖示與視覺設計（170）。
 - 合併在 GitHub 上進行，看板內合併排在階段 8（114、174）。
 - 訊息框與開任務的描述欄用 `Cmd+Enter` / `Ctrl+Enter` 送出，輸入法選字中不送出（178）。
-- 階段 5：UI 改版由 Codex 透過 agsv 實作，只改外觀，排在 Chat 之後；任務詳情頁加入 Chat 與 worktree 裡的 Shell，Shell 永遠不控制 agent（173、176、180）。
+- 階段 5：UI 改版透過 agsv 交給 agent 實作（任務 22 是 Codex，任務 23 是 Claude Code），只改前端，排在 Chat 之後；任務詳情頁加入 Chat 與 worktree 裡的 Shell，Shell 永遠不控制 agent（173、176、180、190）。
 - 任務詳情頁標出每一則內容的來源（你、reviewer、自動、agent、系統）與所屬的 run（180）。
 - run 執行中送出的訊息維持拒絕，介面允許先打草稿；封存或 PR 合併後不能送，PR 關閉時仍可送（183）。
-- 介面的需求以 `ui.md` 與 `ui-mockup.html` 為準：任務詳情頁用分割版（左 Chat、右 Diff／Shell／Events／Runs，窄視窗退回分頁）；深色與淺色主題都做，跟著系統切換（182）。
+- 介面的需求以 `ui.md` 與 `mockups/`（每個畫面的 HTML 與截圖）為準：任務詳情頁用分割版（左 Chat、右 Diff／Shell／Events／Runs，窄視窗退回分頁）；深色與淺色主題都做，跟著系統切換（182）。
+- 視覺方向是 A · Calm：中性色為主、只有一個靛藍強調色、細邊框不用陰影；字型用 Inter 與 JetBrains Mono，但不從網路載入（186）。
+- Chat 左右分邊：你的訊息靠右，agent 與 reviewer 靠左，系統與自動的事件置中（187）。
+- Archive 是獨立的畫面（`#/archive`，表格、依結果篩選、搜尋）；看板與 Archive 共用專案篩選，記在 `localStorage`。側欄在看板列出各專案進行中的任務，在 Archive 只列專案（188）。
+- 設定頁只能看不能改：Agents、GitHub、Projects、Usage；Limits and permissions 需要唯讀的 `GET /api/config`，拆成獨立的小任務（189）。
 
 ## 開源、安裝與發布
 
@@ -129,6 +133,7 @@
 
 - 一次做一個任務，合併之後才開始下一個；每個任務先提計畫，確認後再動手（150）。
 - 給 agent 的專案指示只寫在 `AGENTS.md`，`CLAUDE.md` 匯入它；agent-supervisor 開在這個 repo 的任務，agent 不 commit、不 push（184）。
+- 用 agsv 開發 agsv 時碰到的操作問題與改進點記在 `../history/dogfooding.md`，定期挑出來排進任務（191）。
 - 階段的順序見 `roadmap.md`（174）。主 agent 拆完要人確認才派工（177）。
 - 文件分成 `design/`（現在的樣子）、`history/`（決策紀錄與規劃的過程）、`guide/`（對外的英文文件）；任務單在階段做完後刪掉，舊版在 git 的 tag 裡（179）。
 

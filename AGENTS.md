@@ -14,18 +14,18 @@
 | `docs/design/roadmap.md` | 各個階段與各自的完成標準 |
 | `docs/design/spec.md` | 規格：資料表、run 的生命週期、看板、自動處理與上限、留言、衝突、復原、API、adapter 介面 |
 | `docs/design/decisions.md` | 目前仍然有效的設計決定（依主題）、尚未決定的事、已知的問題 |
-| `docs/design/ui.md` | 介面的需求：每個畫面、訊息來源的標示、顏色與 token；`ui-mockup.html` 是任務詳情頁的靜態草稿 |
+| `docs/design/ui.md` | 介面的需求：每個畫面、訊息來源的標示、顏色與 token；`mockups/` 是每個畫面的靜態 HTML 草稿與截圖 |
 | `docs/design/diagrams.md` | 架構圖與流程圖 |
 | `docs/design/phase5-tasks.md` | 目前階段的任務單與驗證清單 |
 | `docs/design/claude-sdk-notes.md`、`docs/design/codex-notes.md` | Claude Agent SDK 與 Codex CLI 的調查與實測結果 |
 | `docs/guide/` | 對外的英文文件：使用說明（`usage.md`）、信任模型與已知限制（`trust-model.md`）、adapter 開發指南（`adapters.md`）、HTTP API（`http-api.md`）。改了看板、設定檔、上限、權限、adapter 介面或 API 要一起更新 |
-| `docs/history/` | 完整的決策紀錄（`decision-log.md`，只增不改）與規劃的過程（`plans/`） |
+| `docs/history/` | 完整的決策紀錄（`decision-log.md`，只增不改）、規劃的過程（`plans/`）、用 agsv 開發這個 repo 時碰到的問題（`dogfooding.md`） |
 
-文件與本檔衝突時以 `docs/` 為準，並提醒我更新本檔。實作中做了新的設計決定：在 `docs/history/decision-log.md` 新增一筆；如果它改變了現行的做法，同時更新 `docs/design/decisions.md`。
+文件與本檔衝突時以 `docs/` 為準，並提醒我更新本檔。實作中做了新的設計決定：在 `docs/history/decision-log.md` 新增一筆；如果它改變了現行的做法，同時更新 `docs/design/decisions.md`。用 agsv 開發這個 repo 時碰到的操作問題或想改進的地方，記在 `docs/history/dogfooding.md`。
 
 ## 目前階段
 
-階段 5（新介面），版本 `0.3.x`，做完發 `0.4`。階段 0 到 4 已完成（`v0.3.0`，repo 已公開）。現在依 `docs/design/phase5-tasks.md` 做任務 19 到 25：任務 19 到 21 已完成，任務 22、23 交給 Codex，透過 agsv 開任務執行。**一次做一個，合併之後才開始下一個**（決策第 150 筆）；每個任務先提計畫，我確認後再動手。不要提前做階段 6 之後的功能，也不要做任務單「不要做」清單裡的功能。進入新階段時我會更新這一段。
+階段 5（新介面），版本 `0.3.x`，做完發 `0.4`。階段 0 到 4 已完成（`v0.3.0`，repo 已公開）。現在依 `docs/design/phase5-tasks.md` 做任務 19 到 25：任務 19 到 22 已完成；任務 23 由 Claude Code 透過 agsv 開任務執行，任務 23b、24、25 在對話裡直接做。**一次做一個，合併之後才開始下一個**（決策第 150 筆）；每個任務先提計畫，我確認後再動手。不要提前做階段 6 之後的功能，也不要做任務單「不要做」清單裡的功能。進入新階段時我會更新這一段。
 
 ## 技術選型
 
@@ -36,8 +36,8 @@
 - 全程 asyncio；背景工作與 API 跑在同一個 process
 - 測試用 `pytest` + `pytest-asyncio`，lint / format 用 `ruff`
 - 前端：React + Vite + TypeScript，放在 `web/`，測試用 vitest
-  - 樣式用 Tailwind 4（`@tailwindcss/vite`）。外觀改版（任務 22）之前不載入 Preflight；手寫的 CSS 不在 layer 裡，會蓋過 Tailwind 的 class（決策第 181 筆）
-  - 顏色一律經過 `docs/design/ui.md` 的 token，深色與淺色都要有，元件裡不寫死色碼（第 182 筆）
+  - 樣式用 Tailwind 4（`@tailwindcss/vite`），Preflight 已開啟（任務 22）。手寫的 CSS 一律放進 layer：不在 layer 裡的規則會蓋過 Tailwind 的 class（決策第 181、185 筆）
+  - 視覺方向是 `docs/design/ui.md` 的方向 A（第 186 筆）；顏色一律經過那裡的 token，深色與淺色都要有，元件裡不寫死色碼（第 182 筆）。字型不從網路載入
   - Shell（任務 24）會加 xterm.js
   - 不裝路由、資料抓取的套件；元件庫、圖示庫要用之前先問我（第 175 筆）
 
@@ -132,7 +132,7 @@ import 名稱是 `agent_supervisor`。不要用 `supervisor`，PyPI 上有同名
 - 型別註記寫完整；公開函式寫一行 docstring
 - 程式碼的註解與 docstring、介面文字、對外的文件（README 等）用英文；`docs/` 下的設計文件用繁體中文（決策第 143 筆）。程式碼識別字與 commit message 用英文
 - 遇到規格沒寫清楚的地方，先停下來問我，不要自行擴充範圍
-- **由 agent-supervisor 開的任務**（例如任務 22、23 的 Codex）：只在 worktree 裡改檔案，不要 commit、push 或開 PR，那些由 supervisor 做（設計規則 7）。做完在最後的訊息裡說明改了什麼、跑了哪些檢查
+- **由 agent-supervisor 開的任務**（例如任務 22 的 Codex、任務 23 的 Claude Code）：只在 worktree 裡改檔案，不要 commit、push 或開 PR，那些由 supervisor 做（設計規則 7）。做完在最後的訊息裡說明改了什麼、跑了哪些檢查
 
 ## 常用指令
 

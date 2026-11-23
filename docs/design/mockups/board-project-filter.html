@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: board with project filter</title>
+<!-- Static mockup for docs/design/ui.md (direction A). Generated from the design canvas; edit ui.md first. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FBFBFC}
+a{color:#4B4FC9}a:hover{color:#363AA8}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.navrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:13px;color:#16181D;text-decoration:none}
+.navrow:hover{background:#F1F2F5}
+.navon{background:#ECEDF1;font-weight:500}
+.dim{opacity:0.45}
+.seg{border:0;background:none;padding:5px 12px;border-radius:6px;font:500 13px Inter,sans-serif;color:#5F6672;cursor:pointer}
+.seg-on{background:#FFFFFF;color:#16181D;box-shadow:0 1px 2px rgba(16,24,40,0.08)}
+.btn{border:1px solid #E6E8EC;background:#FFFFFF;border-radius:6px;padding:6px 10px;font:500 13px Inter,sans-serif;color:#16181D;cursor:pointer}
+.opt{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;padding:8px 10px;border-radius:6px;font:13px Inter,sans-serif;color:#16181D;cursor:pointer;text-align:left}
+.opt:hover{background:#F4F5F7}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.t-working{background:#3E63DD}.t-needs{background:#E8590C}.t-review{background:#C99A06}.t-ready{background:#2F9E5B}
+.card{display:block;background:#FFFFFF;border:1px solid #E6E8EC;border-radius:8px;padding:12px;text-decoration:none;color:#16181D}
+.empty{border:1px dashed #DADDE3;border-radius:8px;padding:18px;text-align:center;font-size:12px;color:#5F6672}
+</style>
+</head>
+<body>
+<div style="min-height:900px;display:flex;flex-wrap:wrap;font-family:Inter,system-ui,sans-serif;color:#16181D;background:#FBFBFC">
+  <aside style="flex:1 1 220px;max-width:100%;box-sizing:border-box;padding:16px 12px;border-right:1px solid #E6E8EC;background:#F7F7F9;display:flex;flex-direction:column;gap:16px">
+    <div style="padding:0 8px;font-weight:600;font-size:14px">agent-supervisor</div>
+    <button class="btn" style="text-align:left">New task</button>
+    <nav aria-label="Views" style="display:flex;flex-direction:column;gap:2px">
+      <a class="navrow" href="#">Board <span style="margin-left:auto;font-size:12px;color:#5F6672">3</span></a>
+      <a class="navrow" href="#">Archive <span style="margin-left:auto;font-size:12px;color:#5F6672">25</span></a>
+    </nav>
+    <nav aria-label="Projects" style="display:flex;flex-direction:column;gap:2px">
+      <span style="font-size:11px;font-weight:500;color:#5F6672;text-transform:uppercase;letter-spacing:0.06em;padding:0 8px 6px">Projects</span>
+      <a class="navrow navon" href="#" aria-current="true">web-app <span style="margin-left:auto;font-size:12px;color:#5F6672">3</span></a>
+      <a class="navrow" href="#" style="padding-left:24px;color:#5F6672"><span class="dot t-review"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Restyle the board and the task page</span></a>
+      <a class="navrow" href="#" style="padding-left:24px;color:#5F6672"><span class="dot t-needs"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Migrate settings to the new form</span></a>
+      <a class="navrow" href="#" style="padding-left:24px;color:#5F6672"><span class="dot t-needs"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Fix flaky upload test</span></a>
+      <div class="dim" style="display:flex;flex-direction:column;gap:2px">
+      <a class="navrow" href="#">api-service <span style="margin-left:auto;font-size:12px">2</span></a>
+      <a class="navrow" href="#" style="padding-left:24px;color:#5F6672"><span class="dot t-working"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Add rate limiting to login</span></a>
+      <a class="navrow" href="#" style="padding-left:24px;color:#5F6672"><span class="dot t-ready"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Write a Fibonacci example</span></a>
+      <a class="navrow" href="#">infra <span style="margin-left:auto;font-size:12px">1</span></a>
+      <a class="navrow" href="#" style="padding-left:24px;color:#5F6672"><span class="dot t-ready"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Rotate TLS certs via DNS</span></a>
+      </div>
+      <button class="navrow" style="border:0;background:none;cursor:pointer;color:#5F6672;font:13px Inter,sans-serif">+ Add project</button>
+    </nav>
+    <div style="margin-top:auto"><a class="navrow" href="#">Settings</a></div>
+  </aside>
+  <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <header style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid #E6E8EC;background:#FFFFFF">
+      <div role="tablist" aria-label="View" style="display:flex;gap:2px;background:#F1F2F5;border-radius:8px;padding:3px"><button role="tab" aria-selected="true" class="seg seg-on">Board</button><button role="tab" class="seg">Archive</button></div>
+      <div style="position:relative">
+        <button class="btn" aria-expanded="true" aria-haspopup="listbox" style="border-color:#4B4FC9;box-shadow:0 0 0 3px #E4E5FA">web-app ▾</button>
+        <div role="listbox" aria-label="Project" style="position:absolute;top:40px;left:0;z-index:2;width:260px;background:#FFFFFF;border:1px solid #E6E8EC;border-radius:10px;padding:6px;box-shadow:0 8px 28px rgba(16,24,40,0.12)">
+          <button role="option" class="opt"><span style="width:14px"></span><span style="flex:1">All projects</span><span style="font-size:12px;color:#5F6672">6</span></button>
+          <div style="height:1px;background:#EEF0F3;margin:4px 6px"></div>
+          <button role="option" aria-selected="true" class="opt" style="background:#F1F2F5;font-weight:500"><span style="width:14px;color:#4B4FC9">✓</span><span style="flex:1">web-app</span><span style="font-size:12px;color:#5F6672">3</span></button>
+          <button role="option" class="opt"><span style="width:14px"></span><span style="flex:1">api-service</span><span style="font-size:12px;color:#5F6672">2</span></button>
+          <button role="option" class="opt"><span style="width:14px"></span><span style="flex:1">infra</span><span style="font-size:12px;color:#5F6672">1</span></button>
+          <div style="height:1px;background:#EEF0F3;margin:4px 6px"></div>
+          <button class="opt" style="color:#5F6672"><span style="width:14px">+</span><span>Add project…</span></button>
+        </div>
+      </div>
+      <span style="font-size:13px;color:#5F6672">3 active · 2 need you</span>
+      <div style="margin-left:auto"><button style="border:0;background:#4B4FC9;border-radius:6px;padding:7px 12px;font:500 13px Inter,sans-serif;color:#FFFFFF;cursor:pointer">New task in web-app</button></div>
+    </header>
+    <div style="flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding:20px 24px;align-items:start">
+      <section style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px"><span class="dot t-working"></span><h2 style="margin:0;font-size:13px;font-weight:600">Working</h2><span style="font-size:12px;color:#5F6672">0</span></div><div class="empty">Nothing running in web-app</div></section>
+      <section style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px"><span class="dot t-needs"></span><h2 style="margin:0;font-size:13px;font-weight:600">Needs you</h2><span style="font-size:12px;color:#5F6672">2</span></div>
+        <a class="card" href="#"><div style="font-size:12px;color:#5F6672;margin-bottom:6px">#29 · Codex</div><div style="font-size:13px;font-weight:500;margin-bottom:10px">Migrate the settings page to the new form layout</div><span style="font-size:12px;font-weight:500;color:#B4410A">● CI failed 3 times</span></a>
+        <a class="card" href="#"><div style="font-size:12px;color:#5F6672;margin-bottom:6px">#30 · Claude Code</div><div style="font-size:13px;font-weight:500;margin-bottom:10px">Fix flaky upload test</div><span style="font-size:12px;font-weight:500;color:#B4410A">● Stopped</span></a>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px"><span class="dot t-review"></span><h2 style="margin:0;font-size:13px;font-weight:600">In review</h2><span style="font-size:12px;color:#5F6672">1</span></div>
+        <a class="card" href="#"><div style="font-size:12px;color:#5F6672;margin-bottom:6px">#27 · Codex</div><div style="font-size:13px;font-weight:500;margin-bottom:10px">Restyle the board and the task page</div><span style="font-size:12px;font-weight:500;color:#7A5800">● CI running</span></a>
+      </section>
+      <section style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px"><span class="dot t-ready"></span><h2 style="margin:0;font-size:13px;font-weight:600">Ready to merge</h2><span style="font-size:12px;color:#5F6672">0</span></div><div class="empty">Nothing ready in web-app</div></section>
+    </div>
+  </main>
+</div>
+</body>
+</html>
