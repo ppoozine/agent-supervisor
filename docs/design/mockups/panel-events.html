@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: Events panel</title>
+<!-- Static mockup for docs/design/ui.md (direction A). Generated from the design canvas; edit ui.md first. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FBFBFC}
+a{color:#4B4FC9}a:hover{color:#363AA8}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.tab{border:0;background:none;padding:10px 2px;margin-right:16px;font:500 13px Inter,sans-serif;color:#5F6672;cursor:pointer;border-bottom:2px solid transparent}
+.tab-on{color:#16181D;border-bottom-color:#16181D}
+.chipf{border:1px solid #E6E8EC;background:#FFFFFF;border-radius:999px;padding:4px 10px;font:500 12px Inter,sans-serif;color:#5F6672;cursor:pointer}
+.chipf-on{background:#16181D;border-color:#16181D;color:#FFFFFF}
+.ev{display:grid;grid-template-columns:62px 112px minmax(0,1fr);gap:10px;align-items:baseline;padding:7px 10px;border-radius:6px;font-size:12px}
+.ev:hover{background:#F4F5F7}
+.ty{font-size:11px;font-weight:500}
+.agent{color:#0E7C74}.you{color:#4B4FC9}.reviewer{color:#7E3FB8}.auto{color:#8F4700}.system{color:#5F6672}.denied{color:#B4232F}
+</style>
+</head>
+<body>
+<div style="width:580px;height:900px;box-sizing:border-box;display:flex;flex-direction:column;font-family:Inter,system-ui,sans-serif;color:#16181D;background:#FBFBFC;border-left:1px solid #E6E8EC">
+  <div role="tablist" style="display:flex;padding:0 20px;border-bottom:1px solid #E6E8EC;background:#FFFFFF">
+    <button role="tab" class="tab">Diff</button><button role="tab" class="tab">Shell</button><button role="tab" aria-selected="true" class="tab tab-on">Events <span style="color:#5F6672;font-weight:400">116</span></button><button role="tab" class="tab">Runs</button>
+  </div>
+  <div style="padding:12px 20px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #E6E8EC;background:#FFFFFF">
+    <div style="display:flex;flex-wrap:wrap;gap:6px" role="group" aria-label="Filter by source">
+      <button class="chipf chipf-on" aria-pressed="true">All</button><button class="chipf">Agent</button><button class="chipf">You</button><button class="chipf">Reviewer</button><button class="chipf">Automatic</button><button class="chipf">System</button>
+    </div>
+    <div style="display:flex;gap:8px">
+      <label for="evtype" style="position:absolute;left:-9999px">Event type</label>
+      <select id="evtype" style="border:1px solid #E6E8EC;border-radius:6px;padding:5px 8px;font:12px Inter,sans-serif;color:#16181D;background:#FFFFFF"><option>All types</option></select>
+      <label for="evrun" style="position:absolute;left:-9999px">Run</label>
+      <select id="evrun" style="border:1px solid #E6E8EC;border-radius:6px;padding:5px 8px;font:12px Inter,sans-serif;color:#16181D;background:#FFFFFF"><option>All runs</option></select>
+    </div>
+  </div>
+  <div style="flex:1;overflow:auto;padding:8px 10px">
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:40:31</span><span class="ty mono agent">session_started</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">run 3 · resumed session 01a2…</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:40:30</span><span class="ty mono auto">state_change</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">run started · automatic: PR comments</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:40:12</span><span class="ty mono reviewer">review_comment</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">mira · Sidebar.tsx:42 · The collapse button needs…</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:33:54</span><span class="ty mono system">ci_status</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">CI passed on f2e2268</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:32:04</span><span class="ty mono system">pr_opened</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">PR #43</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:32:01</span><span class="ty mono system">pushed</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">f2e2268 → asv/task-27-restyle…</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:31:40</span><span class="ty mono agent">agent_message</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Done: tokens, Preflight, light and dark themes…</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:31:12</span><span class="ty mono agent">command</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">$ npm test · exit 0</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:24:03</span><span class="ty mono denied">permission_denied</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Bash git push · not allowed</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:21:47</span><span class="ty mono agent">tool_call</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Edit web/src/components/Sidebar.tsx</span></div>
+    
+      <div class="ev"><span class="mono" style="color:#5F6672">08:19:57</span><span class="ty mono you">state_change</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">run started · your message</span></div>
+    
+    <div style="margin:2px 10px 8px;border:1px solid #E6E8EC;border-radius:8px;background:#FFFFFF">
+      <div style="display:flex;justify-content:space-between;padding:8px 10px;font-size:12px;border-bottom:1px solid #EEF0F3"><span><span class="mono agent">command</span> · run 2 · 08:31:12</span><button style="border:0;background:none;font:500 12px Inter,sans-serif;color:#4B4FC9;cursor:pointer;padding:0">Copy JSON</button></div>
+      <pre class="mono" style="margin:0;padding:10px;font-size:11px;line-height:1.6;color:#3A404A;white-space:pre-wrap">{ "phase": "finished", "tool_use_id": "call_7f2",
+  "command": "npm test", "exit_code": 0,
+  "output": "Tests  74 passed (74)" }</pre>
+    </div>
+  </div>
+</div>
+</body>
+</html>

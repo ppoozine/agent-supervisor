@@ -1,12 +1,12 @@
 # 階段 5 任務單
 
-最後更新：2026-11-22
+最後更新：2026-11-23
 
-階段 5「新介面」的七個任務，對應 `roadmap.md` 的階段 5。規劃的過程見 `../history/plans/11-next-plan.md` 主題 1、4、5，現行的決定見 `decisions.md`。階段做完後這份任務單會刪掉（決策第 179 筆）。
+階段 5「新介面」的八個任務，對應 `roadmap.md` 的階段 5。規劃的過程見 `../history/plans/11-next-plan.md` 主題 1、4、5，現行的決定見 `decisions.md`。階段做完後這份任務單會刪掉（決策第 179 筆）。
 
 這個階段的目標是：**介面從「只求可用」變成每天願意用的樣子；在一個任務裡就看得懂 agent 做了什麼、是誰叫它做的，也能自己在 worktree 裡動手。** 做完發 `0.4.0`。
 
-做法：**一次做一個任務，合併之後才開始下一個**（第 150 筆）。每個任務一個 branch、一個 PR，開始前先提計畫、確認後再動手。任務 22、23 交給 Codex，透過 agsv 開任務執行（第 176 筆），其他由 Claude Code 做。
+做法：**一次做一個任務，合併之後才開始下一個**（第 150 筆）。每個任務一個 branch、一個 PR，開始前先提計畫、確認後再動手。任務 22 由 Codex、任務 23 由 Claude Code，都透過 agsv 開任務執行（第 176、190 筆），其他由 Claude Code 在對話裡直接做。用 agsv 開發時碰到的問題記在 `../history/dogfooding.md`（第 191 筆）。
 
 順序的理由：
 
@@ -133,70 +133,93 @@
 
 ---
 
-## 任務 22 · 外觀改版：看板與任務詳情頁（Codex）
+## 任務 22 · 外觀改版的底層（Codex，已完成）
 
-由 Claude 在 agsv 開一張 Codex 的任務，指示如下。Codex 的 PR 由 agsv 開出，我看畫面後在 PR 上留言，agsv 會把留言餵回 Codex；Claude 做 code review。
-
-```
-Read AGENTS.md and docs/README.md, then docs/design/ui.md and the static
-mockup docs/design/ui-mockup.html.
-
-Restyle the board and the task detail page to match docs/design/ui.md
-and the mockup, using Tailwind and the design tokens defined there.
-
-Scope:
-1. Design tokens in the Tailwind configuration, as listed in ui.md
-   Tailwind is loaded without Preflight (see the top of web/src/styles.css,
-   decision 181). Turn Preflight on as part of this task, and replace the
-   hand-written CSS for these screens: rules outside a layer win over
-   Tailwind's classes, so leftover rules will override your utilities
-2. Board: sidebar, columns, cards, the Archive area
-3. Task detail page: header, tabs, the Chat timeline, Diff, Events,
-   Runs, the message box
-4. Keep every existing behavior, data flow, API call and keyboard
-   shortcut. Do not change anything under src/ (the Python backend)
-5. Keep the existing accessible names (labels, roles) so the current
-   tests keep passing; npm test and npm run build must pass
-6. Code comments in English
-
-Do not: change the settings page or the dialogs (next task), add
-component libraries, add routing or data-fetching libraries, copy
-Agent Orchestrator's visual design.
-```
-
-**我要驗證的事**
-- [ ] 看板與任務詳情頁和 ui.md 與 `ui-mockup.html` 一致，訊息來源一眼分得出來
-- [ ] PR 上至少一則留言經 agsv 餵回 Codex 並被改好（順便驗證留言回饋的迴圈）
-- [ ] Code review 沒有發現資料流、API 或後端的改動
+PR #43：Tailwind 的 `@theme` tokens、開啟 Preflight、深淺主題跟著系統、分割面板與窄視窗的分頁、側欄收合、舊樣式隔離在 `web/src/legacy.css`。看過之後決定視覺改走方向 A（第 186 筆），這次的成果當作任務 23 的底層。
 
 ---
 
-## 任務 23 · 外觀改版：其他畫面（Codex）
+## 任務 23 · 外觀改版：所有畫面（Claude Code）
 
-做法同任務 22。
+由 Claude 在 agsv 開一張 Claude Code 的任務，指示如下（第 190 筆）。PR 由 agsv 開出，我看畫面後在 PR 上留言，agsv 會把留言餵回 agent；Claude 做 code review、截圖和草稿比對。
 
 ```
-Read AGENTS.md and docs/README.md, then docs/design/ui.md.
+Read AGENTS.md and docs/README.md, then docs/design/ui.md and every mockup
+in docs/design/mockups/ (the HTML files hold the exact values; the PNG
+files show how each screen should look).
 
-Restyle the remaining screens to match docs/design/ui.md, using the
-design tokens already in the Tailwind configuration.
+Bring every screen to the design in docs/design/ui.md (direction A,
+decisions 186 to 189). Task 22 already set up the tokens, Preflight, the
+light and dark themes and the split panel; build on that.
 
 Scope:
-1. Settings page
-2. New task and Add project dialogs, the archive confirmation
-3. Empty states, error messages, loading states on every screen
-4. Remove whatever is left of the old hand-written CSS that no screen
-   uses any more
-5. Same rules as before: keep behavior, data flow, API calls, keyboard
-   shortcuts and accessible names; npm test and npm run build pass;
-   nothing under src/ changes
+1. Tokens: change the @theme names and values in web/src/styles.css to
+   the ones in ui.md, light and dark
+2. Sidebar: the Board and Archive items, projects with their active
+   tasks, the selected-project state, Live and Settings at the bottom
+3. Board: the header with the Board | Archive switch, the project filter
+   menu, the summary line and the New task button; columns and cards
+4. Archive as its own view at #/archive: outcome filter, search and the
+   table. It replaces the Archive area below the board
+5. Task page: the header; Chat with your messages on the right, everyone
+   else on the left, system and automatic lines centred; Diff; Events
+   with the source and run filters and expandable rows; Runs with the
+   totals and cards that jump to the run in Chat; the Shell placeholder;
+   the message box
+6. Dialogs: New task (agent cards, Title before Description, the note
+   about what happens next), Add project (the field error, the
+   requirements note), the archive confirmation
+7. Settings, read-only: the Agents, GitHub, Projects and Usage sections.
+   Leave out Limits and permissions; a separate task adds its API
+8. Remove web/src/legacy.css and any CSS that no screen uses any more
+9. Keep every behavior, data flow, API call, keyboard shortcut and
+   accessible name that exists today. Nothing under src/ (the Python
+   backend) changes. Filters and totals are computed in the frontend
+   from data the API already returns
+10. Tests for the new interactions: the project filter, the archive
+   filter and search, the events source filter, jumping from Runs to
+   Chat. npm test and npm run build pass
+11. Update docs/guide/usage.md where it describes the screens
+12. Code comments in English
 
-Do not: add component libraries, routing or data-fetching libraries.
+Do not: load fonts from the network; add component, icon, routing or
+data-fetching libraries; make settings editable; build the Shell
+terminal (task 24).
 ```
 
 **我要驗證的事**
-- [ ] 每個畫面都已經是新的樣子，舊的 CSS 沒有殘留沒用到的部分
-- [ ] Code review 沒有發現行為的改動
+- [ ] 每個畫面的截圖和 `mockups/` 的 PNG 對得起來，深色主題也看過
+- [ ] Chat 裡你的訊息在右、agent 與 reviewer 在左、系統與自動置中
+- [ ] 專案篩選、Archive、Events 的來源篩選、Runs 跳到 Chat 都能用
+- [ ] PR 上至少一則留言經 agsv 餵回 agent 並被改好
+- [ ] Code review 沒有發現後端、資料流或 API 的改動；`legacy.css` 已刪除
+
+---
+
+## 任務 23b · 設定頁的 Limits and permissions
+
+由 Claude Code 在對話裡直接做（第 189 筆）。
+
+```
+請先讀 AGENTS.md 與 docs/README.md，再讀 docs/design/ui.md 的設定頁。
+
+加上唯讀的 GET /api/config，並在設定頁加上「Limits and permissions」。
+
+範圍：
+1. 後端：GET /api/config 回傳 ui.md 列出的值（每個任務的費用與
+   token 上限、每次 run 的輪數與時間上限、自動修復與留言的次數
+   上限、輪詢間隔、通知、sandbox、網路、禁止的指令）。只回這些
+   欄位，不回本機路徑以外的資訊；沿用 api/guard.py 的檢查
+2. 前端：設定頁照 mockups/settings.html 加上這一區，含
+   「To change these, edit … and restart agsv serve.」的說明
+3. 測試：API 的回應形狀、guard 擋得住別的來源；前端顯示正確
+4. 更新 docs/guide/http-api.md
+
+不要做：修改設定的 API 或介面。
+```
+
+**我要驗證的事**
+- [ ] 改 `config.toml` 的一個上限並重啟後，設定頁顯示新的值
 
 ---
 

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: settings</title>
+<!-- Static mockup for docs/design/ui.md (direction A). Generated from the design canvas; edit ui.md first. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FBFBFC}
+a{color:#4B4FC9}a:hover{color:#363AA8}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.navrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:13px;color:#16181D;text-decoration:none}
+.navrow:hover{background:#F1F2F5}
+.navon{background:#ECEDF1;font-weight:500}
+.sec{background:#FFFFFF;border:1px solid #E6E8EC;border-radius:10px}
+.sechead{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;padding:16px 18px;border-bottom:1px solid #EEF0F3}
+.h2{margin:0;font-size:14px;font-weight:600}
+.muted{font-size:12px;color:#5F6672}
+.item{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;padding:14px 18px;border-bottom:1px solid #EEF0F3}
+.item:last-child{border-bottom:0}
+.st{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%}
+.ok{color:#1E7A45}.ok .dot{background:#2F9E5B}
+.bad{color:#B4410A}.bad .dot{background:#E8590C}
+.btn{border:1px solid #E6E8EC;background:#FFFFFF;border-radius:6px;padding:6px 10px;font:500 13px Inter,sans-serif;color:#16181D;cursor:pointer}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 24px;padding:14px 18px;font-size:13px}
+.kv span:nth-child(odd){color:#3A404A}
+.kv span:nth-child(even){font-family:'JetBrains Mono',monospace;font-size:12px;text-align:right}
+th{text-align:left;font-size:12px;font-weight:500;color:#5F6672;padding:10px 18px;border-bottom:1px solid #EEF0F3;white-space:nowrap}
+td{font-size:13px;padding:10px 18px;border-bottom:1px solid #EEF0F3;white-space:nowrap}
+.new{font-size:11px;font-weight:500;color:#4B4FC9;background:#EEF0FD;border-radius:4px;padding:1px 6px}
+</style>
+</head>
+<body>
+<div style="min-height:1700px;display:flex;flex-wrap:wrap;font-family:Inter,system-ui,sans-serif;color:#16181D;background:#FBFBFC">
+  <aside style="flex:1 1 220px;max-width:100%;box-sizing:border-box;padding:16px 12px;border-right:1px solid #E6E8EC;background:#F7F7F9;display:flex;flex-direction:column;gap:16px">
+    <a class="navrow" href="#" style="color:#5F6672">← Board</a>
+    <nav aria-label="Settings sections" style="display:flex;flex-direction:column;gap:2px">
+      <span style="font-size:11px;font-weight:500;color:#5F6672;text-transform:uppercase;letter-spacing:0.06em;padding:0 8px 6px">Settings</span>
+      <a class="navrow navon" href="#agents" aria-current="true">Agents</a>
+      <a class="navrow" href="#github">GitHub</a>
+      <a class="navrow" href="#projects">Projects</a>
+      <a class="navrow" href="#usage">Usage</a>
+      <a class="navrow" href="#limits">Limits and permissions</a>
+    </nav>
+  </aside>
+  <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:20px;padding:24px 32px 40px;max-width:920px">
+    <header style="display:flex;flex-wrap:wrap;align-items:center;gap:12px">
+      <h1 style="margin:0;font-size:18px;font-weight:600">Settings</h1>
+      <span class="muted">Checked 2 minutes ago</span>
+      <button class="btn" style="margin-left:auto">Check again</button>
+    </header>
+    <p class="muted" style="margin:-8px 0 0;line-height:1.55">agent-supervisor runs the agents you installed and signed in to yourself. It never signs you in and never stores keys or tokens.</p>
+
+    <section id="agents" class="sec" aria-labelledby="hAgents">
+      <div class="sechead"><h2 id="hAgents" class="h2">Agents</h2><span class="muted">3 installed · 2 ready</span></div>
+      <div class="item"><strong style="font-size:13px;width:140px">Claude Code</strong><span class="st ok"><span class="dot"></span>Ready</span><span class="muted mono">2.4.1</span><span class="muted">Signed in with a Claude subscription · reports cost</span></div>
+      <div class="item"><strong style="font-size:13px;width:140px">Codex</strong><span class="st ok"><span class="dot"></span>Ready</span><span class="muted mono">0.98.0</span><span class="muted">Signed in with ChatGPT · reports tokens only</span></div>
+      <div class="item" style="align-items:flex-start;flex-direction:column">
+        <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center"><strong style="font-size:13px;width:140px">example-agent</strong><span class="st bad"><span class="dot"></span>Not signed in</span><span class="muted mono">0.1.0</span></div>
+        <div style="width:100%;box-sizing:border-box">
+          <div class="muted" style="margin-bottom:6px">Run in a terminal, then Check again:</div>
+          <div style="display:flex;align-items:center;gap:8px;background:#F7F7F9;border:1px solid #E6E8EC;border-radius:6px;padding:8px 10px"><code class="mono" style="font-size:12px;flex:1">example-agent login</code><button class="btn" style="padding:3px 8px;font-size:12px">Copy</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="github" class="sec" aria-labelledby="hGh">
+      <div class="sechead"><h2 id="hGh" class="h2">GitHub</h2></div>
+      <div class="item"><strong style="font-size:13px;width:140px" class="mono">gh</strong><span class="st ok"><span class="dot"></span>Ready</span><span class="muted mono">2.62.0</span><span class="muted">Signed in to github.com</span></div>
+    </section>
+
+    <section id="projects" class="sec" aria-labelledby="hProj">
+      <div class="sechead"><h2 id="hProj" class="h2">Projects</h2><span class="new">New</span><button class="btn" style="margin-left:auto">Add project</button></div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        <thead><tr><th>Name</th><th>Local path</th><th>GitHub</th><th>Requires review</th><th>Tasks</th></tr></thead>
+        <tbody>
+          <tr><td style="font-weight:500">web-app</td><td class="mono" style="font-size:12px;color:#5F6672">~/code/web-app</td><td class="mono" style="font-size:12px">you/web-app</td><td>Yes</td><td style="color:#5F6672">3 active · 19 archived</td></tr>
+          <tr><td style="font-weight:500">api-service</td><td class="mono" style="font-size:12px;color:#5F6672">~/code/api-service</td><td class="mono" style="font-size:12px">you/api-service</td><td>No</td><td style="color:#5F6672">2 active · 4 archived</td></tr>
+          <tr><td style="font-weight:500;border-bottom:0">infra</td><td class="mono" style="font-size:12px;color:#5F6672;border-bottom:0">~/code/infra</td><td class="mono" style="font-size:12px;border-bottom:0">you/infra</td><td style="border-bottom:0">No</td><td style="color:#5F6672;border-bottom:0">1 active · 2 archived</td></tr>
+        </tbody>
+      </table></div>
+    </section>
+
+    <section id="usage" class="sec" aria-labelledby="hUse">
+      <div class="sechead"><h2 id="hUse" class="h2">Usage</h2><span class="new">New</span><span class="muted">All tasks, including archived</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;padding:16px 18px">
+        <div style="flex:1 1 160px;border:1px solid #EEF0F3;border-radius:8px;padding:12px"><div class="muted">Cost (agents that report it)</div><div style="font-size:20px;font-weight:600;margin-top:4px">$18.40</div></div>
+        <div style="flex:1 1 160px;border:1px solid #EEF0F3;border-radius:8px;padding:12px"><div class="muted">Tokens in</div><div style="font-size:20px;font-weight:600;margin-top:4px">41.2M</div></div>
+        <div style="flex:1 1 160px;border:1px solid #EEF0F3;border-radius:8px;padding:12px"><div class="muted">Tokens out</div><div style="font-size:20px;font-weight:600;margin-top:4px">612k</div></div>
+      </div>
+      <p class="muted" style="margin:0;padding:0 18px 16px">Codex reports tokens only, so its tasks are not in the cost total.</p>
+    </section>
+
+    <section id="limits" class="sec" aria-labelledby="hLim">
+      <div class="sechead"><h2 id="hLim" class="h2">Limits and permissions</h2><span class="new">New · read-only</span></div>
+      <div class="kv">
+        <span>Cost limit per task</span><span>$5.00</span>
+        <span>Token limit per task</span><span>20,000,000</span>
+        <span>Turns per run</span><span>50</span>
+        <span>Time per run</span><span>30 min</span>
+        <span>Automatic fixes per task</span><span>3</span>
+        <span>Comment rounds per task</span><span>5</span>
+        <span>GitHub polling</span><span>every 30 s</span>
+        <span>Notify when a task needs you</span><span>on</span>
+        <span>Sandbox</span><span>workspace-write</span>
+        <span>Network for agents</span><span>allowed</span>
+        <span>Denied commands</span><span>git push, gh, sudo, rm -rf /</span>
+      </div>
+      <p class="muted" style="margin:0;padding:12px 18px 16px;border-top:1px solid #EEF0F3">To change these, edit <span class="mono">~/.agent-supervisor/config.toml</span> and restart <span class="mono">agsv serve</span>.</p>
+    </section>
+  </main>
+</div>
+</body>
+</html>

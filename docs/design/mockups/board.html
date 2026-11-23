@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: board</title>
+<!-- Static mockup for docs/design/ui.md (direction A). Generated from the design canvas; edit ui.md first. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FBFBFC}
+a{color:#4B4FC9}a:hover{color:#363AA8}
+.navrow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;font-size:13px;color:#16181D;text-decoration:none}
+.navrow:hover{background:#F1F2F5}
+.navsub{padding-left:24px;color:#5F6672}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.t-working{background:#3E63DD}.t-needs{background:#E8590C}.t-review{background:#C99A06}.t-ready{background:#2F9E5B}.t-archived{background:#8B919C}
+.lbl{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:500}
+.l-working{color:#2F54C9}.l-needs{color:#B4410A}.l-review{color:#7A5800}.l-ready{color:#1E7A45}
+.card{display:block;background:#FFFFFF;border:1px solid #E6E8EC;border-radius:8px;padding:12px;text-decoration:none;color:#16181D}
+.card:hover{border-color:#C9CDD5}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+</style>
+</head>
+<body>
+<div style="min-height:900px;display:flex;flex-wrap:wrap;font-family:Inter,system-ui,sans-serif;color:#16181D;background:#FBFBFC">
+  <aside style="flex:1 1 220px;max-width:100%;box-sizing:border-box;padding:16px 12px;border-right:1px solid #E6E8EC;background:#F7F7F9;display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:0 8px">
+      <span style="font-weight:600;font-size:14px;letter-spacing:-0.01em">agent-supervisor</span>
+      <button aria-label="Collapse sidebar" style="border:0;background:none;padding:6px;border-radius:6px;color:#5F6672;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path></svg></button>
+    </div>
+    <button style="display:flex;align-items:center;justify-content:space-between;width:100%;box-sizing:border-box;border:1px solid #E6E8EC;background:#FFFFFF;border-radius:8px;padding:8px 10px;font:500 13px Inter,sans-serif;color:#16181D;cursor:pointer"><span>New task</span></button>
+    <nav aria-label="Views" style="display:flex;flex-direction:column;gap:2px">
+      <a class="navrow" href="#" aria-current="page" style="background:#ECEDF1;font-weight:500">Board <span style="margin-left:auto;font-size:12px;color:#5F6672;font-weight:400">6</span></a>
+      <a class="navrow" href="#">Archive <span style="margin-left:auto;font-size:12px;color:#5F6672">25</span></a>
+    </nav>
+    <nav aria-label="Projects" style="display:flex;flex-direction:column;gap:2px">
+      <span style="font-size:11px;font-weight:500;color:#5F6672;text-transform:uppercase;letter-spacing:0.06em;padding:0 8px 6px">Projects</span>
+      
+        <a class="navrow" href="#"><span style="flex:1;font-weight:500">web-app</span><span style="font-size:12px;color:#5F6672">3</span></a>
+        
+          <a class="navrow navsub" href="#"><span class="dot t-review"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Restyle the board and the task page</span></a>
+        
+          <a class="navrow navsub" href="#"><span class="dot t-needs"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Migrate settings to the new form</span></a>
+        
+          <a class="navrow navsub" href="#"><span class="dot t-needs"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Fix flaky upload test</span></a>
+        
+      
+        <a class="navrow" href="#"><span style="flex:1;font-weight:500">api-service</span><span style="font-size:12px;color:#5F6672">2</span></a>
+        
+          <a class="navrow navsub" href="#"><span class="dot t-working"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Add rate limiting to login</span></a>
+        
+          <a class="navrow navsub" href="#"><span class="dot t-ready"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Write a Fibonacci example</span></a>
+        
+      
+        <a class="navrow" href="#"><span style="flex:1;font-weight:500">infra</span><span style="font-size:12px;color:#5F6672">1</span></a>
+        
+          <a class="navrow navsub" href="#"><span class="dot t-ready"></span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Rotate TLS certs via DNS</span></a>
+        
+      
+    </nav>
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:2px">
+      <a class="navrow" href="#"><span class="dot t-ready"></span>Live</a>
+      <a class="navrow" href="#">Settings</a>
+    </div>
+  </aside>
+  <main style="flex:999 1 560px;min-width:0;display:flex;flex-direction:column">
+    <header style="display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid #E6E8EC;background:#FFFFFF">
+      <div role="tablist" aria-label="View" style="display:flex;gap:2px;background:#F1F2F5;border-radius:8px;padding:3px"><button role="tab" aria-selected="true" style="border:0;background:#FFFFFF;padding:5px 12px;border-radius:6px;font:500 13px Inter,sans-serif;color:#16181D;box-shadow:0 1px 2px rgba(16,24,40,0.08)">Board</button><button role="tab" style="border:0;background:none;padding:5px 12px;border-radius:6px;font:500 13px Inter,sans-serif;color:#5F6672">Archive</button></div>
+      <button style="border:1px solid #E6E8EC;background:#FFFFFF;border-radius:6px;padding:6px 10px;font:500 13px Inter,sans-serif;color:#16181D;cursor:pointer">All projects ▾</button>
+      <span style="font-size:13px;color:#5F6672">6 active · 2 need you</span>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button style="border:0;background:#4B4FC9;border-radius:6px;padding:7px 12px;font:500 13px Inter,sans-serif;color:#FFFFFF;cursor:pointer">New task</button>
+      </div>
+    </header>
+    <div style="flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;padding:20px 24px;align-items:start">
+      
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px">
+            <span class="dot t-working"></span>
+            <h2 style="margin:0;font-size:13px;font-weight:600">Working</h2>
+            <span style="font-size:12px;color:#5F6672">1</span>
+          </div>
+          
+            <a class="card" href="#">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#5F6672;margin-bottom:6px"><span>api-service · #31</span><span>Claude Code</span></div>
+              <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:10px">Add rate limiting to the login endpoint</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <span class="lbl l-working"><span class="dot t-working"></span>Working</span>
+                <span style="font-size:12px;color:#5F6672">Run 2 · 6m · 412k tok</span>
+              </div>
+              
+            </a>
+          
+        </section>
+      
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px">
+            <span class="dot t-needs"></span>
+            <h2 style="margin:0;font-size:13px;font-weight:600">Needs you</h2>
+            <span style="font-size:12px;color:#5F6672">2</span>
+          </div>
+          
+            <a class="card" href="#">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#5F6672;margin-bottom:6px"><span>web-app · #29</span><span>Codex</span></div>
+              <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:10px">Migrate the settings page to the new form layout</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <span class="lbl l-needs"><span class="dot t-needs"></span>CI failed 3 times</span>
+                <span style="font-size:12px;color:#5F6672">1.2M tok</span>
+              </div>
+              
+                <div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF0F3;display:flex;gap:10px;font-size:12px;color:#5F6672"><span class="mono">PR #41</span><span>✗ CI failed</span></div>
+              
+            </a>
+          
+            <a class="card" href="#">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#5F6672;margin-bottom:6px"><span>web-app · #30</span><span>Claude Code</span></div>
+              <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:10px">Fix flaky upload test</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <span class="lbl l-needs"><span class="dot t-needs"></span>Stopped</span>
+                <span style="font-size:12px;color:#5F6672">$0.84</span>
+              </div>
+              
+            </a>
+          
+        </section>
+      
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px">
+            <span class="dot t-review"></span>
+            <h2 style="margin:0;font-size:13px;font-weight:600">In review</h2>
+            <span style="font-size:12px;color:#5F6672">1</span>
+          </div>
+          
+            <a class="card" href="#">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#5F6672;margin-bottom:6px"><span>web-app · #27</span><span>Codex</span></div>
+              <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:10px">Restyle the board and the task page</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <span class="lbl l-review"><span class="dot t-review"></span>CI running</span>
+                <span style="font-size:12px;color:#5F6672">3.9M tok · 1h</span>
+              </div>
+              
+                <div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF0F3;display:flex;gap:10px;font-size:12px;color:#5F6672"><span class="mono">PR #43</span><span>comments 1/5</span></div>
+              
+            </a>
+          
+        </section>
+      
+        <section style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;padding:4px 2px 8px">
+            <span class="dot t-ready"></span>
+            <h2 style="margin:0;font-size:13px;font-weight:600">Ready to merge</h2>
+            <span style="font-size:12px;color:#5F6672">2</span>
+          </div>
+          
+            <a class="card" href="#">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#5F6672;margin-bottom:6px"><span>api-service · #26</span><span>Claude Code</span></div>
+              <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:10px">Write a Fibonacci example</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <span class="lbl l-ready"><span class="dot t-ready"></span>Ready</span>
+                <span style="font-size:12px;color:#5F6672">$0.31 · 11h</span>
+              </div>
+              
+                <div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF0F3;display:flex;gap:10px;font-size:12px;color:#5F6672"><span class="mono">PR #26</span><span>✓ CI · approved</span></div>
+              
+            </a>
+          
+            <a class="card" href="#">
+              <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#5F6672;margin-bottom:6px"><span>infra · #24</span><span>Codex</span></div>
+              <div style="font-size:13px;font-weight:500;line-height:1.4;margin-bottom:10px">Rotate TLS certificates via the DNS challenge</div>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+                <span class="lbl l-ready"><span class="dot t-ready"></span>Ready</span>
+                <span style="font-size:12px;color:#5F6672">640k tok · 2d</span>
+              </div>
+              
+                <div style="margin-top:10px;padding-top:10px;border-top:1px solid #EEF0F3;display:flex;gap:10px;font-size:12px;color:#5F6672"><span class="mono">PR #19</span><span>✓ CI passed</span></div>
+              
+            </a>
+          
+        </section>
+      
+    </div>
+  </main>
+</div>
+</body>
+</html>

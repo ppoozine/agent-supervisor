@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup: New task dialog</title>
+<!-- Static mockup for docs/design/ui.md (direction A). Generated from the design canvas; edit ui.md first. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FBFBFC}
+a{color:#4B4FC9}a:hover{color:#363AA8}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.lab{display:block;font-size:12px;font-weight:500;color:#3A404A;margin-bottom:6px}
+.inp{width:100%;box-sizing:border-box;border:1px solid #E6E8EC;border-radius:6px;padding:8px 10px;font:13px Inter,sans-serif;color:#16181D;background:#FFFFFF}
+.agent{display:flex;gap:10px;align-items:flex-start;border:1px solid #E6E8EC;border-radius:8px;padding:10px 12px;cursor:pointer;flex:1 1 180px}
+.agent-on{border-color:#4B4FC9;box-shadow:0 0 0 3px #E4E5FA}
+.agent-off{background:#F7F7F9;cursor:not-allowed}
+</style>
+</head>
+<body>
+<div style="width:720px;height:900px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(22,24,29,0.32);font-family:Inter,system-ui,sans-serif;color:#16181D">
+  <form role="dialog" aria-labelledby="ntTitle" style="width:100%;max-width:600px;background:#FFFFFF;border-radius:12px;box-shadow:0 24px 60px rgba(16,24,40,0.24);display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;padding:16px 20px;border-bottom:1px solid #EEF0F3">
+      <h2 id="ntTitle" style="margin:0;font-size:15px;font-weight:600">New task</h2>
+      <button type="button" aria-label="Close" style="margin-left:auto;border:0;background:none;padding:6px;border-radius:6px;color:#5F6672;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+    </div>
+    <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px">
+      <div>
+        <label class="lab" for="ntProject">Project</label>
+        <select id="ntProject" class="inp"><option>web-app</option></select>
+      </div>
+      <fieldset style="border:0;margin:0;padding:0">
+        <legend class="lab">Agent</legend>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <label class="agent agent-on"><input type="radio" name="ag" checked="" style="margin-top:2px;accent-color:#4B4FC9"><span><span style="display:block;font-size:13px;font-weight:500">Claude Code</span><span style="display:block;font-size:12px;color:#5F6672;margin-top:2px">Ready · reports cost</span></span></label>
+          <label class="agent"><input type="radio" name="ag" style="margin-top:2px;accent-color:#4B4FC9"><span><span style="display:block;font-size:13px;font-weight:500">Codex</span><span style="display:block;font-size:12px;color:#5F6672;margin-top:2px">Ready · reports tokens only</span></span></label>
+          <label class="agent agent-off"><input type="radio" name="ag" disabled="" style="margin-top:2px"><span><span style="display:block;font-size:13px;font-weight:500;color:#5F6672">example-agent</span><span style="display:block;font-size:12px;color:#B4410A;margin-top:2px">Not installed · <a href="#">Settings</a></span></span></label>
+        </div>
+      </fieldset>
+      <div>
+        <label class="lab" for="ntTitleIn">Title <span style="font-weight:400;color:#5F6672">· optional</span></label>
+        <input id="ntTitleIn" class="inp" placeholder="Add rate limiting to the login endpoint">
+      </div>
+      <div>
+        <label class="lab" for="ntDesc">Description</label>
+        <textarea id="ntDesc" class="inp" rows="8" placeholder="What should the agent do?" style="resize:vertical;line-height:1.5">Add rate limiting to the login endpoint: 5 attempts per minute per IP, return 429 with a Retry-After header. Add tests.</textarea>
+      </div>
+      <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:8px;background:#F7F7F9;font-size:12px;line-height:1.5;color:#5F6672">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex:none;margin-top:2px" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16h.01"></path></svg>
+        <span>Starts right away in a new worktree on <span class="mono">asv/task-32-add-rate-limiting…</span>. The supervisor commits, pushes and opens the PR when the agent finishes.</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid #EEF0F3">
+      <span style="font-size:12px;color:#5F6672">⌘↵ to start</span>
+      <button type="button" style="margin-left:auto;border:1px solid #E6E8EC;background:#FFFFFF;border-radius:6px;padding:7px 12px;font:500 13px Inter,sans-serif;color:#16181D;cursor:pointer">Cancel</button>
+      <button type="submit" style="border:0;background:#4B4FC9;border-radius:6px;padding:8px 14px;font:500 13px Inter,sans-serif;color:#FFFFFF;cursor:pointer">Start task</button>
+    </div>
+  </form>
+</div>
+</body>
+</html>
