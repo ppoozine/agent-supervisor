@@ -6,7 +6,7 @@ Run several AI coding agents in parallel on your own machine, each in its own gi
 let them fix their own failing CI and review comments, with hard limits on how many times they
 retry and how much they spend. You only step in when a card lands in **Needs you**.
 
-![The board: one task per column, from Working to Ready to merge, with Claude Code and Codex tasks](docs/assets/board.png)
+![The board: one task per column, from Working to Ready to merge, with Claude Code and Codex tasks](docs/assets/board-v0.4.png)
 
 ![A task's page: the conversation with the agent on the left, the diff against the base branch on the right](docs/assets/task.png)
 
