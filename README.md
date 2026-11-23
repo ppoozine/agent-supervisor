@@ -8,6 +8,8 @@ retry and how much they spend. You only step in when a card lands in **Needs you
 
 ![The board: one task per column, from Working to Ready to merge, with Claude Code and Codex tasks](docs/assets/board.png)
 
+![A task's page: the conversation with the agent on the left, the diff against the base branch on the right](docs/assets/task.png)
+
 How it works, in one task's life:
 
 1. You open a task on the board: a repo, an agent (Claude Code or Codex), and what to do.
@@ -19,7 +21,8 @@ How it works, in one task's life:
 5. When CI passes (and a review approves, if you ask for one), the card moves to **Ready to merge**.
    You merge on GitHub.
 
-Every step is written to an append-only event log you can read on the task's page.
+Every step is written to an append-only event log. The task's page shows it as a conversation, next
+to the diff and a shell in the task's worktree.
 
 > **Only use it on repos you trust.** The agents run unattended with your credentials, and the
 > permission policy is not a security boundary. Read the [trust model](docs/guide/trust-model.md)
@@ -49,7 +52,7 @@ Install the package from the [latest release](https://github.com/ppoozine/agent-
 (it includes the board):
 
 ```sh
-uv tool install https://github.com/ppoozine/agent-supervisor/releases/download/v0.3.0/agent_supervisor-0.3.0-py3-none-any.whl
+uv tool install https://github.com/ppoozine/agent-supervisor/releases/download/v0.4.0/agent_supervisor-0.4.0-py3-none-any.whl
 agsv --help
 ```
 
@@ -92,13 +95,13 @@ Other ways to install
    default branch are read from `origin`. Leave "Require an approving review" off for now.
 4. **New task**: pick the project and an agent, and describe a small change, for example
    "Add a `--version` flag to the CLI and a test for it".
-5. Go back to the board (**← Board**, or the task in the sidebar) and watch the card. It sits in
-   **Working** while the agent runs; click it to see the agent's messages and tool calls as they
-   happen. When the run ends the supervisor pushes and opens a pull request, and the card moves to
+5. Watch the card on the board. It sits in **Working** while the agent runs; click it to open the
+   task's page, where **Chat** shows the agent's messages and tool calls as they happen. When the run ends the supervisor pushes and opens a pull request, and the card moves to
    **In review** with the label **CI running**. The label under the title always says what the card
    is waiting for.
 6. When CI passes the card moves to **Ready to merge**. Review the diff on the task's **Diff** tab or
-   on GitHub, and merge on GitHub. The card then leaves the board for **Archive**.
+   on GitHub; **Shell** opens a terminal in the task's worktree if you want to run the tests
+   yourself. Merge on GitHub. The card then leaves the board for **Archive**.
 
 If CI fails, the card goes back to **Working** with the label **Fixing CI**: the agent gets the
 failing log. It tries at most three times; after that, or when something else goes wrong, the card
@@ -114,8 +117,8 @@ message to continue them after the next `agsv serve`.
 Other tools also run coding agents in parallel, for example Agent Orchestrator, Conductor, Vibe
 Kanban, and Claude Squad. Agent Orchestrator already does the same core loop (a worktree per task,
 CI failures and review comments sent back to the agent, several agents) and has more features than
-this project, such as a desktop app, an embedded terminal and chat, merging from the app, and a lead
-agent that splits up work. If you want the most features, look at those first.
+this project, such as a desktop app, merging from the app, and a lead agent that splits up work. If
+you want the most features, look at those first.
 
 What this project focuses on instead:
 
@@ -142,7 +145,7 @@ macOS; Linux is covered by CI. Known gaps that matter:
   [adapters](docs/guide/adapters.md).
 
 Until 1.0, the adapter interface, the HTTP API, the config file, and the database schema may change
-in any minor release (0.3 to 0.4, and so on); the release notes list what changed. Pin the version
+in any minor release (0.4 to 0.5, and so on); the release notes list what changed. Pin the version
 you build on.
 
 ## Documentation

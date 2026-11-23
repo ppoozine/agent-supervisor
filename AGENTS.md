@@ -16,7 +16,6 @@
 | `docs/design/decisions.md` | 目前仍然有效的設計決定（依主題）、尚未決定的事、已知的問題 |
 | `docs/design/ui.md` | 介面的需求：每個畫面、訊息來源的標示、顏色與 token；`mockups/` 是每個畫面的靜態 HTML 草稿與截圖 |
 | `docs/design/diagrams.md` | 架構圖與流程圖 |
-| `docs/design/phase5-tasks.md` | 目前階段的任務單與驗證清單 |
 | `docs/design/claude-sdk-notes.md`、`docs/design/codex-notes.md` | Claude Agent SDK 與 Codex CLI 的調查與實測結果 |
 | `docs/guide/` | 對外的英文文件：使用說明（`usage.md`）、信任模型與已知限制（`trust-model.md`）、adapter 開發指南（`adapters.md`）、HTTP API（`http-api.md`）。改了看板、設定檔、上限、權限、adapter 介面或 API 要一起更新 |
 | `docs/history/` | 完整的決策紀錄（`decision-log.md`，只增不改）、規劃的過程（`plans/`）、用 agsv 開發這個 repo 時碰到的問題（`dogfooding.md`） |
@@ -25,7 +24,7 @@
 
 ## 目前階段
 
-階段 5（新介面），版本 `0.3.x`，做完發 `0.4`。階段 0 到 4 已完成（`v0.3.0`，repo 已公開）。現在依 `docs/design/phase5-tasks.md` 做任務 19 到 25：任務 19 到 24 已完成（任務 22 由 Codex、任務 23 由 Claude Code 透過 agsv 執行）；剩下任務 25（驗收與發 0.4），在對話裡直接做。**一次做一個，合併之後才開始下一個**（決策第 150 筆）；每個任務先提計畫，我確認後再動手（由 agent-supervisor 開的任務例外，見「開發慣例」）。不要提前做階段 6 之後的功能，也不要做任務單「不要做」清單裡的功能。進入新階段時我會更新這一段。
+階段 0 到 5 已完成（`v0.4.0`；階段 5 的任務 22 由 Codex、任務 23 由 Claude Code 透過 agsv 執行）。階段 6 還沒開始，任務單在開始時寫。**一次做一個，合併之後才開始下一個**（決策第 150 筆）；每個任務先提計畫，我確認後再動手（由 agent-supervisor 開的任務例外，見「開發慣例」）。階段 6 開始之前不要做它的功能；之後的任務也不要做任務單「不要做」清單裡的功能。進入新階段時我會更新這一段。
 
 ## 技術選型
 

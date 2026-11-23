@@ -129,8 +129,8 @@ there is something to say. **Archive** is on the right, and **Stop** appears the
 active.
 
 Diff includes a file list and totals; each file can be folded. Like on GitHub, each line shows its
-number in the old and the new file, and added and removed lines use GitHub's colors. Events lists the newest first and
-filters by source (Agent, You, Reviewer, Automatic, System), by event type and by run; click a row
+number in the old and the new file, and added and removed lines use GitHub's colors. Events lists
+the newest first and filters by source (Agent, You, Reviewer, Automatic, System), by event type and by run; click a row
 to see its full payload and copy it as JSON. Runs shows the task's tokens, the agent's total time
 and the automatic rounds used, then one card per run; select a card to jump to that run in Chat.
 

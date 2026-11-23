@@ -8,7 +8,7 @@ The built-in adapters (Claude Code and Codex) and any adapter you write are load
 so an adapter is an ordinary Python package; nothing in this repository has to change.
 
 > **Not stable yet.** Until 1.0, the adapter interface described here may change in any minor
-> release (0.3 to 0.4, and so on). Changes are listed in the release notes. Pin the
+> release (0.4 to 0.5, and so on). Changes are listed in the release notes. Pin the
 > agent-supervisor version your adapter was written against.
 
 A complete, runnable example is in [`examples/example-adapter/`](../../examples/example-adapter/):
