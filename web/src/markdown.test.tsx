@@ -69,3 +69,9 @@ test('a numbered list broken up by sub-items keeps counting', () => {
   expect([...container.querySelectorAll('ol')].map((list) => list.getAttribute('start'))).toEqual(['1', '2'])
 })
 
+test('code inside bold still renders as code', () => {
+  const { container } = render(<Markdown text={'- **`calc.py`:** clamp added'} />)
+
+  expect(container.querySelector('strong code')?.textContent).toBe('calc.py')
+  expect(container.textContent).not.toContain('`')
+})

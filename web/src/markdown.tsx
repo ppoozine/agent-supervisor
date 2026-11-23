@@ -110,7 +110,8 @@ export function renderInline(text: string): ReactNode[] {
     if (start > last) nodes.push(text.slice(last, start))
     const [whole, code, bold, link, url] = match
     if (code) nodes.push(<code key={start}>{code.slice(1, -1)}</code>)
-    else if (bold) nodes.push(<strong key={start}>{bold.slice(2, -2)}</strong>)
+    // Bold may wrap code or a link, as in **`calc.py`:**; its own text holds no **, so this ends.
+    else if (bold) nodes.push(<strong key={start}>{renderInline(bold.slice(2, -2))}</strong>)
     else if (link && url) {
       const label = link.slice(1, link.indexOf(']('))
       nodes.push(
