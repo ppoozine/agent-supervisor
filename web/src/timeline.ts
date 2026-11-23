@@ -446,3 +446,48 @@ export function eventSource(event: EventRow, runsById: Map<number, Run>): Source
   }
   return 'system'
 }
+
+/** One line saying what an event was, e.g. `CI passed on f2e2268` or `$ npm test · exit 0`; never raw JSON. */
+export function eventSummary(event: EventRow): string {
+  const { payload } = event
+  const failed = payload.is_error === true ? ' · failed' : ''
+  switch (event.type) {
+    case 'agent_message': {
+      const body = firstLine(text(payload.text).trim())
+      if (payload.kind === 'reasoning') return clip(`Thinking: ${body}`, MAX_TITLE_CHARS)
+      if (payload.kind === 'plan') return clip(`Plan: ${body}`, MAX_TITLE_CHARS)
+      return clip(body, MAX_TITLE_CHARS)
+    }
+    case 'command': {
+      const command = clip(`$ ${firstLine(text(payload.command))}`, MAX_TITLE_CHARS)
+      if (payload.phase !== 'finished') return command
+      const exitCode = typeof payload.exit_code === 'number' ? ` · exit ${payload.exit_code}` : ''
+      return `${command}${exitCode || failed}`
+    }
+    case 'tool_call': {
+      const title = `${text(payload.tool)} ${summarizeInput(payload.input ?? payload.item)}`.trim()
+      return `${clip(title, MAX_TITLE_CHARS)}${failed}`
+    }
+    case 'permission_denied': {
+      const title = `Denied: ${text(payload.tool)} ${summarizeInput(payload.input)}`.trim()
+      const reason = payload.reason ? ` · ${firstLine(text(payload.reason))}` : ''
+      return clip(`${title}${reason}`, MAX_TITLE_CHARS)
+    }
+    case 'review_comment': {
+      const item = reviewerItem(event)
+      const where = item.where ? ` on ${item.where}` : ''
+      return clip(`@${item.author}${where}: ${firstLine(item.body)}`, MAX_TITLE_CHARS)
+    }
+    case 'session_started':
+      return payload.session_id ? `Session ${text(payload.session_id)}` : 'Session started'
+    case 'state_change': {
+      const ended = systemItem(event)
+      if (ended) return ended.text
+      const change = text(payload.change).replace(/_/g, ' ')
+      const status = payload.exit_status ? ` (${text(payload.exit_status)})` : ''
+      return `${change.charAt(0).toUpperCase()}${change.slice(1)}${status}`
+    }
+    default:
+      return systemItem(event)?.text ?? event.type.replace(/_/g, ' ')
+  }
+}

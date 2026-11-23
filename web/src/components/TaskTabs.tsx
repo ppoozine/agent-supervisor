@@ -9,7 +9,7 @@ import {
   runUsage,
   totalRunTime,
 } from '../format'
-import { eventSource, runReason, type Source } from '../timeline'
+import { eventSource, eventSummary, runReason, type Source } from '../timeline'
 import type { Card, EventRow, Run } from '../types'
 
 const SOURCE_FILTERS: { source: Source | null; label: string }[] = [
@@ -20,17 +20,6 @@ const SOURCE_FILTERS: { source: Source | null; label: string }[] = [
   { source: 'auto', label: 'Automatic' },
   { source: 'system', label: 'System' },
 ]
-
-/** Payload fields that make a good one-line summary, in order of preference. */
-const SUMMARY_FIELDS = ['text', 'command', 'body', 'name', 'tool', 'reason', 'state', 'conclusion']
-
-function eventSummary(event: EventRow): string {
-  for (const field of SUMMARY_FIELDS) {
-    const value = event.payload[field]
-    if (typeof value === 'string' && value.trim() !== '') return value.split('\n')[0]
-  }
-  return JSON.stringify(event.payload)
-}
 
 /** Run numbers as Chat shows them: the first run of the task is Run 1. */
 function runNumbers(runs: Run[]): Map<number, number> {

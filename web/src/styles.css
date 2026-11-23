@@ -792,7 +792,7 @@
     @apply text-lg;
   }
   .settings-section {
-    @apply flex max-w-[880px] scroll-mt-4 flex-col gap-2;
+    @apply flex max-w-[920px] scroll-mt-4 flex-col gap-2;
   }
   .settings-section > h2 {
     @apply flex items-center text-[13px];

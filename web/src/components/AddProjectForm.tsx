@@ -1,7 +1,6 @@
 import { useState } from 'react'
 
 import { addProject, errorMessage } from '../api'
-import { currentSubmitShortcutLabel } from '../keys'
 import type { Project } from '../types'
 import { Dialog } from './Dialog'
 
@@ -34,7 +33,8 @@ export function AddProjectForm({ onAdded, onClose }: AddProjectFormProps) {
       submitLabel="Add project"
       isBusy={isBusy}
       error={null}
-      shortcutHint={`${currentSubmitShortcutLabel()} to add`}
+      // A single-line field: Enter submits the form, so the hint names Enter.
+      shortcutHint="↵ to add"
       onSubmit={() => void submit()}
       onClose={onClose}
     >

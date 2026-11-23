@@ -246,9 +246,10 @@ function SystemEntry({ item }: { item: SystemItem }) {
   )
 }
 
-/** Up to two letters for the agent's stamp: `Claude Code` becomes `CC`, `Codex` becomes `CO`. */
+/** Two letters for an avatar: `Claude Code` becomes `CC`; one word takes its first and last letter, so `Codex` becomes `CX`. */
 export function initials(name: string): string {
   const words = name.split(/\s+/).filter(Boolean)
   if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase()
-  return name.slice(0, 2).toUpperCase()
+  const word = words[0] ?? ''
+  return (word.length > 1 ? word[0] + word[word.length - 1] : word).toUpperCase()
 }

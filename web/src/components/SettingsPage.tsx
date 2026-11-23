@@ -63,13 +63,13 @@ export function SettingsPage({
           {isChecking ? 'Checking…' : 'Check again'}
         </button>
       </div>
-      <p className="max-w-[880px] text-xs text-text-muted">
+      <p className="max-w-[920px] text-xs text-text-muted">
         agent-supervisor runs the agents you have installed and signed in to yourself. It never signs
         you in and never stores keys or tokens. After fixing something in a terminal, check again;
         environment variables only take effect when agsv serve is started from a shell that has them.
       </p>
       {error && (
-        <div className="alert m-0 max-w-[880px]" role="alert">
+        <div className="alert m-0 max-w-[920px]" role="alert">
           {error}
         </div>
       )}
@@ -124,7 +124,7 @@ export function SettingsPage({
                 return (
                   <tr key={project.id}>
                     <td className="font-medium">{project.name}</td>
-                    <td className="font-mono text-text-muted">{project.repo_path}</td>
+                    <td className="font-mono break-all whitespace-normal text-text-muted">{project.repo_path}</td>
                     <td className="text-text-muted">{project.github_repo ?? '—'}</td>
                     <td className="text-text-muted">{project.require_review ? 'Yes' : 'No'}</td>
                     <td className="text-text-muted">
