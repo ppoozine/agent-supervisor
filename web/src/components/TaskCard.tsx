@@ -18,48 +18,54 @@ export function TaskCard({ card, projectName }: { card: Card; projectName?: stri
   const agentName = useAgentName()
   return (
     <a className="card" href={`#/tasks/${card.id}`}>
-      <div className="card-title">{card.title}</div>
       <div className="card-head">
-        {projectName && <span className="text-text-muted">{projectName}</span>}
-        <span className={`agent agent-${card.agent_type}`}>{agentName(card.agent_type)}</span>
-        <span className="muted">#{card.id}</span>
+        <span className="truncate">
+          {projectName && `${projectName} · `}#{card.id}
+        </span>
+        <span className="shrink-0">{agentName(card.agent_type)}</span>
       </div>
+      <div className="card-title">{card.title}</div>
       {card.branch && <div className="branch">{card.branch}</div>}
-      <div className="card-foot">
+      <div className="card-status">
         <StatusLabel label={card.label} column={card.column} active={card.has_open_run} />
-        <span
-          className="muted"
-          title={card.cost_usd === null ? 'This agent does not report cost' : 'Estimated'}
-        >
+        <span title={card.cost_usd === null ? 'This agent does not report cost' : 'Estimated'}>
           {formatUsage(card)} · {timeAgo(card.updated_at)}
         </span>
       </div>
       {card.pr_number !== null && (
         <div className="card-pr">
-          PR #{card.pr_number}{' '}
-          <span className={`pr-state pr-${card.pr_state}`}>{card.pr_state}</span>
-        </div>
-      )}
-      {(card.ci_state !== 'none' ||
-        card.review_state === 'approved' ||
-        card.merge_state === 'conflicting' ||
-        card.ci_fix_attempts > 0) && (
-        <div className="flex flex-wrap gap-2 text-xs">
+          <span>
+            PR #{card.pr_number}
+            {card.pr_state !== 'open' && card.pr_state && ` ${card.pr_state}`}
+          </span>
           <Checks card={card} />
-          {card.ci_fix_attempts > 0 && (
-            <span
-              className={
-                card.ci_fix_attempts >= card.max_ci_fix_attempts
-                  ? 'text-needs-you'
-                  : 'text-text-muted'
-              }
-            >
-              fixes {card.ci_fix_attempts}/{card.max_ci_fix_attempts}
-            </span>
-          )}
+          <Attempts card={card} />
         </div>
       )}
     </a>
+  )
+}
+
+/** Automatic rounds used, shown only once any were used; at the limit they turn to the Needs you color. */
+export function Attempts({ card, always = false }: { card: Card; always?: boolean }) {
+  const rounds = [
+    ['fixes', card.ci_fix_attempts, card.max_ci_fix_attempts],
+    ['comments', card.feedback_attempts, card.max_feedback_attempts],
+  ] as const
+  return (
+    <>
+      {rounds
+        .filter(([, used]) => always || used > 0)
+        .map(([name, used, limit]) => (
+          <span
+            key={name}
+            className={used >= limit ? 'text-needs-you-text' : undefined}
+            title="Automatic rounds used since you last stepped in"
+          >
+            {name} {used}/{limit}
+          </span>
+        ))}
+    </>
   )
 }
 
@@ -74,7 +80,7 @@ export function Checks({ card, detailed = false }: { card: Card; detailed?: bool
               ? 'text-success'
               : card.ci_state === 'failed'
                 ? 'text-danger'
-                : 'text-in-review'
+                : 'text-in-review-text'
           }
         >
           {card.ci_state === 'passed' ? '✓' : card.ci_state === 'failed' ? '✗' : '◌'} CI{' '}
@@ -87,7 +93,7 @@ export function Checks({ card, detailed = false }: { card: Card; detailed?: bool
         detailed && <span>review {card.review_state === 'none' ? '—' : card.review_state}</span>
       )}
       {card.merge_state === 'conflicting' ? (
-        <span className="text-needs-you">⚠ conflict</span>
+        <span className="text-needs-you-text">⚠ conflict</span>
       ) : (
         detailed && (
           <span>{card.merge_state === 'clean' ? 'no conflict' : 'mergeability unknown'}</span>

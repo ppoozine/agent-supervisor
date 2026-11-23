@@ -39,7 +39,16 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
       </div>
     )
   }
-  if (loaded === null) return <p className="empty">Loading…</p>
+  if (loaded === null) {
+    return (
+      <div className="skeleton" aria-busy="true">
+        <span className="sr-only">Loading…</span>
+        <span className="w-1/2" />
+        <span className="w-full" />
+        <span className="w-3/4" />
+      </div>
+    )
+  }
   if (files.length === 0) {
     return (
       <p className="empty">
@@ -50,18 +59,15 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
   return (
     <div className="diff">
       <p className="diff-summary">
-        {files.length} {files.length === 1 ? 'file' : 'files'} changed against {loaded.base_branch}
+        {files.length} {files.length === 1 ? 'file' : 'files'} changed against {loaded.base_branch}{' '}
+        ·{' '}
+        <span className="diff-added">+{files.reduce((total, file) => total + file.added, 0)}</span>{' '}
+        <span className="diff-removed">
+          −{files.reduce((total, file) => total + file.removed, 0)}
+        </span>
         {loaded.is_truncated && ' · diff too long, the rest is not shown'}
       </p>
-      <div className="mb-4 flex flex-col gap-1 text-xs">
-        <span>
-          <span className="text-success">
-            +{files.reduce((total, file) => total + file.added, 0)}
-          </span>{' '}
-          <span className="text-danger">
-            −{files.reduce((total, file) => total + file.removed, 0)}
-          </span>
-        </span>
+      <nav className="diff-files" aria-label="Changed files">
         {files.map((file, index) => (
           <a
             key={file.path}
@@ -72,12 +78,13 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
                 .getElementById(`diff-file-${taskId}-${index}`)
                 ?.scrollIntoView({ block: 'start' })
             }}
-            className="font-mono"
           >
-            {file.path}
+            <span className="diff-path">{file.path}</span>
+            <span className="diff-added">+{file.added}</span>
+            <span className="diff-removed">−{file.removed}</span>
           </a>
         ))}
-      </div>
+      </nav>
       {files.map((file, index) => (
         <section
           id={`diff-file-${taskId}-${index}`}

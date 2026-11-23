@@ -120,3 +120,13 @@ export interface TaskDiff {
   is_truncated: boolean
   base_branch: string
 }
+
+/** Token and cost totals over every task, archived ones included. */
+export interface Usage {
+  /** Only agents that report cost count toward it. */
+  cost_usd: number
+  tokens_in: number
+  tokens_out: number
+  has_unknown_cost: boolean
+  usage_is_complete: boolean
+}

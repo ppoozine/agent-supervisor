@@ -114,3 +114,53 @@ export function mergeEvents(existing: EventRow[], incoming: EventRow[]): EventRo
   for (const event of incoming) byId.set(event.id, event)
   return [...byId.values()].sort((first, second) => first.id - second.id)
 }
+
+export type ArchiveOutcome = 'merged' | 'closed' | 'archived'
+
+export const ARCHIVE_OUTCOME_LABELS: Record<ArchiveOutcome, string> = {
+  merged: 'Merged',
+  closed: 'PR closed',
+  archived: 'Archived by you',
+}
+
+/** How an archived task ended: by its PR's result when the PR was merged or closed, else archived by you. */
+export function archiveOutcome(card: Pick<Card, 'pr_state'>): ArchiveOutcome {
+  if (card.pr_state === 'merged') return 'merged'
+  if (card.pr_state === 'closed') return 'closed'
+  return 'archived'
+}
+
+/** When an archived task finished: when it was archived, else when it last changed. */
+export function finishedAt(card: Pick<Card, 'archived_at' | 'updated_at'>): string {
+  return card.archived_at ?? card.updated_at
+}
+
+/** Whether a card matches an Archive search: title or branch contains the query, ignoring case. */
+export function matchesSearch(card: Pick<Card, 'title' | 'branch'>, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return true
+  return [card.title, card.branch ?? ''].some((value) => value.toLowerCase().includes(needle))
+}
+
+/** A preview of the branch name a new task gets; only an illustration, the daemon picks the real name. */
+export function branchPreview(text: string): string {
+  const slug = text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    .replace(/-+$/, '')
+  return slug ? `asv/task-…-${slug}` : 'asv/task-…'
+}
+
+/** Total time the agent ran across finished runs, e.g. `4m 12s`. */
+export function totalRunTime(runs: Pick<Run, 'started_at' | 'ended_at'>[]): string {
+  const seconds = runs.reduce((total, run) => {
+    if (run.ended_at === null) return total
+    return total + (new Date(run.ended_at).getTime() - new Date(run.started_at).getTime()) / 1000
+  }, 0)
+  const rounded = Math.round(seconds)
+  if (rounded < 60) return `${rounded}s`
+  if (rounded < 3600) return `${Math.floor(rounded / 60)}m ${rounded % 60}s`
+  return `${Math.floor(rounded / 3600)}h ${Math.floor((rounded % 3600) / 60)}m`
+}

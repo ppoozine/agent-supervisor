@@ -435,3 +435,14 @@ function runOpening(run: Run, number: number): TimelineItem[] {
   }
   return opening
 }
+
+/** Who an event came from, by the same rules as the Chat: agent actions, reviewer comments, the start of a run by whoever triggered it, everything else the system. */
+export function eventSource(event: EventRow, runsById: Map<number, Run>): Source {
+  if (AGENT_EVENT_TYPES.has(event.type)) return 'agent'
+  if (event.type === 'review_comment') return 'reviewer'
+  if (event.type === 'session_started' && event.run_id !== null) {
+    const run = runsById.get(event.run_id)
+    if (run) return runReason(run.trigger).source
+  }
+  return 'system'
+}

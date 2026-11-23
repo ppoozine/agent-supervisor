@@ -1,6 +1,7 @@
 import { useState } from 'react'
 
 import { addProject, errorMessage } from '../api'
+import { currentSubmitShortcutLabel } from '../keys'
 import type { Project } from '../types'
 import { Dialog } from './Dialog'
 
@@ -32,27 +33,49 @@ export function AddProjectForm({ onAdded, onClose }: AddProjectFormProps) {
       title="Add project"
       submitLabel="Add project"
       isBusy={isBusy}
-      error={error}
+      error={null}
+      shortcutHint={`${currentSubmitShortcutLabel()} to add`}
       onSubmit={() => void submit()}
       onClose={onClose}
     >
-      <label>
+      <label className="field">
         Repo path
         <input
+          className="input font-mono"
           value={repoPath}
           onChange={(event) => setRepoPath(event.target.value)}
+          aria-invalid={error !== null}
+          aria-describedby={error ? 'repo-path-error' : undefined}
           placeholder="/Users/you/code/my-repo"
           required
           autoFocus
         />
+        {error && (
+          <span id="repo-path-error" className="field-error" role="alert">
+            {error}
+          </span>
+        )}
       </label>
-      <label className="checkbox">
+      <div className="note">
+        The folder needs:
+        <ul className="mt-1 list-disc pl-5">
+          <li>to be the top of a local git repository</li>
+          <li>a GitHub remote that gh can reach; tasks open their pull requests there</li>
+          <li>no other project already using it</li>
+        </ul>
+      </div>
+      <label className="check">
         <input
           type="checkbox"
           checked={requireReview}
           onChange={(event) => setRequireReview(event.target.checked)}
         />
-        Require an approving review before Ready to merge
+        <span>
+          <span className="font-medium">Require an approving review</span>
+          <span className="block text-xs text-text-muted">
+            Tasks reach Ready to merge only after someone approves the PR.
+          </span>
+        </span>
       </label>
     </Dialog>
   )

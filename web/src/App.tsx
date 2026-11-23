@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { errorMessage, listAgents, listProjects, listTasks } from './api'
 import { AddProjectForm } from './components/AddProjectForm'
+import { Archive } from './components/Archive'
 import { Board } from './components/Board'
 import { NewTaskDialog } from './components/NewTaskDialog'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { AgentNames } from './components/TaskCard'
 import { TaskPage } from './components/TaskPage'
+import { readPreference, savePreference } from './preferences'
 import { connectStream, type StreamStatus } from './stream'
 import type { Agent, Card, EventRow, Project } from './types'
 
@@ -16,14 +18,19 @@ type EventListener = (event: EventRow) => void
 const STATUS_TEXT: Record<StreamStatus, string> = {
   connecting: 'Connecting…',
   live: 'Live',
-  offline: 'Offline — reconnecting…',
+  offline: 'Reconnecting…',
 }
 
-type Page = { kind: 'board' } | { kind: 'task'; taskId: number } | { kind: 'settings' }
+type Page =
+  | { kind: 'board' }
+  | { kind: 'archive' }
+  | { kind: 'task'; taskId: number }
+  | { kind: 'settings' }
 
-/** Which page the URL points to: `#/tasks/12` is task 12, `#/settings` the settings, anything else the board. */
+/** Which page the URL points to: `#/tasks/12` is task 12, `#/archive` the Archive, `#/settings` the settings, anything else the board. */
 export function pageFromHash(hash: string): Page {
   if (hash === '#/settings') return { kind: 'settings' }
+  if (hash === '#/archive') return { kind: 'archive' }
   const match = /^#\/tasks\/(\d+)$/.exec(hash)
   return match ? { kind: 'task', taskId: Number(match[1]) } : { kind: 'board' }
 }
@@ -63,6 +70,11 @@ export function App() {
   // Only the most recently started load may update the screen; an earlier load that comes
   // back late is dropped.
   const latestLoad = useRef(0)
+  // The project the board and the Archive are filtered to; null is all projects.
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(() => {
+    const saved = Number(readPreference('project-filter'))
+    return Number.isInteger(saved) && saved > 0 ? saved : null
+  })
   const page = usePage()
   const openTaskId = page.kind === 'task' ? page.taskId : null
 
@@ -126,6 +138,22 @@ export function App() {
   // Only once agents have loaded: an empty list while loading is not "none usable".
   const hasNoUsableAgent = agents.length > 0 && !agents.some((agent) => agent.usable)
   const openCard = openTaskId === null ? undefined : cards[openTaskId]
+  // A saved project that no longer exists means all projects.
+  const filterProjectId = projects.some((project) => project.id === selectedProjectId)
+    ? selectedProjectId
+    : null
+  const selectProject = (projectId: number | null): void => {
+    setSelectedProjectId(projectId)
+    savePreference('project-filter', projectId === null ? '' : String(projectId))
+    if (page.kind === 'task' || page.kind === 'settings') window.location.hash = '#/'
+  }
+  const filterProps = {
+    cards: allCards,
+    projects,
+    selectedProjectId: filterProjectId,
+    onSelectProject: selectProject,
+    onAddProject: () => setIsAddingProject(true),
+  }
 
   return (
     <AgentNames.Provider value={agentNames}>
@@ -133,35 +161,20 @@ export function App() {
         <Sidebar
           projects={projects}
           cards={allCards}
+          view={page.kind}
           openTaskId={openTaskId}
-          isSettingsOpen={page.kind === 'settings'}
+          selectedProjectId={filterProjectId}
+          onSelectProject={selectProject}
           onAddProject={() => setIsAddingProject(true)}
           onNewTask={() => setIsCreatingTask(true)}
           newTaskBlocker={blocker}
-          connection={page.kind === 'task' ? { status, text: STATUS_TEXT[status] } : undefined}
+          connection={{ status, text: STATUS_TEXT[status] }}
         />
         <main className="main">
-          {page.kind !== 'task' && (
-            <header className="topbar">
-              <h1>
-                {page.kind === 'board' ? (
-                  'Board'
-                ) : (
-                  <a className="back" href="#/">
-                    ← Board
-                  </a>
-                )}
-              </h1>
-              <span className={`connection connection-${status}`}>{STATUS_TEXT[status]}</span>
-              <button
-                className="primary"
-                onClick={() => setIsCreatingTask(true)}
-                disabled={blocker !== null}
-                title={blocker ?? undefined}
-              >
-                + New task
-              </button>
-            </header>
+          {status === 'offline' && (
+            <div className="banner" role="status">
+              Can't reach the daemon. Retrying…
+            </div>
           )}
           {loadError && (
             <div className="alert" role="alert">
@@ -173,8 +186,23 @@ export function App() {
               No agent can be used yet. <a href="#/settings">See Settings</a> for what is missing.
             </div>
           )}
-          {page.kind === 'settings' && <SettingsPage onChecked={() => void reload()} />}
-          {page.kind === 'board' && <Board cards={allCards} projects={projects} />}
+          {page.kind === 'settings' && (
+            <SettingsPage
+              onChecked={() => void reload()}
+              projects={projects}
+              cards={allCards}
+              agents={agents}
+              onAddProject={() => setIsAddingProject(true)}
+            />
+          )}
+          {page.kind === 'board' && (
+            <Board
+              {...filterProps}
+              onNewTask={() => setIsCreatingTask(true)}
+              newTaskBlocker={blocker}
+            />
+          )}
+          {page.kind === 'archive' && <Archive {...filterProps} />}
           {openTaskId !== null && (
             <TaskPage
               key={openTaskId}
@@ -191,6 +219,7 @@ export function App() {
           <NewTaskDialog
             projects={projects}
             agents={agents}
+            initialProjectId={filterProjectId}
             onCreated={(task) => {
               showCard(task)
               setIsCreatingTask(false)
