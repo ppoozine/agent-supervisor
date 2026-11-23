@@ -8,14 +8,6 @@ import { countByProject, ViewHeader } from './ViewHeader'
 export const BOARD_COLUMNS = ['Working', 'Needs you', 'In review', 'Ready to merge']
 const CLOCK_TICK_MILLISECONDS = 30_000
 
-/** What an empty column says while a project is chosen, e.g. "Nothing running in web-app". */
-const EMPTY_VERBS: Record<string, string> = {
-  Working: 'running',
-  'Needs you': 'waiting for you',
-  'In review': 'in review',
-  'Ready to merge': 'ready to merge',
-}
-
 function newestFirst(cards: Card[]): Card[] {
   return [...cards].sort((first, second) => second.updated_at.localeCompare(first.updated_at))
 }
@@ -73,7 +65,7 @@ export function Board({
           disabled={newTaskBlocker !== null}
           title={newTaskBlocker ?? undefined}
         >
-          {selected ? `New task in ${selected.name}` : 'New task'}
+          New task
         </button>
       </ViewHeader>
       {projects.length === 0 ? (
@@ -96,7 +88,7 @@ export function Board({
                 </h2>
                 {columnCards.length === 0 && (
                   <p className="column-empty">
-                    {selected ? `Nothing ${EMPTY_VERBS[column]} in ${selected.name}` : 'Nothing here'}
+                    Nothing here
                   </p>
                 )}
                 {columnCards.map((card) => (

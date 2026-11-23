@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clockTime, runDuration, runOutcome, runUsage } from '../format'
+import { Markdown } from '../markdown'
 import {
+  actionSummary,
   buildTimeline,
+  groupParts,
+  type ActionGroup,
   type AgentAction,
   type AgentItem,
   type AutoItem,
@@ -199,17 +203,37 @@ function AgentEntry({ item, agentName }: { item: AgentItem; agentName: string })
         <div className="bubble-head">
           {agentName} <span className="muted">· {clockTime(item.ts)}</span>
         </div>
-        {item.parts.map((part) =>
-          part.kind === 'message' ? (
-            <div className="chat-body" key={part.key}>
-              {part.text}
-            </div>
-          ) : (
-            <ActionRow action={part} key={part.key} />
-          ),
-        )}
+        {groupParts(item.parts).map((part) => {
+          if (part.kind === 'message') {
+            return (
+              <div className="chat-body" key={part.key}>
+                <Markdown text={part.text} />
+              </div>
+            )
+          }
+          if (part.kind === 'actions') return <ActionGroupRow group={part} key={part.key} />
+          return <ActionRow action={part} key={part.key} />
+        })}
       </div>
     </div>
+  )
+}
+
+/** Several actions in a row, folded into one line that opens to list them. */
+function ActionGroupRow({ group }: { group: ActionGroup }) {
+  const { text, failed } = actionSummary(group.actions)
+  return (
+    <details className="action-group">
+      <summary>
+        <span>{text}</span>
+        {failed > 0 && <span className="action-group-failed">· {failed} failed</span>}
+      </summary>
+      <div className="action-group-list">
+        {group.actions.map((action) => (
+          <ActionRow action={action} key={action.key} />
+        ))}
+      </div>
+    </details>
   )
 }
 

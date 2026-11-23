@@ -4,7 +4,7 @@
 
 階段 5 新介面的需求。視覺方向是 **A · Calm**（決策第 186 筆）：安靜、密度適中、只有一個強調色。任務 22 已經把底層做好（tokens、Preflight、深淺主題、分割面板，PR #43）；任務 23 由 Claude Code 透過 agsv 把所有畫面調成這份文件的樣子，任務 24 做 Shell。
 
-靜態草稿在 `mockups/`：每個畫面一個 HTML（直接用瀏覽器打開）與一張截圖（PNG）。HTML 是數值的依據（顏色、間距、字級照抄即可），PNG 方便快速瀏覽與實作後比對。草稿用假資料，字型從 Google Fonts 載入；草稿和這份文件不一致時以這份為準。
+靜態草稿在 `mockups/`（任務 24b 的打磨在草稿之後，細節以這份文件為準）：每個畫面一個 HTML（直接用瀏覽器打開）與一張截圖（PNG）。HTML 是數值的依據（顏色、間距、字級照抄即可），PNG 方便快速瀏覽與實作後比對。草稿用假資料，字型從 Google Fonts 載入；草稿和這份文件不一致時以這份為準。
 
 | 草稿 | 畫面 |
 | --- | --- |
@@ -39,7 +39,6 @@
 │ web-app        3 │                                                    │
 │   ● Restyle …    │                                                    │
 │   ● Migrate …    │                                                    │
-│   ✦ Plan with main agent                                              │
 │ api-service    2 │                                                    │
 │   ● Add rate …   │                                                    │
 │ + Add project    │                                                    │
@@ -49,6 +48,7 @@
 ```
 
 - 側欄寬 240px，底色比主區深一階（`--color-sidebar`），可以收合成只剩圖示（56px）。收合狀態記在 `localStorage`，讀不到時預設展開。
+- **分區要分得出來**（決策第 198 筆）：最上面是產品名稱（前面一個小的強調色方塊）與「New task」；接著是 Board／Archive、Projects、最下面的 Live 與 Settings 三區，區與區之間一條細線加間距。每個專案前面一個資料夾圖示、名稱用粗一點的字；專案的任務掛在左邊一條細的導引線上，看得出屬於哪個專案；專案之間留間距。目前選取的項目是白底加一圈細框的小卡，不是灰底。數量是圓角的小膠囊。
 - **側欄的內容依畫面而不同**（決策第 188 筆）：
   - **看板**：每個專案底下列出它**進行中**的任務（看板四欄裡的卡片），前面的圓點顏色代表欄位，正在跑的圓點會呼吸閃爍。點任務打開詳情。
   - **看板且選了專案**：同上，選中的專案標成目前選取（`aria-current`），其他專案變淡（不隱藏）。
@@ -63,7 +63,7 @@
 
 **頁首**：左邊是「Board | Archive」的分段切換（`role="tablist"`）、專案篩選按鈕、一行摘要（「6 active · 2 need you」，用目前篩選後的卡片算）；右邊是主要按鈕「New task」。
 
-**四欄**：Working、Needs you、In review、Ready to merge。欄位標題是圓點、名稱、張數；空的欄位顯示虛線框與淡色文字（沒篩選時「Nothing here」，篩選時「Nothing running in web-app」這類，依欄位換動詞）。欄寬平均分配，窄視窗時自動換行（`repeat(auto-fit, minmax(240px, 1fr))`）。
+**四欄**：Working、Needs you、In review、Ready to merge。欄位標題是圓點、名稱、張數；空的欄位顯示虛線框與淡色的「Nothing here」（篩選按鈕已經寫了專案名稱，不再重複）。欄位標題的張數是圓角的小膠囊。欄寬平均分配，窄視窗時自動換行（`repeat(auto-fit, minmax(240px, 1fr))`）。
 
 **卡片**
 
@@ -81,7 +81,7 @@
 ### 專案篩選（新功能）
 
 - 頁首的按鈕顯示目前的選擇（「All projects ▾」或專案名稱），點了打開選單（`role="listbox"`）：「All projects」與總數、分隔線、每個專案與它進行中的任務數（選中的打勾）、分隔線、「Add project…」。
-- 選了專案之後：看板只顯示那個專案的卡片；側欄如上；頁首的主要按鈕變成「New task in web-app」，開出的對話框預先選好這個專案。
+- 選了專案之後：看板只顯示那個專案的卡片；側欄如上；頁首的主要按鈕仍是「New task」，開出的對話框預先選好這個專案。
 - 點側欄的專案名稱等於在選單裡選它；再點一次回到「All projects」。
 - 選擇記在 `localStorage`，讀不到時用「All projects」。專案篩選只在前端做（API 的 `GET /api/tasks` 已經有 `project_id` 參數，但卡片本來就一次全部載入，前端篩即可）。
 
@@ -104,7 +104,7 @@
 
 ```
 Board /  Restyle the board and the task page  ● In review · CI running        [Archive] [Stop]
-web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comments 1/5   3.9M tok
+web-app · Codex │ asv/task-27-restyle-the-board ⧉ │ PR #43 │ ✓ CI passed │ comments 1/5 │ 3.9M tok
 ```
 
 | 東西 | 來源 |
@@ -114,10 +114,12 @@ web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comm
 | 專案、agent | 同看板 |
 | branch | `branch`，等寬字，旁邊一個複製按鈕；還沒有時不顯示 |
 | PR | `pr_number` 連到 GitHub；`pr_state` 是 merged / closed 時顯示在旁邊 |
-| CI、review、衝突 | `ci_state`、`review_state`、`merge_state` |
-| 次數 | `fixes {ci_fix_attempts}/{max_ci_fix_attempts}`、`comments {feedback_attempts}/{max_feedback_attempts}` |
+| CI、review、衝突 | `ci_state`、`review_state`、`merge_state`；只顯示有意義的：review 是 `none` 時不顯示，只有衝突時才顯示 ⚠ conflict（不寫「no conflict」） |
+| 次數 | `fixes {ci_fix_attempts}/{max_ci_fix_attempts}`、`comments {feedback_attempts}/{max_feedback_attempts}`，大於 0 才顯示 |
 | 用量 | `cost_usd`、`tokens`、`usage_is_complete`；滑過去顯示 `tokens_in` / `tokens_out` |
-| Stop | 紅字白底的次要按鈕，只有 `has_open_run` 時可以按 |
+| Stop | 紅字白底的次要按鈕，只在 `has_open_run` 時出現（停用的紅色按鈕看起來像出錯） |
+
+頁首第二行的各項之間用細的直線隔開。
 | Archive | PR 還開著時先跳確認框（第 117 筆，沿用現在的文字與行為） |
 
 ### 主區的排法
@@ -145,7 +147,7 @@ web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comm
 | 來源 | 資料 | 位置與外觀 |
 | --- | --- | --- |
 | **你** | `trigger` 是 `initial`、`user_message` 的 run 的 `input_text` | **靠右**。淡強調色底（`--color-you-bubble`）的泡泡，右下角小圓角；頭像在泡泡右邊（強調色方塊、白字「YO」）；泡泡內第一行是靠右的「You」 |
-| **Agent** | `agent_message`（`kind` 是 `message`） | **靠左**。白底、細邊框的泡泡，左下角小圓角；頭像在左邊（agent 色方塊、白字縮寫 `CC`、`CX`）；泡泡內第一行是 agent 名稱（agent 色） |
+| **Agent** | `agent_message`（`kind` 是 `message`） | **靠左**。白底、細邊框的泡泡，左下角小圓角；頭像在左邊（agent 色方塊、白字縮寫 `CC`、`CX`）；泡泡內第一行是 agent 名稱（agent 色）。內容照 markdown 顯示（見下） |
 | Agent 的動作 | `command`、`tool_call`、`agent_message`（`kind` 是 `reasoning`、`plan`） | 在 Agent 泡泡裡、訊息文字之前，每個動作一列淺灰底的精簡列：`▸ $ npm test   74 passed`、`▸ Edited 14 files`、`▸ Thinking`；點開才看輸出或內容。失敗的指令標紅，被擋下的動作（`permission_denied`）標紅並寫原因 |
 | **Reviewer** | `review_comment` 事件 | **靠左**。淡紫底的泡泡、紫色頭像（作者縮寫）；第一行是作者、「reviewer」、檔案與行號（有的話），連到 GitHub |
 | **自動** | `trigger` 是 `ci_failure`、`merge_conflict`、`review_feedback` 的 run 的 `input_text` | **置中**的一行小字，自動色：「Automatic · sent 1 new pull request comment to the agent」「Automatic · CI failed on 3f2a9c1e: sent the failing logs」；點開看實際送出的內容（CI log 很長，預設收合） |
@@ -155,6 +157,8 @@ web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comm
 - **沒送給 agent 的留言**（`ignored` 有值）：Reviewer 泡泡變淡，加一行說明：`bot` → 「Not sent: posted by a bot」、`untrusted_author` → 「Not sent: the author is not a collaborator」、`empty` → 「Not sent: no text」、`not_a_change_request` → 「Not sent: approval」。
 - 泡泡最大寬度：你的 72%、其他 78%，長文字換行。
 - **預設收合**：自動訊息的內容、指令的輸出、工具呼叫的內容、agent 的推理。
+- **連續的動作收成一行**（決策第 198 筆）：三個以上連在一起的動作合成一行「▸ 23 actions · 18 commands, 5 tool calls」，有失敗的再加紅字「· 2 failed」；點開才列出每一個動作。一兩個動作照原樣顯示。
+- **agent 的訊息照 markdown 顯示**：段落、標題、項目與編號清單、表格、程式碼區塊、粗體、行內程式碼、http(s) 連結。用 `web/src/markdown.tsx` 自己轉成 React 元素，不設定 HTML，agent 文字裡的 HTML 照字面顯示；不支援的語法保持原文。
 - **跟隨最新**：捲到底部時新事件進來自動捲動；往上捲之後不自動捲，右下角出現「↓ New activity」按鈕。
 - **還在跑**：最後一個 run 還沒結束時，底部是 agent 的頭像與「Working…」。
 
@@ -169,7 +173,8 @@ web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comm
 
 - 第一行：「17 files · +1680 −1230」。
 - 檔案清單：白底卡片，每列是等寬字的路徑與 `+n −n`；點一列捲到該檔案。
-- 每個檔案一張卡片：標題列是路徑（可以收合），內容是 diff，新增的行淡綠底、刪除的行淡紅底，等寬字 12px、行高 20px，太寬時左右捲動。
+- 每個檔案一張卡片：標題列是路徑（可以收合），內容照 GitHub 的排法（決策第 198 筆）：舊行號、新行號、`+`／`-` 符號、程式碼四欄，行號從 hunk 標頭算出來；hunk 那一行藍底。等寬字 12px、行高 20px，太寬時左右捲動。
+- 顏色用 GitHub 的 Primer 色票（`@primer/primitives` 的 `diffBlob-*`），寫成 `--color-diff-*` token，深淺各一套：新增行 `#dafbe1`／`#2ea04326`、新增行號 `#aceebb`／`#3fb9504d`、刪除行 `#ffebe9`／`#f851491a`、刪除行號 `#ffcecb`／`#f851494d`、hunk 行 `#ddf4ff`／`#388bfd1a`、hunk 行號 `#b6e3ff`／`#0c2d6b`、hunk 與行號文字 `#59636e`／`#9198a1`（淺色／深色）。行內單字層級的反白不做。
 
 ### 右側面板：Shell（任務 24）
 
@@ -235,7 +240,7 @@ PR 還開著時出現，說明封存不會關掉 PR、不能取消封存（沿�
 
 草稿：`mockups/settings.html`。**只能看，不能改**（決策第 189 筆）。
 
-- 左側是設定頁自己的導覽（取代主側欄的內容）：「← Board」，接著 Agents、GitHub、Projects、Usage、Limits and permissions，點了捲到該區。
+- 頁首是麵包屑「Board / Settings」，和任務頁的寫法一致（回看板的連結不放在側欄）。側欄照常有 Board、Archive 一區，下面用細線隔出「Settings」一區：Agents、GitHub、Projects、Usage、Limits and permissions，點了捲到該區。
 - 頁首：「Settings」、上次檢查的時間（`checked_at`）、「Check again」（`POST /api/setup/check`）。下面一段說明（沿用現在的文字：agsv 不幫你登入、不存金鑰）。
 - 每一區是白底、細邊框的卡片。
 
@@ -316,7 +321,7 @@ Reviewer 泡泡的底色與邊框、diff 的行、各種淡底色用 `color-mix(
 
 | 東西 | 位置 | 這個階段的樣子 |
 | --- | --- | --- |
-| 主 agent | 側欄每個專案底下的「✦ Plan with main agent」（草稿裡沒畫，沿用任務 22 的位置） | 淡色、不能按，滑過去顯示「Coming in 0.5」 |
+| 主 agent | 側欄 Projects 標題旁的小膠囊「✦ Main agent」，只有一個（原本每個專案底下各一行，太雜） | 淡色、不能按，滑過去顯示「Plan with main agent · Coming in 0.5」 |
 
 ## 需要新增的 API
 

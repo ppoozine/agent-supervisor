@@ -63,6 +63,10 @@ export function SettingsPage({
   return (
     <div className="settings">
       <div className="settings-head">
+        {/* The way back sits where the task page has it: a crumb before the title. */}
+        <a className="crumb" href="#/">
+          Board <span aria-hidden="true">/</span>
+        </a>
         <h1>Settings</h1>
         {setup && <span className="text-xs text-text-muted">Checked {timeAgo(setup.checked_at)}</span>}
         <button className="btn ml-auto" onClick={() => void checkAgain()} disabled={isChecking}>

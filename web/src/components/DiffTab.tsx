@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { errorMessage, getDiff } from '../api'
-import { parseDiff } from '../diff'
+import { parseDiff, type DiffLine } from '../diff'
 import type { TaskDiff } from '../types'
 
 interface DiffTabProps {
@@ -102,17 +102,43 @@ export function DiffTab({ taskId, headSha, connectionCount }: DiffTabProps) {
               <span className="diff-added">+{file.added}</span>
               <span className="diff-removed">−{file.removed}</span>
             </summary>
-            <pre>
-              {file.lines.map((line, index) => (
-                <span className={`diff-line diff-${line.kind}`} key={index}>
-                  {line.text || ' '}
-                  {'\n'}
-                </span>
-              ))}
-            </pre>
+            <div className="diff-scroll">
+              <table className="diff-table">
+                <tbody>
+                  {file.lines.map((line, index) => (
+                    <DiffRow line={line} key={index} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </details>
         </section>
       ))}
     </div>
   )
 }
+
+const SIGN: Partial<Record<DiffLine['kind'], string>> = { added: '+', removed: '-' }
+
+/** One diff line as GitHub shows it: old and new line numbers, the sign, then the code. */
+function DiffRow({ line }: { line: DiffLine }) {
+  if (line.kind === 'hunk' || line.kind === 'meta') {
+    return (
+      <tr className={`diff-row is-${line.kind}`}>
+        <td className="diff-num" colSpan={2} />
+        <td className="diff-code" colSpan={2}>
+          {line.content}
+        </td>
+      </tr>
+    )
+  }
+  return (
+    <tr className={`diff-row is-${line.kind}`}>
+      <td className="diff-num">{line.oldNumber}</td>
+      <td className="diff-num">{line.newNumber}</td>
+      <td className="diff-sign">{SIGN[line.kind] ?? ' '}</td>
+      <td className="diff-code">{line.content || ' '}</td>
+    </tr>
+  )
+}
+

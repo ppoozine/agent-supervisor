@@ -2,7 +2,14 @@ import { describe, expect, test } from 'vitest'
 
 import { initials } from './components/ChatTab'
 import { makeEvent } from './testing'
-import { buildTimeline, eventSummary, type AgentItem, type TimelineItem } from './timeline'
+import {
+  actionSummary,
+  buildTimeline,
+  eventSummary,
+  groupParts,
+  type AgentItem,
+  type TimelineItem,
+} from './timeline'
 import type { EventRow, Run } from './types'
 
 function run(id: number, trigger: string, startedAt: string, fields: Partial<Run> = {}): Run {
@@ -260,4 +267,27 @@ test('avatars use two letters: Claude Code is CC and Codex is CX', () => {
   expect(initials('Claude Code')).toBe('CC')
   expect(initials('Codex')).toBe('CX')
   expect(initials('X')).toBe('X')
+})
+
+describe('folding the agent’s actions', () => {
+  const action = (key: string, type: 'command' | 'tool' = 'command', failed = false) =>
+    ({ kind: 'action', key, type, title: key, detail: '', note: '', failed }) as const
+  const message = (key: string) => ({ kind: 'message', key, text: key }) as const
+
+  test('three or more actions in a row fold into one group; fewer stay as they are', () => {
+    const parts = [action('a'), action('b'), message('m'), action('c'), action('d'), action('e', 'tool')]
+
+    const grouped = groupParts(parts)
+
+    expect(grouped.map((part) => part.kind)).toEqual(['action', 'action', 'message', 'actions'])
+    const group = grouped[3]
+    expect(group.kind === 'actions' && group.actions.map((part) => part.key)).toEqual(['c', 'd', 'e'])
+  })
+
+  test('the group says how many of each kind, and how many failed', () => {
+    expect(actionSummary([action('a'), action('b', 'command', true), action('c', 'tool')])).toEqual({
+      text: '3 actions · 2 commands, 1 tool call',
+      failed: 1,
+    })
+  })
 })

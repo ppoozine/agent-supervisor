@@ -62,11 +62,39 @@ Binary files a/logo.png and b/logo.png differ
     ['new.txt', 'old.txt'],
     ['logo.png', null],
   ])
-  expect(files[1].lines).toEqual([
+  expect(files[1].lines).toMatchObject([
     { kind: 'meta', text: 'Binary files a/logo.png and b/logo.png differ' },
   ])
 })
 
 test('an empty diff has no files', () => {
   expect(parseDiff('')).toEqual([])
+})
+
+test('each line knows its number in the old and the new file, from the hunk header', () => {
+  const [file] = parseDiff(`diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -10,4 +10,5 @@ def main():
+ keep
+-old
++new
++extra
+ tail
+`)
+
+  expect(file.lines.map((line) => [line.kind, line.oldNumber, line.newNumber, line.content])).toEqual([
+    ['hunk', null, null, '@@ -10,4 +10,5 @@ def main():'],
+    ['context', 10, 10, 'keep'],
+    ['removed', 11, null, 'old'],
+    ['added', null, 11, 'new'],
+    ['added', null, 12, 'extra'],
+    ['context', 12, 13, 'tail'],
+  ])
+})
+
+test('a new file counts from line 1', () => {
+  const [file] = parseDiff('diff --git a/n.txt b/n.txt\nnew file mode 100644\n@@ -0,0 +1,2 @@\n+a\n+b\n')
+
+  expect(file.lines.filter((line) => line.kind === 'added').map((line) => line.newNumber)).toEqual([1, 2])
 })

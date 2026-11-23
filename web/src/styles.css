@@ -39,6 +39,16 @@
   --color-source-system: #6b7280;
   --color-source-system-text: #5f6672;
 
+  /* Diff colors are GitHub's, from the Primer design tokens (@primer/primitives, diffBlob-*). */
+  --color-diff-add-line: #dafbe1;
+  --color-diff-add-num: #aceebb;
+  --color-diff-del-line: #ffebe9;
+  --color-diff-del-num: #ffcecb;
+  --color-diff-hunk-line: #ddf4ff;
+  --color-diff-hunk-num: #b6e3ff;
+  --color-diff-hunk-text: #59636e;
+  --color-diff-num-text: #59636e;
+
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   --radius-sm: 6px;
@@ -88,6 +98,15 @@
       --color-source-auto: #e0a04a;
       --color-source-auto-text: #e0a04a;
       --color-source-system: #8b919c;
+
+      --color-diff-add-line: #2ea04326;
+      --color-diff-add-num: #3fb9504d;
+      --color-diff-del-line: #f851491a;
+      --color-diff-del-num: #f851494d;
+      --color-diff-hunk-line: #388bfd1a;
+      --color-diff-hunk-num: #0c2d6b;
+      --color-diff-hunk-text: #9198a1;
+      --color-diff-num-text: #9198a1;
       --color-source-system-text: #8b919c;
     }
   }
@@ -272,42 +291,68 @@
   .sidebar {
     @apply flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-sidebar px-3 py-3;
   }
+  /* Groups of the sidebar, each set apart by a hairline and some air. */
+  .sidebar-section {
+    @apply flex flex-col gap-0.5 border-t border-border pt-3 pb-2;
+  }
+  .sidebar-projects {
+    @apply gap-2;
+  }
+  .sidebar-project {
+    @apply flex flex-col gap-0.5;
+  }
+  /* A project's tasks hang off a guide line, so it is clear which project they belong to. */
+  .sidebar-tasks {
+    @apply ml-3 flex flex-col gap-px border-l border-border pl-1.5;
+  }
   .sidebar.is-collapsed {
     @apply w-14 items-center px-2;
   }
   .brand {
-    @apply min-w-0 flex-1 truncate px-2 text-[13px] font-semibold text-text hover:no-underline;
+    @apply flex min-w-0 flex-1 items-center gap-2 truncate px-2 text-[13px] font-semibold text-text hover:no-underline;
+  }
+  /* A small mark: two overlapping squares, the board's columns seen from above. */
+  .brand-mark {
+    @apply relative size-4 shrink-0 rounded-[4px] bg-accent;
+    box-shadow: 4px 4px 0 -1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+  }
+  .project-icon {
+    @apply size-3.5 shrink-0 fill-none stroke-text-muted stroke-[1.2];
   }
   .sidebar .primary {
     @apply my-2 w-full;
   }
   .sidebar-heading {
-    @apply mt-4 mb-1 px-2 text-[11px] font-medium tracking-wider text-text-muted uppercase;
+    @apply mb-1 flex items-center justify-between gap-2 px-2 text-[11px] font-medium tracking-wider text-text-muted uppercase;
   }
   .nav-item {
     @apply flex w-full min-w-0 items-center gap-2 rounded-sm bg-transparent px-2 py-1.5 text-left text-[13px] text-text hover:bg-surface-raised hover:no-underline;
   }
   .nav-item[aria-current='page'],
   .nav-item[aria-current='true'] {
-    @apply bg-surface-raised font-medium;
+    @apply bg-surface font-medium shadow-[0_0_0_1px_var(--color-border)];
+  }
+  .sidebar-project > .nav-item {
+    @apply font-medium;
   }
   .nav-item .count {
-    @apply ml-auto;
+    @apply ml-auto min-w-5 rounded-full bg-surface-raised px-1.5 text-center text-[11px] font-normal text-text-muted tabular-nums;
   }
   .nav-item.is-dimmed {
     @apply opacity-55;
   }
   .sidebar-task {
-    @apply flex min-w-0 items-center gap-2 rounded-sm py-1 pr-2 pl-6 text-xs text-text-muted hover:bg-surface-raised hover:text-text hover:no-underline;
+    @apply flex min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-xs text-text-muted hover:bg-surface-raised hover:text-text hover:no-underline;
   }
   .sidebar-task.is-open {
-    @apply bg-surface-raised text-text;
+    @apply bg-surface text-text shadow-[0_0_0_1px_var(--color-border)];
   }
+  /* One main-agent entry beside the Projects heading; it is a placeholder until 0.5. */
   .sidebar-plan {
-    @apply w-full truncate py-1 pr-2 pl-6 text-left text-xs text-text-muted opacity-60;
+    @apply truncate rounded-full border border-dashed border-border px-2 py-px text-[10px] font-normal tracking-normal normal-case opacity-70;
   }
   .sidebar-foot {
-    @apply mt-auto flex flex-col gap-1 pt-3;
+    @apply mt-auto flex flex-col gap-0.5 border-t border-border pt-3;
   }
   .connection {
     @apply flex items-center gap-2 px-2 py-1.5 text-xs text-text-muted;
@@ -378,11 +423,14 @@
   .column-title {
     @apply flex items-center gap-2 px-1 py-1 text-[13px] font-semibold;
   }
+  .column-title .count {
+    @apply min-w-5 rounded-full bg-surface-raised px-1.5 text-center text-[11px] font-normal text-text-muted tabular-nums;
+  }
   .column-empty {
-    @apply rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-text-muted;
+    @apply rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-text-muted;
   }
   .card {
-    @apply flex min-w-0 flex-col gap-1.5 rounded-md border border-border bg-surface p-3 text-text transition-colors hover:border-border-strong hover:no-underline;
+    @apply flex min-w-0 flex-col gap-1.5 rounded-lg border border-border bg-surface p-3.5 text-text shadow-[0_1px_2px_rgb(16_24_40/0.04)] transition hover:-translate-y-px hover:border-border-strong hover:no-underline hover:shadow-[0_4px_12px_rgb(16_24_40/0.08)];
   }
   .card-head {
     @apply flex items-center justify-between gap-2 text-[11px] text-text-muted;
@@ -440,7 +488,11 @@
     @apply ml-auto flex shrink-0 gap-2;
   }
   .task-meta {
-    @apply flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-muted;
+    @apply flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted;
+  }
+  /* Hairlines between the header's facts, instead of one undivided run of text. */
+  .task-meta > * + * {
+    @apply border-l border-border pl-3;
   }
   .branch {
     @apply truncate font-mono text-xs text-text-muted;
@@ -529,6 +581,76 @@
   }
   .chat pre {
     @apply mt-1.5 max-h-64 overflow-auto rounded-sm border border-border bg-bg p-2 wrap-anywhere;
+  }
+  /* Agent messages rendered from markdown (see markdown.tsx). */
+  .chat-body .md {
+    @apply flex flex-col gap-2 whitespace-normal;
+  }
+  .md p,
+  .md ul,
+  .md ol {
+    @apply m-0;
+  }
+  .md ul,
+  .md ol {
+    @apply flex flex-col gap-0.5 pl-5;
+  }
+  .md ul {
+    @apply list-disc;
+  }
+  .md ol {
+    @apply list-decimal;
+  }
+  .md li::marker {
+    @apply text-text-muted;
+  }
+  .md-heading {
+    @apply font-semibold;
+  }
+  .md code {
+    @apply rounded-[4px] bg-surface-raised px-1 py-px font-mono text-[0.92em];
+  }
+  .md pre.md-code {
+    @apply m-0 whitespace-pre;
+  }
+  .md pre.md-code code {
+    @apply bg-transparent p-0;
+  }
+  .md a {
+    @apply underline decoration-border-strong underline-offset-2;
+  }
+  .md-table {
+    @apply overflow-x-auto rounded-sm border border-border;
+  }
+  .md-table table {
+    @apply w-full border-collapse text-xs;
+  }
+  .md-table th,
+  .md-table td {
+    @apply border-b border-border px-2 py-1 text-left align-top;
+  }
+  .md-table th {
+    @apply bg-surface-raised font-medium;
+  }
+  .md-table tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Several actions in a row, folded into one line. */
+  .action-group > summary {
+    @apply flex list-none items-baseline gap-1.5 rounded-sm px-2 py-1 text-xs text-text-muted hover:bg-surface-raised hover:text-text;
+  }
+  .action-group > summary::before {
+    content: '▸';
+  }
+  .action-group[open] > summary::before {
+    content: '▾';
+  }
+  .action-group-failed {
+    @apply text-danger;
+  }
+  .action-group-list {
+    @apply mt-1 flex flex-col gap-1 border-l-2 border-border pl-2;
   }
   .chat-where {
     @apply font-mono text-[11px] text-text-muted;
@@ -644,26 +766,45 @@
   .diff-removed {
     @apply text-danger;
   }
-  .diff-file pre {
-    @apply overflow-x-auto py-1 leading-5 whitespace-pre;
+  /* GitHub's layout: old and new line numbers, the sign, then the code. */
+  .diff-scroll {
+    @apply overflow-x-auto;
   }
-  .diff-line {
-    @apply block min-w-max px-3;
+  .diff-table {
+    @apply w-full border-collapse font-mono text-xs leading-5;
   }
-  .diff-line.diff-added {
-    @apply text-text;
-    background: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
+  .diff-table td {
+    @apply p-0 align-top;
   }
-  .diff-line.diff-removed {
-    @apply text-text;
-    background: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+  .diff-table .diff-num {
+    @apply w-[1%] min-w-11 px-2.5 text-right whitespace-nowrap select-none text-diff-num-text;
   }
-  .diff-line.diff-hunk {
-    @apply text-text-muted;
-    background: color-mix(in srgb, var(--color-working) 8%, var(--color-surface));
+  .diff-table .diff-sign {
+    @apply w-6 pr-1 pl-3 whitespace-pre select-none;
   }
-  .diff-line.diff-meta {
-    @apply text-text-muted italic;
+  .diff-table .diff-code {
+    @apply pr-4 whitespace-pre text-text;
+  }
+  .diff-row.is-added td {
+    @apply bg-diff-add-line;
+  }
+  .diff-row.is-added .diff-num {
+    @apply bg-diff-add-num text-text;
+  }
+  .diff-row.is-removed td {
+    @apply bg-diff-del-line;
+  }
+  .diff-row.is-removed .diff-num {
+    @apply bg-diff-del-num text-text;
+  }
+  .diff-row.is-hunk td {
+    @apply bg-diff-hunk-line py-1 text-diff-hunk-text;
+  }
+  .diff-row.is-hunk .diff-num {
+    @apply bg-diff-hunk-num;
+  }
+  .diff-row.is-meta td {
+    @apply py-0.5 text-text-muted italic;
   }
 
   /* ---- Events and Runs ---- */
