@@ -210,7 +210,7 @@ web-app · Codex   asv/task-27-restyle-the-board ⧉   PR #43   fixes 0/3   comm
 欄位依序：
 
 1. **Project**：下拉選單；從篩選了專案的看板打開時預先選好。
-2. **Agent**：每個 agent 一張可以點的卡片（radio），內容是名稱與狀態：「Ready · reports cost」「Ready · reports tokens only」。不能用的 agent 也列出，變灰、不能選，狀態寫原因（「Not installed」「Not signed in」）並連到設定頁。
+2. **Agent**：每個 agent 一張可以點的卡片（radio），內容是名稱與狀態：「Ready · reports cost」「Ready · reports tokens only」。不能用的 agent 也列出，變灰、不能選，狀態寫「Not ready」並連到設定頁（原因在設定頁看；`GET /api/agents` 只有 `usable`，不為了這裡另外抓 `/api/setup`，決策第 193 筆）。
 3. **Title**：選填，標籤後面淡色的「· optional」，placeholder 是描述的開頭（留空時用描述的開頭，沿用）。
 4. **Description**：多行，placeholder「What should the agent do?」，`Cmd/Ctrl+Enter` 送出。
 5. 欄位下面一個淺灰底的說明：「Starts right away in a new worktree on asv/task-…. The supervisor commits, pushes and opens the PR when the agent finishes.」branch 名稱用描述或標題即時預覽，只是示意，實際名稱由 daemon 決定。
